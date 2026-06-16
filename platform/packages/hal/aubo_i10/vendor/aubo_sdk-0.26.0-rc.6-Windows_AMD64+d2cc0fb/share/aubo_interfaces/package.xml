@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>aubo_interfaces</name>
+  <version>0.0.1</version>
+  <description>AUBO generated ROS2 interfaces (.srv/.msg)</description>
+
+  <maintainer email="luxin@aubo-robotics.cn">aubo_peter</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <author email="luxin@aubo-robotics.cn">aubo_peter</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <depend>builtin_interfaces</depend>
+
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

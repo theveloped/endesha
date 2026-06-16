@@ -1,0 +1,8 @@
+string ip
+int32 slave_number
+int32 function_code
+uint8[] data
+---
+int32 result
+int32 code
+string message

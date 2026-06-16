@@ -1,0 +1,68 @@
+[workspace]
+name = "wf-platform"
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64", "osx-arm64", "osx-64"]
+
+# Declare the glibc floor so cross-platform solving of the linux-64 env accepts
+# the manylinux_2_28 wheels published for several deps (cbor2, opencv-python,
+# pillow, eclipse-zenoh) instead of falling back to source builds. The Linux
+# sim image (Ubuntu 22.04, glibc 2.35) satisfies this floor.
+[system-requirements]
+libc = { family = "glibc", version = "2.28" }
+
+[dependencies]
+python = "3.12.*"
+pinocchio = ">=3.2"
+coal = ">=3.0"
+
+[pypi-dependencies]
+eclipse-zenoh = "~=1.8.0"
+cbor2 = "*"
+uuid6 = "*"
+numpy = "*"
+pyyaml = "*"
+opencv-python = "*"
+trimesh = "*"
+pyrender = "*"
+PyOpenGL = "*"
+mcap = ">=1.1,<2"
+ruckig = "*"
+python-statemachine = "*"
+zxing-cpp = "*"
+wf-core = { path = "packages/core", editable = true }
+wf-world-model = { path = "packages/world_model", editable = true }
+wf-contracts-arm = { path = "packages/contracts/arm", editable = true }
+wf-contracts-camera2d = { path = "packages/contracts/camera2d", editable = true }
+wf-hal-aubo-i10 = { path = "packages/hal/aubo_i10", editable = true }
+wf-hal-arm-sim = { path = "packages/hal/arm_sim", editable = true }
+wf-hal-camera2d-sim = { path = "packages/hal/camera2d_sim", editable = true }
+wf-tools = { path = "packages/tools", editable = true }
+wf-services-recording = { path = "packages/services/recording", editable = true }
+wf-services-config = { path = "packages/services/config", editable = true }
+wf-contracts-vision = { path = "packages/contracts/vision", editable = true }
+wf-services-vision = { path = "packages/services/vision", editable = true }
+wf-contracts-task = { path = "packages/contracts/task", editable = true }
+wf-services-task-runner = { path = "packages/services/task_runner", editable = true }
+wf-contracts-supervisor = { path = "packages/contracts/supervisor", editable = true }
+wf-services-supervisor = { path = "packages/services/supervisor", editable = true }
+
+# GenICam camera HAL: vendor harvesters/genicam SDK ships no macOS cp312 wheels,
+# so the camera driver is Windows/Linux only. The collision engine and every
+# other package remain available on all four platforms.
+[target.win-64.pypi-dependencies]
+harvesters = "~=1.4"
+wf-hal-genicam = { path = "packages/hal/genicam", editable = true }
+
+[target.linux-64.pypi-dependencies]
+harvesters = "~=1.4"
+wf-hal-genicam = { path = "packages/hal/genicam", editable = true }
+
+[environments]
+default = { features = ["dev"], solve-group = "default" }
+
+[feature.dev.pypi-dependencies]
+pytest = ">=8"
+
+[tasks]
+test = "python -m pytest"
+sync-assets = { cmd = "node scripts/sync-assets.mjs", cwd = "web" }

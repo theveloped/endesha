@@ -1,0 +1,10 @@
+bool joint_space
+bool[] select
+float64[] stiff_percent
+float64[] stiff_damp_ratio
+float64[] force_threshold
+float64[] force_limit
+---
+int32 result
+int32 code
+string message

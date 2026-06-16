@@ -1,0 +1,8 @@
+// Minimal phase-1 zenoh router config.
+// Storage + remote-api plugins arrive in weeks 3-4.
+{
+  mode: "router",
+  listen: {
+    endpoints: ["tcp/0.0.0.0:7447"],
+  },
+}

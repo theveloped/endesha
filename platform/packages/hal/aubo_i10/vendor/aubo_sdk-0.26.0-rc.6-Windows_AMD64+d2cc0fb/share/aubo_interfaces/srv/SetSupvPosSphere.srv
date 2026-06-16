@@ -1,0 +1,6 @@
+float64[] frame
+float64[] sphere
+---
+int32 result
+int32 code
+string message

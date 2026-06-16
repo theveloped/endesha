@@ -1,0 +1,10 @@
+float64[] pose_via
+float64[] pose_to
+float64 a
+float64 v
+float64 blend_radius
+float64 duration
+float64 helix
+float64 spiral
+float64 direction
+int32 loop_times

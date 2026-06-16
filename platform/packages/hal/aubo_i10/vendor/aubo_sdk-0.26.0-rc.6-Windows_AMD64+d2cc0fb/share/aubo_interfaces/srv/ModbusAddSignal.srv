@@ -1,0 +1,10 @@
+string device_info
+int32 slave_number
+int32 signal_address
+int32 signal_type
+string signal_name
+bool sequential_mode
+---
+int32 result
+int32 code
+string message

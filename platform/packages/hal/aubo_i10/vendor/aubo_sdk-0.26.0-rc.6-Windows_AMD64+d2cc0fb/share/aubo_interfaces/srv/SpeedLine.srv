@@ -1,0 +1,7 @@
+float64[] xd
+float64 a
+float64 t
+---
+int32 result
+int32 code
+string message

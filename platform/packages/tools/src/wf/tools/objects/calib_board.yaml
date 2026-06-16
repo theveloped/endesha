@@ -1,0 +1,58 @@
+# Calibration board — the first importable object (design §5.4/§5.10).
+#
+# A thin planar board carrying ArUco fiducials, posed in whatever frame the
+# importer parents it to. The shared `calib_board.glb` is the ONE asset both
+# the sim-camera pyrender renderer AND the Coal collision engine load (design
+# §5.10, "share the asset, not the renderer"): the `mesh` collision part below
+# resolves through `asset://wf/...`, so the rendered board and its collision
+# proxy are the same geometry. The markers become child frames so
+# vision/calibration can locate each tag by name.
+#
+# Units are metres (asserted by the importer). Board: 0.300 x 0.200 x 0.005 m.
+name: calib_board
+units: m
+
+render:
+  mesh_uri: "asset://wf/calib_board.glb"   # object-level render mesh (shared asset)
+
+collision:
+  # The board IS the shared glb: render and collision share one asset.
+  - xyz: [0.0, 0.0, 0.0]
+    quat: [0.0, 0.0, 0.0, 1.0]
+    geometry:
+      type: mesh
+      uri: "asset://wf/calib_board.glb"
+
+markers:
+  # A representative 2x2 grid of ArUco 4x4_50 tags on the board's top face.
+  - name: tag0
+    family: aruco_4x4_50
+    id: 0
+    size_m: 0.040
+    xyz: [-0.075, 0.050, 0.005]
+    quat: [0.0, 0.0, 0.0, 1.0]
+  - name: tag1
+    family: aruco_4x4_50
+    id: 1
+    size_m: 0.040
+    xyz: [0.075, 0.050, 0.005]
+    quat: [0.0, 0.0, 0.0, 1.0]
+  - name: tag2
+    family: aruco_4x4_50
+    id: 2
+    size_m: 0.040
+    xyz: [-0.075, -0.050, 0.005]
+    quat: [0.0, 0.0, 0.0, 1.0]
+  - name: tag3
+    family: aruco_4x4_50
+    id: 3
+    size_m: 0.040
+    xyz: [0.075, -0.050, 0.005]
+    quat: [0.0, 0.0, 0.0, 1.0]
+
+frames:
+  # The board's mounting reference (e.g. a corner datum) as a named child frame.
+  - name: datum
+    xyz: [-0.150, -0.100, 0.0]
+    quat: [0.0, 0.0, 0.0, 1.0]
+    meta: {}

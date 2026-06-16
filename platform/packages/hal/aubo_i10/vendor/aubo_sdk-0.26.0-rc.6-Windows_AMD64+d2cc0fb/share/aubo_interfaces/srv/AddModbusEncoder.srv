@@ -1,0 +1,7 @@
+int32 encoder_id
+int32 range_id
+string signal_name
+---
+int32 result
+int32 code
+string message

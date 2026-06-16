@@ -1,0 +1,5 @@
+float64 v
+---
+int32 result
+int32 code
+string message

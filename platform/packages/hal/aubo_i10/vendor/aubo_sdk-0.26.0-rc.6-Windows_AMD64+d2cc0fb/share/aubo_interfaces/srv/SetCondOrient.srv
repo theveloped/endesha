@@ -1,0 +1,9 @@
+float64[] frame
+float64 max_angle
+float64 max_rot
+bool outside
+float64 timeout
+---
+int32 result
+int32 code
+string message

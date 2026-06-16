@@ -1,0 +1,11 @@
+float64[] q
+int32 move_type
+float64 blend_radius
+float64[] qdmax
+float64[] qddmax
+float64[] vmax
+float64[] amax
+---
+int32 result
+int32 code
+string message

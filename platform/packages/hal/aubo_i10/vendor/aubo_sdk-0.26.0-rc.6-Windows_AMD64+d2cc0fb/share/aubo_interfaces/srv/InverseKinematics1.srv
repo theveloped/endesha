@@ -1,0 +1,7 @@
+float64[] qnear
+float64[] pose
+float64[] tcp_offset
+---
+string result
+int32 code
+string message

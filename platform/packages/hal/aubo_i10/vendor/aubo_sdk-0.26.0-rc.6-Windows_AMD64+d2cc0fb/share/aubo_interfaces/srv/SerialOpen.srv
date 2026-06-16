@@ -1,0 +1,9 @@
+string device
+int32 baud
+float32 stop_bits
+int32 even
+string serial_name
+---
+int32 result
+int32 code
+string message

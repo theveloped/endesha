@@ -1,0 +1,84 @@
+# Phase-1 router topology. Dev/tests run peer-to-peer without the router;
+# the router is for the multi-host/live-cell topology (and is exercised once
+# during the hardware verification gate).
+#
+# If the exact 1.8.0 tag is absent at pull time, use the newest plain 1.8.x.
+# Live-reload our own source: bind-mount the host workspace `packages/` over the
+# image's baked copy so Python/flow-YAML edits land in the container without a
+# rebuild. The pixi env runs these sources directly (not pip-installed), so a
+# process restart (`docker compose restart <svc>`) is a true hot reload. The
+# `pixi install` image layer (deps) is untouched. Read-only: containers never
+# write back into the repo.
+x-code-mount: &code ../packages:/platform/packages:ro
+
+services:
+  zenoh-router:
+    image: eclipse/zenoh:1.8.0
+    ports:
+      - "7447:7447"
+    volumes:
+      - ./zenoh/zenoh-router.json5:/zenoh.json5:ro
+    command: -c /zenoh.json5
+
+  # Browser gateway: the remote-api WebSocket bridge. A zenoh peer of the
+  # router that serves ws://127.0.0.1:10000 to the web app (zenoh-ts). The
+  # router stays the native-TCP hub; this is the only WS edge. The web app
+  # itself (`npm run dev`) is the one piece that stays a host process.
+  bridge:
+    profiles: ["sim"]
+    build:
+      context: .
+      dockerfile: Dockerfile.bridge
+    image: wf-bridge:latest
+    depends_on: [zenoh-router]
+    ports:
+      - "127.0.0.1:10000:10000"
+
+  # ── sim profile: a headless Linux cell that renders the camera2d view ──
+  # `docker compose --profile sim up` brings up the router, config service, and
+  # the supervisor — which from `cell.sim.yaml` spawns the sim arm (flange
+  # source), the sim camera (OSMesa pyrender render), and the always-on
+  # demo_detect vision runtime, then publishes the flow catalog. The seeder
+  # one-shots the demo poses + board. All share the build context `platform/`
+  # via Dockerfile.sim and connect to the router by name.
+  config:
+    profiles: ["sim"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.sim
+    image: wf-sim:latest
+    depends_on: [zenoh-router]
+    # Persist the config store on the HOST so UI edits (frames/poses/TCPs)
+    # survive `docker compose --build`/recreate — the container fs is otherwise
+    # ephemeral and reverts to the image's baked store.yaml on every rebuild.
+    # This is the SAME deploy/config the host tooling uses: one source of truth.
+    volumes:
+      - *code
+      - ./config:/platform/deploy/config
+    command: ["python", "-m", "wf.services.config",
+              "--dir", "deploy/config",
+              "--zenoh-config", "deploy/zenoh/sim-container.json5"]
+
+  supervisor:
+    profiles: ["sim"]
+    image: wf-sim:latest
+    environment:
+      WF_REALM: sim
+    depends_on: [zenoh-router, config]
+    volumes:
+      - *code
+    command: ["python", "-m", "wf.services.supervisor",
+              "--realm", "sim",
+              "--cell", "deploy/cell.sim.yaml",
+              "--flows-dir", "packages/services/task_runner/flows",
+              "--zenoh-config", "deploy/zenoh/sim-container.json5"]
+
+  seed:
+    profiles: ["sim"]
+    image: wf-sim:latest
+    depends_on: [config]
+    restart: "no"
+    volumes:
+      - *code
+    command: ["python", "scripts/seed_demo_cell.py",
+              "--connect", "tcp/zenoh-router:7447"]

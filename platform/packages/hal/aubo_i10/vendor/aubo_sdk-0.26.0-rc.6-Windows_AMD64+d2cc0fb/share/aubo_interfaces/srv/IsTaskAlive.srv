@@ -1,0 +1,5 @@
+int32 tid
+---
+bool result
+int32 code
+string message

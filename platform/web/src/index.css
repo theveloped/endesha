@@ -1,0 +1,112 @@
+/* Theme per gui-design-spec §1: dark industrial UI, realm tinting via
+   --primary overrides under [data-realm=…]. Dark-only — values live in
+   :root and <html class="dark"> is set statically in index.html. */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: "Inter Variable", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", monospace;
+    /* Spec status colors: green = ok/running, amber = warning/paused. */
+    --color-ok: #46a758;
+    --color-warn: #e8b931;
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: #16181d;
+    --foreground: #e8e6e1;
+    --card: #1e2128;
+    --card-foreground: #e8e6e1;
+    --popover: #1e2128;
+    --popover-foreground: #e8e6e1;
+    --primary: #ff6a00;
+    --primary-foreground: #16181d;
+    --secondary: #2c313a;
+    --secondary-foreground: #e8e6e1;
+    --muted: #232831;
+    --muted-foreground: #8a919e;
+    --accent: #2c313a;
+    --accent-foreground: #e8e6e1;
+    --destructive: #e5484d;
+    --border: #2c313a;
+    --input: #2c313a;
+    --ring: #8a919e;
+    --radius: 0.5rem;
+}
+
+/* Realm tint = primary (spec §1): every primary button and active toggle
+   item is realm-tinted with zero per-component work. */
+[data-realm="live"] {
+    --tint: #ff6a00;
+    --primary: #ff6a00;
+    --primary-foreground: #16181d;
+}
+[data-realm="sim"] {
+    --tint: #22b8cf;
+    --primary: #22b8cf;
+    --primary-foreground: #16181d;
+}
+[data-realm="replay"] {
+    --tint: #e8b931;
+    --primary: #e8b931;
+    --primary-foreground: #16181d;
+}
+
+@layer components {
+    /* REPLAY: robot-command controls flatten (spec §1) — replay transport
+       controls in the drawer never carry .cmd. */
+    [data-realm="replay"] .cmd {
+        opacity: 0.35;
+        pointer-events: none;
+    }
+    /* Safety takeover: page dims while a safety stop is active (spec §2). */
+    .safety-active .workspace {
+        filter: brightness(0.8);
+    }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+  html,
+  body,
+  #root {
+    height: 100%;
+    }
+}

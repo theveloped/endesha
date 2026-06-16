@@ -1,0 +1,6 @@
+int8 value
+string socket_name
+---
+int32 result
+int32 code
+string message

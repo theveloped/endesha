@@ -1,0 +1,6 @@
+int32 speed_levels
+float64 speed_ratio_min
+---
+int32 result
+int32 code
+string message

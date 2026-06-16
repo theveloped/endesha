@@ -1,0 +1,7 @@
+float64[] min
+float64[] max
+int32 strategy
+---
+int32 result
+int32 code
+string message

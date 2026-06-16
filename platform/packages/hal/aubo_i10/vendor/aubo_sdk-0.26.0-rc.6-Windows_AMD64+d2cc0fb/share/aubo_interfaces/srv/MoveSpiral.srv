@@ -1,0 +1,9 @@
+SpiralParameters param
+float64 blend_radius
+float64 v
+float64 a
+float64 t
+---
+int32 result
+int32 code
+string message

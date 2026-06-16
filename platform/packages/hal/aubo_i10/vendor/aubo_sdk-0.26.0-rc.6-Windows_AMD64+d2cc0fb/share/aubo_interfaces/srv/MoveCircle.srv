@@ -1,0 +1,10 @@
+float64[] via_pose
+float64[] end_pose
+float64 a
+float64 v
+float64 blend_radius
+float64 duration
+---
+int32 result
+int32 code
+string message

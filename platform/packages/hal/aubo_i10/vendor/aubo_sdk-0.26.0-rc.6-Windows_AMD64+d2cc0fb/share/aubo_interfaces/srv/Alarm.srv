@@ -1,0 +1,7 @@
+int32 level
+int32 code
+string[] args
+---
+int32 result
+int32 code
+string message

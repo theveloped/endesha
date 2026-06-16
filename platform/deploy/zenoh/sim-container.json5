@@ -1,0 +1,10 @@
+// Sim-container topology: every sim process connects to the compose router
+// service by name (tcp/zenoh-router:7447), no multicast scouting. Mirrors
+// driver-router.dev.json5 but resolves the router over the compose network.
+{
+  mode: "peer",
+  scouting: { multicast: { enabled: false } },
+  connect: {
+    endpoints: ["tcp/zenoh-router:7447"],
+  },
+}

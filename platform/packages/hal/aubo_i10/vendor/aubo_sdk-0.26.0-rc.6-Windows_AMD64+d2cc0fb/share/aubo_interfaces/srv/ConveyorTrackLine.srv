@@ -1,0 +1,6 @@
+int32 encoder_id
+float64[] direction
+---
+int32 result
+int32 code
+string message

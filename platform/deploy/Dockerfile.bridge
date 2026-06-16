@@ -1,0 +1,34 @@
+# The zenoh remote-api WebSocket bridge as a container (browser bus access).
+#
+# The bridge is a normal zenoh PEER that additionally serves the zenoh-ts
+# remote-api protocol over a WebSocket — the only way a browser, which cannot
+# speak native zenoh TCP, reaches the bus. It joins the compose router like
+# every other peer and exposes ws://:10000 to the host. The router stays the
+# hub; the bridge is just the edge gateway (separate process, separate
+# lifecycle, ABI-independent — the rationale get_bridge.ps1 documents).
+#
+# Built from the zenoh-ts Linux musl STANDALONE release (statically linked, so
+# it runs on bare Alpine — no plugin-into-zenohd ABI matching). Pinned by
+# version + sha256 so the build is reproducible and tamper-evident.
+#
+#   docker build -f deploy/Dockerfile.bridge -t wf-bridge deploy/
+FROM alpine:3.20
+
+ARG BRIDGE_URL=https://github.com/eclipse-zenoh/zenoh-ts/releases/download/1.8.0/zenoh-ts-1.8.0-x86_64-unknown-linux-musl-standalone.zip
+ARG BRIDGE_SHA256=b8f9d3fd91dd0b8fd82876bacda8c25ef7eee19c70a2eb60b58555fcecea298e
+
+RUN apk add --no-cache curl unzip libgcc \
+    && cd /tmp \
+    && curl -fsSL -o bridge.zip "$BRIDGE_URL" \
+    && echo "$BRIDGE_SHA256  bridge.zip" | sha256sum -c - \
+    && unzip bridge.zip zenoh-bridge-remote-api -d /usr/local/bin \
+    && chmod +x /usr/local/bin/zenoh-bridge-remote-api \
+    && rm -f bridge.zip \
+    && apk del curl unzip
+
+EXPOSE 10000
+# Peer the bridge to the compose router by name; serve ws on all interfaces in
+# the container (the host publishes 10000 -> 127.0.0.1:10000 for the browser).
+ENTRYPOINT ["/usr/local/bin/zenoh-bridge-remote-api"]
+CMD ["-m", "peer", "-e", "tcp/zenoh-router:7447", \
+     "--no-multicast-scouting", "--ws-port", "0.0.0.0:10000"]

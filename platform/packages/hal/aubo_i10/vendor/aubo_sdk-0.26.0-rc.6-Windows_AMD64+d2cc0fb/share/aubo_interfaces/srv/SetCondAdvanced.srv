@@ -1,0 +1,7 @@
+string type
+float64[] args
+float64 timeout
+---
+int32 result
+int32 code
+string message

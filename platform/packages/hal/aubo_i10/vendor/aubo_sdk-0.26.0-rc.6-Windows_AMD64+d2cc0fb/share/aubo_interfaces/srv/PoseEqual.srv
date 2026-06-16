@@ -1,0 +1,7 @@
+float64[] p1
+float64[] p2
+float64 eps
+---
+bool result
+int32 code
+string message

@@ -1,0 +1,8 @@
+string group_name
+string name
+string parent
+float64[] pose
+---
+int32 result
+int32 code
+string message

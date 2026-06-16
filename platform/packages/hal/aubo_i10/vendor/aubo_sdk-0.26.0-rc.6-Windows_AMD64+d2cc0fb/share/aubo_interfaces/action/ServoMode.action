@@ -1,0 +1,11 @@
+string robot_name
+uint32 dof
+float64 watchdog_timeout
+---
+int32 code
+string message
+uint64 accepted_commands
+---
+bool active
+uint64 accepted_commands
+float64[] target_positions

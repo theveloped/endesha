@@ -1,0 +1,5 @@
+int32 encoder_id
+---
+bool result
+int32 code
+string message

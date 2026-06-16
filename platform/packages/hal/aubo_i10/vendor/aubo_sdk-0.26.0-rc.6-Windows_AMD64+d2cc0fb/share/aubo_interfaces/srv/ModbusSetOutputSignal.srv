@@ -1,0 +1,6 @@
+string signal_name
+uint16 value
+---
+int32 result
+int32 code
+string message

@@ -1,0 +1,11 @@
+Float64ArrayList poses
+float64 a
+float64 v
+float64 main_pipe_radius
+float64 sub_pipe_radius
+float64 normal_distance
+float64 normal_alpha
+---
+int32 result
+int32 code
+string message

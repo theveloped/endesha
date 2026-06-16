@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+.pixi/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Loose CAD source exports at repo root (already converted to tracked .glb assets
+# by platform/scripts/import_cell_stl.py; not needed in the repo).
+/*.stl
+/*.txt

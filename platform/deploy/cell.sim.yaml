@@ -1,0 +1,39 @@
+# Sim cell for the supervisor: brings up arm_sim + camera2d_sim + the always-on
+# demo_detect vision runtime, all spawned from this one file. Mirrors
+# cell.dev.yaml but with the sim HALs and the rendering camera block.
+cell_type: vision-pick-cell-sim@0.1
+platform: 0.1.0
+
+# Distributed seams (design §68): single node is its own master this slice.
+# Both default, so they are optional — written here to document the schema.
+master_node: main
+
+resources:
+  r1:
+    contract: arm
+    hal: arm_sim
+    node: main
+    params: {}
+  cam0:
+    contract: camera2d
+    hal: camera2d_sim
+    node: main
+    params:
+      mount: flange
+      mount_arm: r1
+      render:
+        width: 800
+        height: 800
+        fx: 900.0
+        fy: 900.0
+        background_gray: 90
+        mount_xyz: [0, 0, 0.05]
+        mount_rpy_deg: [0, 0, 0]
+      grab_defaults: { encoding: jpeg, quality: 90, scale: 1.0 }
+
+# Role bindings (design §8.2): the supervisor resolves a flow's contract-typed
+# roles to these concrete resources. demo_inspect's arm -> r1, cam -> cam0.
+bindings:
+  demo_inspect:
+    arm: r1
+    cam: cam0

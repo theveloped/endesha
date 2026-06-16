@@ -1,0 +1,6 @@
+string key
+bool default_value
+---
+bool result
+int32 code
+string message

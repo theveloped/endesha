@@ -1,0 +1,9 @@
+string variable
+string serial_name
+string prefix
+string suffix
+bool interpret_escape
+---
+int32 result
+int32 code
+string message

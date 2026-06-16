@@ -1,0 +1,6 @@
+int32 encoder_id
+int32 tick_per_meter
+---
+int32 result
+int32 code
+string message

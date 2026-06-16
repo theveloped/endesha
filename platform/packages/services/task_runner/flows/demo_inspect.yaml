@@ -1,0 +1,19 @@
+# Demo inspection statechart for the task_runner.
+#
+# A live run requires teaching the three poses first, e.g.:
+#   wfctl pose save belt_above  (move the arm, then save)
+#   wfctl pose save left_above
+#   wfctl pose save right_above
+# The end-to-end test seeds them via config/cmd/set.
+#
+# Two parallel regions run concurrently:
+#   - inspect: enables the `demo_detect` detection pipeline, steps the arm
+#     through the three poses, grabbing a frame at each (the pipeline decodes
+#     it and publishes a `result`), then disables the pipeline.
+#   - conveyor: holds standard DO pin 0 high until standard DI pin 0 goes high
+#     or 2.0 s elapses (sim DI is static 0 -> always stops on timeout).
+# When both finish, the aggregate joins all detected codes into the result.
+name: demo_inspect
+poses: [belt_above, left_above, right_above]
+vision: {format: DataMatrix, min_count: 1, pipeline: demo_detect}
+conveyor: {do_pin: 0, di_pin: 0, timeout_s: 2.0}

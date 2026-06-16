@@ -1,0 +1,9 @@
+// Dev topology: the driver peer listens on a fixed TCP endpoint so wfctl /
+// conformance can `--connect tcp/<host>:7447` deterministically (multicast
+// scouting stays on for same-segment peers that can use it).
+{
+  mode: "peer",
+  listen: {
+    endpoints: ["tcp/0.0.0.0:7447"],
+  },
+}

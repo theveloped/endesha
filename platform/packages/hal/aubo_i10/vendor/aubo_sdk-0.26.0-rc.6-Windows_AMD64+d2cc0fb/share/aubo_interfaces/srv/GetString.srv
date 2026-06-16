@@ -1,0 +1,6 @@
+string key
+string default_value
+---
+string result
+int32 code
+string message

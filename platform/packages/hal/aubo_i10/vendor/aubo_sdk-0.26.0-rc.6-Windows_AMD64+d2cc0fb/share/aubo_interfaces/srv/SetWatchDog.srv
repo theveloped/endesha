@@ -1,0 +1,7 @@
+string key
+float64 timeout
+int32 action
+---
+int32 result
+int32 code
+string message

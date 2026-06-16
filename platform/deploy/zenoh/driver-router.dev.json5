@@ -1,0 +1,9 @@
+// Router topology: the driver connects to the zenoh router (compose.yaml)
+// instead of listening itself. Clients also connect to tcp/<host>:7447.
+{
+  mode: "peer",
+  scouting: { multicast: { enabled: false } },
+  connect: {
+    endpoints: ["tcp/127.0.0.1:7447"],
+  },
+}
