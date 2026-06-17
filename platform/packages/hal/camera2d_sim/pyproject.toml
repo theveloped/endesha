@@ -11,9 +11,6 @@ dependencies = [
     "numpy",
     "opencv-python",
     "pyyaml",
-    "trimesh",
-    "pyrender",
-    "PyOpenGL",
 ]
 
 [build-system]

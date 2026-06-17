@@ -1,0 +1,10 @@
+# Scoped to the headless-cam build (BuildKit reads <dockerfile>.dockerignore
+# first). Keep the platform/ context lean: node_modules and dist are rebuilt
+# inside the image (npm ci + npm run build); pixi env + lockfiles are unused.
+web/node_modules
+web/dist
+**/__pycache__
+**/.pytest_cache
+.pixi
+pixi.lock
+**/*.pyc

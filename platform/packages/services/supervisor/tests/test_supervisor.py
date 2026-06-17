@@ -5,7 +5,8 @@ open their own zenoh session, so the test bus must be reachable by name. We
 listen on a fixed TCP endpoint and hand the children a zenoh config that
 connects to it (the in-process test session listens; children connect).
 
-Render-gated like the task_runner e2e — runs in the wf-sim container (OSMesa).
+Skipped: camera2d_sim was retired, so this e2e can no longer stand up a live
+sim camera in-process — the sim camera is now the external headless-browser HAL.
 """
 
 from __future__ import annotations
@@ -63,11 +64,11 @@ def _catalog_entry(session, name):
 
 
 def test_supervisor_end_to_end(tmp_path):
-    pytest.importorskip("pyrender")
-    try:
-        import pyrender  # noqa: F401
-    except BaseException as exc:  # noqa: BLE001
-        pytest.skip(f"pyrender backend unavailable: {exc!r}")
+    pytest.skip(
+        "camera2d_sim retired; sim camera is now the external headless-browser "
+        "HAL — see deploy/Dockerfile.headless",
+        allow_module_level=False,
+    )
 
     import zenoh
 

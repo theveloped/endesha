@@ -1,0 +1,71 @@
+# The headless-browser camera2d HAL: a Node image that builds the web bundle and
+# runs the contract-serving render page under system Chromium (SwiftShader
+# software WebGL — no GPU needed). The page renders the shared Three.js twin
+# scene from the eye-in-hand pose and serves the FULL camera2d contract over the
+# bridge (liveliness, cmd/* queryables, image topic, status) via zenoh-ts — it
+# IS the sim camera2d HAL for cid=cam0 (pyrender retired).
+#
+# Long-running: serves dist/ via `vite preview`, then keeps a headless Chromium
+# tab open on the page; the page serves the contract until the container stops.
+FROM node:24-slim
+
+# Chromium + the runtime libs headless software-GL needs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      chromium \
+      ca-certificates \
+      fonts-liberation \
+      libnss3 \
+      libatk-bridge2.0-0 \
+      libgbm1 \
+      libasound2 \
+      libxshmfence1 \
+      libgtk-3-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use the system chromium; never let puppeteer download its own.
+ENV PUPPETEER_SKIP_DOWNLOAD=1 \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Build context is `platform/` (so the sibling `packages/` the web build's
+# sync-assets reaches into is present). The web app lives under /platform/web.
+WORKDIR /platform/web
+
+# Install deps first for layer caching.
+COPY web/package*.json ./
+RUN npm ci
+
+# The whole platform tree: web sources + packages/ (aubo URDF + core GLBs that
+# prebuild's sync-assets copies into public/). Then build the multi-entry
+# bundle -> dist/ has both entries + /assets + /aubo_description.
+COPY . /platform
+RUN npm run build
+
+# Long-running entrypoint: start the static preview server, wait for it, then
+# launch the contract-serving page in headless Chromium and keep it open. WS /
+# realm / cid come from env so host vs in-container bridge URLs need no code
+# branch. The page reads the render block (resolution, intrinsics, mount) from
+# its query params, defaulting to the cell.sim.yaml cam0 values.
+ENV WS_URL=ws/bridge:10000 \
+    REALM=sim \
+    CID=cam0 \
+    W=800 \
+    H=800 \
+    FX=900.0 \
+    FY=900.0 \
+    MOUNT_XYZ=0,0,0.05 \
+    MOUNT_RPY_DEG=0,0,0
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'set -e' \
+  'npx vite preview --host --port 4173 &' \
+  'PREVIEW_PID=$!' \
+  'echo "waiting for preview server…"' \
+  'for i in $(seq 1 60); do' \
+  '  if node -e "fetch(\"http://localhost:4173/headless.html\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then break; fi' \
+  '  sleep 1' \
+  'done' \
+  'echo "serving camera2d contract: realm=${REALM} cid=${CID}"' \
+  'exec node scripts/serve-camera.mjs "http://localhost:4173/headless.html?ws=${WS_URL}&realm=${REALM}&cid=${CID}&w=${W}&h=${H}&fx=${FX}&fy=${FY}&mount_xyz=${MOUNT_XYZ}&mount_rpy_deg=${MOUNT_RPY_DEG}"' \
+  > /entrypoint.sh && chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

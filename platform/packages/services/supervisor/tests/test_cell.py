@@ -165,9 +165,10 @@ def test_resolve_roles_unresolved_when_no_resource_of_contract(tmp_path):
 
 
 def test_hal_modules_cover_all_pairs():
+    # camera2d_sim (pyrender) was retired: the sim camera is now the external
+    # headless-browser HAL (hal: external), not a supervisor-spawned process.
     assert HAL_MODULES == {
         ("arm", "arm_sim"): "wf.hal.arm_sim",
         ("arm", "aubo_i10"): "wf.hal.aubo_i10",
-        ("camera2d", "camera2d_sim"): "wf.hal.camera2d_sim",
         ("camera2d", "genicam"): "wf.hal.genicam",
     }

@@ -38,7 +38,7 @@ from wf.core.time import now_ns
 from wf.services.task_runner.spec import load_spec
 
 from .cell import load_cell, resolve_roles
-from .procs import HAL_MODULES, ProcManager
+from .procs import EXTERNAL_HAL, HAL_MODULES, ProcManager
 
 _log = get_logger("wf.services.supervisor.service")
 
@@ -172,8 +172,16 @@ class SupervisorService:
                 argv += ["--zenoh-config", cfg]
             self._procs.spawn("config", argv)
 
-        # One HAL per resource (single node -> all of them).
+        # One HAL per resource (single node -> all of them). A resource whose
+        # hal is EXTERNAL_HAL is served by a process outside the supervisor's
+        # control (e.g. the headless-browser camera2d HAL that renders the twin
+        # scene and serves the contract over the bridge); the supervisor still
+        # carries it in the inventory (role resolution, vision binding) but does
+        # NOT spawn a Python child for it.
         for rid, res in self.cell["resources"].items():
+            if res["hal"] == EXTERNAL_HAL:
+                _log.info("resource %s hal=%s served externally; not spawning", rid, EXTERNAL_HAL)
+                continue
             module = HAL_MODULES.get((res["contract"], res["hal"]))
             if module is None:
                 raise ValueError(f"bad_cell:unknown_hal:{res['hal']}")

@@ -21,9 +21,13 @@ _log = get_logger("wf.services.supervisor.procs")
 HAL_MODULES: dict[tuple[str, str], str] = {
     ("arm", "arm_sim"): "wf.hal.arm_sim",
     ("arm", "aubo_i10"): "wf.hal.aubo_i10",
-    ("camera2d", "camera2d_sim"): "wf.hal.camera2d_sim",
     ("camera2d", "genicam"): "wf.hal.genicam",
 }
+
+# A resource whose hal is this sentinel is served by a process OUTSIDE the
+# supervisor (e.g. the headless-browser camera2d HAL): the supervisor keeps it
+# in the inventory for role resolution + vision binding but spawns no child.
+EXTERNAL_HAL = "external"
 
 # A freshly-spawned child that exits within this window is treated as a failed
 # spawn (e.g. import error, bad args) rather than a transient running process.

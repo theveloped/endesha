@@ -1,30 +1,29 @@
-# Linux sim container: the ONLY supported render path for camera2d_sim.
+# Linux sim container: runs the sim Python processes (supervisor, arm_sim,
+# config service, vision runtime) via pixi (dev parity). Build context is
+# `platform/` so the whole workspace (pixi.toml + packages/*) is available.
 #
-# pyrender's headless backends (OSMesa/EGL) are Linux-only; the native stack
-# runs on Windows where the renderer raises "render backend unavailable". This
-# image installs OSMesa (pure-CPU software GL) and the platform via pixi (dev
-# parity), then runs the sim processes. Build context is `platform/` so the
-# whole workspace (pixi.toml + packages/*) is available.
+# The sim CAMERA is no longer rendered here: the retired pyrender camera2d_sim
+# HAL was replaced by the external camera2d-headless service (headless-browser
+# Three.js render — see deploy/Dockerfile.headless), so this image no longer
+# needs OSMesa/PyOpenGL.
 #
 #   docker build -f deploy/Dockerfile.sim -t wf-sim .
 FROM ghcr.io/prefix-dev/pixi:0.50.2-jammy
 
-# OSMesa software GL for pyrender headless rendering + glut for GLU symbols;
 # build-essential/cmake compile source-only pypi deps (ruckig); git +
 # ca-certificates + curl bootstrap a CURRENT Rust toolchain (jammy's apt cargo
 # 1.75 is too old: rejects eclipse-zenoh's v4 Cargo.lock and edition2024).
+# libglib2.0-0/libxrender1/libxext6/libsm6/libgl1-mesa-glx are kept as common
+# shared-lib deps for the cv2/scientific stack (not pyrender-specific).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        libosmesa6 libosmesa6-dev freeglut3-dev libgl1-mesa-glx \
-        libglib2.0-0 libxrender1 libxext6 libsm6 \
+        libglib2.0-0 libxrender1 libxext6 libsm6 libgl1-mesa-glx \
         build-essential cmake git ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 # Current stable Rust (cargo >= 1.85) via rustup, on PATH for the sdist builds.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --profile minimal --default-toolchain stable
 ENV PATH=/root/.cargo/bin:$PATH
-# pyrender selects the OSMesa platform via this env (also set in render.py).
-ENV PYOPENGL_PLATFORM=osmesa
 ENV WF_REALM=sim
 # Build zenoh's git dependency via the system git (libgit2 hit SSL cert issues).
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
@@ -38,28 +37,21 @@ COPY packages ./packages
 RUN pixi install --locked
 
 # Capture the env activation (PATH, LD_LIBRARY_PATH, conda activation vars) into
-# a script the entrypoint sources. We deliberately do NOT use `pixi run` at
-# runtime: it re-syncs the env to the lock and would revert the PyOpenGL
-# override below. Sourcing the frozen activation + the env python keeps it.
+# a script the entrypoint sources, then exec the env python directly rather than
+# via `pixi run` (which re-syncs the env to the lock on every invocation).
 RUN pixi shell-hook -e default > /activate.sh
-
-# pyrender 0.1.45 hard-pins PyOpenGL==3.1.0, which lacks
-# OSMesaCreateContextAttribs (the symbol pyrender's OSMesa platform calls).
-# Override that single over-strict pin with PyOpenGL 3.1.7 (has the symbol,
-# otherwise API-compatible) directly in the env — the lock stays authoritative
-# for everything else. This MUST come after shell-hook so it is not re-synced.
-RUN pixi run python -m ensurepip --upgrade \
-    && pixi run python -m pip install --no-deps "PyOpenGL==3.1.7"
 
 COPY deploy ./deploy
 COPY scripts ./scripts
 
-# Entrypoint sources the frozen activation, then execs the env python directly
-# (never `pixi run`), preserving the PyOpenGL override.
+# Entrypoint sources the frozen activation, then execs the env python directly.
 COPY deploy/sim-entrypoint.sh /sim-entrypoint.sh
 RUN chmod +x /sim-entrypoint.sh
 ENTRYPOINT ["/sim-entrypoint.sh"]
 
-# Default: the sim camera. compose overrides the command per service.
-CMD ["python", "-m", "wf.hal.camera2d_sim", \
-     "--cell", "deploy/cell.dev.yaml", "--resource", "cam0", "--realm", "sim"]
+# The sim camera is now the external camera2d-headless service (see
+# deploy/Dockerfile.headless); this image runs the other sim processes.
+# Default to the supervisor; compose overrides the command per service.
+CMD ["python", "-m", "wf.services.supervisor", \
+     "--realm", "sim", "--cell", "deploy/cell.sim.yaml", \
+     "--flows-dir", "packages/services/task_runner/flows"]

@@ -371,6 +371,9 @@ interface FrustumOverlayProps {
   intrinsics: Intrinsics | null;
   /** Latest per-frame world<-optical camera pose; null ⇒ hidden. */
   poseRef: RefObject<Pose | null>;
+  /** Robot base pose (Z-up world matrix); the frustum nests inside it because
+   *  the genicam driver stamps poses in the arm base frame, not world. */
+  baseMatrix?: THREE.Matrix4;
   /** Far plane distance (m). Near is a small fixed fraction. */
   far?: number;
 }
@@ -385,6 +388,7 @@ interface FrustumOverlayProps {
 export function FrustumOverlay({
   intrinsics,
   poseRef,
+  baseMatrix = IDENTITY,
   far = 0.6,
 }: FrustumOverlayProps) {
   const groupRef = useRef<THREE.Group>(null);
@@ -434,11 +438,13 @@ export function FrustumOverlay({
   if (geometry === null) return null;
   return (
     <group rotation={ZUP_TO_YUP}>
-      <group ref={groupRef} visible={false}>
-        <lineSegments>
-          <primitive object={geometry} attach="geometry" />
-          <lineBasicMaterial color="#f59e0b" />
-        </lineSegments>
+      <group matrix={baseMatrix} matrixAutoUpdate={false}>
+        <group ref={groupRef} visible={false}>
+          <lineSegments>
+            <primitive object={geometry} attach="geometry" />
+            <lineBasicMaterial color="#f59e0b" />
+          </lineSegments>
+        </group>
       </group>
     </group>
   );

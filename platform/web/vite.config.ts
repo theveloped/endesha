@@ -20,6 +20,17 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    // Multi-page: the twin (index.html) and the headless render-only bundle
+    // (headless.html) ship as separate entries from one build. The twin's
+    // dist/index.html is unchanged.
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        headless: path.resolve(__dirname, "headless.html"),
+      },
+    },
+  },
   optimizeDeps: {
     exclude: ["@eclipse-zenoh/zenoh-ts"],
     include: ["channel-ts", "typed-duration", "base64-arraybuffer", "uuid"],
