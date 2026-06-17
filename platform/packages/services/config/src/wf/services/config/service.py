@@ -75,6 +75,10 @@ class ConfigService:
         try:
             req = decode(query.payload) if query.payload is not None else {}
             revision = self.store.set(req["key"], req["value"])
+            # Publish the new value on its own key so live subscribers (e.g. the
+            # sim camera page) see the edit without re-GETting. config/** stays
+            # queryable too; this only adds a latest-wins sample on change.
+            self.session.put(req["key"], encode(req["value"]))
             query.reply(
                 key, encode({"ok": True, "revision": revision, "error": None})
             )
@@ -92,6 +96,9 @@ class ConfigService:
         try:
             req = decode(query.payload) if query.payload is not None else {}
             self.store.delete(req["key"])
+            # Empty-payload tombstone so live subscribers drop the entry (mirrors
+            # the runtime scene layer's delete convention in scene_live.py).
+            self.session.put(req["key"], encode({}))
             query.reply(key, encode({"ok": True, "error": None}))
         except ValueError as exc:
             query.reply(key, encode({"ok": False, "error": str(exc)}))

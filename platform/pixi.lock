@@ -5593,7 +5593,7 @@ packages:
 - pypi: ./packages/hal/camera2d_sim
   name: wf-hal-camera2d-sim
   version: 0.1.0
-  sha256: 9de40b3c0700da6feb2bb79e926081850d2916338a2c5462d249cbe13d183528
+  sha256: d24eb6805fa899fc294f1643870cb3e722f805f03b3d52785fd6704b538f9846
   requires_dist:
   - wf-core
   - wf-world-model
@@ -5602,9 +5602,6 @@ packages:
   - numpy
   - opencv-python
   - pyyaml
-  - trimesh
-  - pyrender
-  - pyopengl
   requires_python: '>=3.12,<3.13'
   editable: true
 - pypi: ./packages/hal/genicam

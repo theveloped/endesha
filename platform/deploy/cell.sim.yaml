@@ -1,6 +1,7 @@
-# Sim cell for the supervisor: brings up arm_sim + camera2d_sim + the always-on
-# demo_detect vision runtime, all spawned from this one file. Mirrors
-# cell.dev.yaml but with the sim HALs and the rendering camera block.
+# Sim cell for the supervisor: brings up arm_sim + the always-on demo_detect
+# vision runtime, all spawned from this one file. Mirrors cell.dev.yaml but with
+# the sim HALs. cam0 is `hal: external` — the sim camera is the separate
+# camera2d-headless service (headless-browser render), not supervisor-spawned.
 cell_type: vision-pick-cell-sim@0.1
 platform: 0.1.0
 
@@ -16,19 +17,23 @@ resources:
     params: {}
   cam0:
     contract: camera2d
-    hal: camera2d_sim
+    # Served by the headless-browser camera2d HAL (camera2d-headless container),
+    # NOT a supervisor-spawned Python process: it renders the shared Three.js
+    # twin scene and serves the camera2d contract over the bridge. The render
+    # block is the ground-truth optics the headless service passes to the page.
+    hal: external
     node: main
     params:
       mount: flange
       mount_arm: r1
       render:
-        width: 800
+        width: 1280
         height: 800
         fx: 900.0
         fy: 900.0
         background_gray: 90
-        mount_xyz: [0, 0, 0.05]
-        mount_rpy_deg: [0, 0, 0]
+        mount_xyz: [0.08685228895, 0.06511, 0.029]
+        mount_rpy_deg: [90.0, 0.0, 180.0]
       grab_defaults: { encoding: jpeg, quality: 90, scale: 1.0 }
 
 # Role bindings (design §8.2): the supervisor resolves a flow's contract-typed

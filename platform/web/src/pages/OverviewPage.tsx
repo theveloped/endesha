@@ -286,7 +286,11 @@ export default function OverviewPage({
           visible={showScene}
         />
         {showFrustum && intrinsics !== null && (
-          <FrustumOverlay intrinsics={intrinsics} poseRef={cameraPoseRef} />
+          <FrustumOverlay
+            intrinsics={intrinsics}
+            poseRef={cameraPoseRef}
+            baseMatrix={baseMatrix}
+          />
         )}
         {showTcp && activeTcpDef !== null && activeTcp !== null && (
           <TcpTipMarker

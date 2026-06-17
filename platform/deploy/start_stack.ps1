@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 New-Item -ItemType Directory -Force -Path (Join-Path $root "deploy\logs") | Out-Null
 
-Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'aubo_i10|wf.hal.arm_sim|wf.hal.genicam|wf.hal.camera2d_sim|wf.services.recording|wf.services.config|zenoh-bridge-remote-api' } |
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'aubo_i10|wf.hal.arm_sim|wf.hal.genicam|wf.services.recording|wf.services.config|zenoh-bridge-remote-api' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 Start-Process -WindowStyle Hidden cmd -WorkingDirectory $root -ArgumentList '/c', 'pixi run python -m wf.hal.aubo_i10 --cell deploy/cell.dev.yaml --resource r1 --realm live --zenoh-config deploy/zenoh/driver-router.dev.json5 > deploy\logs\driver.log 2>&1'

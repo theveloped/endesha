@@ -34,11 +34,12 @@ services:
     ports:
       - "127.0.0.1:10000:10000"
 
-  # ── sim profile: a headless Linux cell that renders the camera2d view ──
+  # ── sim profile: a headless Linux cell that runs the camera2d pick demo ──
   # `docker compose --profile sim up` brings up the router, config service, and
   # the supervisor — which from `cell.sim.yaml` spawns the sim arm (flange
-  # source), the sim camera (OSMesa pyrender render), and the always-on
-  # demo_detect vision runtime, then publishes the flow catalog. The seeder
+  # source) and the always-on demo_detect vision runtime, then publishes the
+  # flow catalog. The sim camera is the separate camera2d-headless service (cam0
+  # is `hal: external`, so the supervisor does NOT spawn it). The seeder
   # one-shots the demo poses + board. All share the build context `platform/`
   # via Dockerfile.sim and connect to the router by name.
   config:
@@ -67,6 +68,10 @@ services:
     depends_on: [zenoh-router, config]
     volumes:
       - *code
+      # Hot-reload the cell like packages/: cell.sim.yaml lives in deploy/ (NOT
+      # under the packages mount), so bind it explicitly or the supervisor reads
+      # the STALE copy baked into the wf-sim image at build time.
+      - ./cell.sim.yaml:/platform/deploy/cell.sim.yaml:ro
     command: ["python", "-m", "wf.services.supervisor",
               "--realm", "sim",
               "--cell", "deploy/cell.sim.yaml",
@@ -82,3 +87,27 @@ services:
       - *code
     command: ["python", "scripts/seed_demo_cell.py",
               "--connect", "tcp/zenoh-router:7447"]
+
+  # The headless-browser camera2d HAL: serves the camera2d contract for cid=cam0
+  # by rendering the shared Three.js twin scene under headless Chromium
+  # (SwiftShader software WebGL — no GPU passthrough) and publishing over the
+  # bridge via zenoh-ts. Replaces the retired pyrender camera2d_sim; cam0 is
+  # marked `hal: external` in cell.sim.yaml so the supervisor does NOT spawn a
+  # Python camera HAL. Long-running service (not a one-shot).
+  camera2d-headless:
+    profiles: ["sim"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.headless
+    image: wf-camera2d-headless:latest
+    depends_on: [bridge, supervisor]
+    environment:
+      WS_URL: ws/bridge:10000
+      REALM: sim
+      CID: cam0
+      W: "1280"
+      H: "800"
+      FX: "900.0"
+      FY: "900.0"
+      MOUNT_XYZ: "0.08685228895,0.06511,0.029"
+      MOUNT_RPY_DEG: "90.0,0.0,180.0"

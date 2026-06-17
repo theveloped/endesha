@@ -1,3 +1,48 @@
+config/arm/r1/tcp/camera_2:
+  revision: 1
+  t: 1781728846027204654
+  value:
+    quat:
+    - 0
+    - 0
+    - 0
+    - 1
+    role: tool
+    selectable_as_tcp: true
+    xyz:
+    - 0
+    - 0
+    - 0.2
+config/arm/r1/tcp/camera_tcp:
+  revision: 5
+  t: 1781692042468322100
+  value:
+    quat:
+    - 4.329780281177467e-17
+    - 0.7071067811865476
+    - 0.7071067811865475
+    - 4.329780281177466e-17
+    role: tool
+    selectable_as_tcp: true
+    xyz:
+    - 0.08685228895
+    - 0.06511
+    - 0.029
+config/arm/r1/tcp/exchanger_tcp:
+  revision: 7
+  t: 1781691923135702200
+  value:
+    quat:
+    - -0.38268343236508984
+    - 0
+    - 0
+    - 0.9238795325112867
+    role: tool
+    selectable_as_tcp: true
+    xyz:
+    - -0.008
+    - 0.03533954903
+    - 0.12705527778
 config/arm/r1/tcp/plunger_tcp:
   revision: 1
   t: 1781634245430221812
@@ -28,6 +73,134 @@ config/arm/r1/tcp/tool0:
     - 0.0
     - 0.0
     - 0.12
+config/frames/R1T1C1:
+  revision: 2
+  t: 1781711691932848100
+  value:
+    meta: {}
+    parent: world
+    quat:
+    - 0
+    - 0
+    - 0
+    - 1
+    source: manual
+    xyz:
+    - 0.023
+    - -0.305
+    - 0.346
+config/frames/R1T1C2:
+  revision: 2
+  t: 1781711738720893800
+  value:
+    meta: {}
+    parent: world
+    quat:
+    - 0
+    - 0
+    - 0
+    - 1
+    source: manual
+    xyz:
+    - -0.528
+    - -0.305
+    - 0.346
+config/frames/R1T1C3:
+  revision: 1
+  t: 1781711781421664300
+  value:
+    meta: {}
+    parent: world
+    quat:
+    - 0
+    - 0
+    - 0
+    - 1
+    source: manual
+    xyz:
+    - -0.528
+    - 0.046
+    - 0.346
+config/frames/R1T1C4:
+  revision: 1
+  t: 1781711822861712200
+  value:
+    meta: {}
+    parent: world
+    quat:
+    - 0
+    - 0
+    - 0
+    - 1
+    source: manual
+    xyz:
+    - 0.023
+    - 0.046
+    - 0.346
+config/frames/R1T2C1:
+  revision: 1
+  t: 1781711914316432400
+  value:
+    meta: {}
+    parent: world
+    quat:
+    - 0
+    - 0
+    - 0
+    - 1
+    source: manual
+    xyz:
+    - 0.023
+    - 0.104
+    - 0.346
+config/frames/R1T2C2:
+  revision: 1
+  t: 1781711960019971600
+  value:
+    meta: {}
+    parent: world
+    quat:
+    - 0
+    - 0
+    - 0
+    - 1
+    source: manual
+    xyz:
+    - -0.528
+    - 0.104
+    - 0.346
+config/frames/R1T2C3:
+  revision: 1
+  t: 1781711999422693400
+  value:
+    meta: {}
+    parent: world
+    quat:
+    - 0
+    - 0
+    - 0
+    - 1
+    source: manual
+    xyz:
+    - -0.528
+    - 0.456
+    - 0.346
+config/frames/R1T2C4:
+  revision: 1
+  t: 1781712024270396300
+  value:
+    meta: {}
+    parent: world
+    quat:
+    - 0
+    - 0
+    - 0
+    - 1
+    source: manual
+    xyz:
+    - 0.023
+    - 0.456
+    - 0.346
 config/frames/arm/r1/base:
   revision: 1
   t: 0
@@ -38,7 +211,7 @@ config/frames/arm/r1/base:
     quat:
     - 0.0
     - 0.0
-    - -0.7071067811865475
+    - 0.7071067811865475
     - 0.7071067811865476
     source: cad_import
     xyz:
@@ -105,17 +278,17 @@ config/intrinsics/cam0:
     h: 800
     w: 1280
 config/poses/belt_above:
-  revision: 1
-  t: 1781634347068972380
+  revision: 2
+  t: 1781710996927258600
   value:
     meta: {}
     q:
-    - -1.0040282744336755
-    - -0.18707799276370995
-    - 1.0684138673868044
-    - -0.31529074595305245
-    - 1.5707970485459837
-    - -1.0040066095761422
+    - -4.149416343683039
+    - -0.13933203185436788
+    - 1.3920206558350305
+    - 1.5313752143581434
+    - 2.5786024663928786
+    - -3.1415791532088218
 config/poses/home:
   revision: 1
   t: 0
@@ -130,8 +303,8 @@ config/poses/home:
     - 1.5708
     - 0.0
 config/poses/inspect_a:
-  revision: 5
-  t: 1781637665358314070
+  revision: 8
+  t: 1781730277414226525
   value:
     q:
     - 0.0
@@ -141,8 +314,8 @@ config/poses/inspect_a:
     - 1.6384615384615384
     - 0.0
 config/poses/inspect_b:
-  revision: 5
-  t: 1781637665372344428
+  revision: 8
+  t: 1781730277429987905
   value:
     q:
     - 0.0
@@ -152,8 +325,8 @@ config/poses/inspect_b:
     - 1.6384615384615384
     - 0.0
 config/poses/inspect_c:
-  revision: 5
-  t: 1781637665385721424
+  revision: 8
+  t: 1781730277448031343
   value:
     q:
     - 0.0
@@ -162,30 +335,6 @@ config/poses/inspect_c:
     - -0.6981
     - 1.6384615384615384
     - 0.0
-config/poses/left_above:
-  revision: 1
-  t: 1781634392023050720
-  value:
-    meta: {}
-    q:
-    - 1.4574154951465934
-    - 0.26778811770257244
-    - 1.5026493466371806
-    - -0.3359108427383219
-    - 1.570796936107084
-    - 1.4574293452122484
-config/poses/right_above:
-  revision: 1
-  t: 1781634444822715297
-  value:
-    meta: {}
-    q:
-    - 2.7096138720174046
-    - -0.022422463599962583
-    - 1.2525395672204103
-    - -0.2958123513598678
-    - 1.5707987438774937
-    - 2.709634906424039
 config/scene/cell/1590-9070-59/0:
   revision: 1
   t: 0
@@ -286,7 +435,7 @@ config/scene/cell/5775-7230-27:
       quat:
       - 0.0
       - 0.0
-      - -0.7071067811865475
+      - 0.7071067811865475
       - 0.7071067811865476
       xyz:
       - -0.902289920294
@@ -335,8 +484,8 @@ config/scene/cell/NZX:
       - -0.7159851075300001
       - 1.4000000000000001
 config/scene/datamatrix_part:
-  revision: 5
-  t: 1781637665401129432
+  revision: 20
+  t: 1781730277469025733
   value:
     frame: world
     geometry:
@@ -352,29 +501,6 @@ config/scene/datamatrix_part:
       - 0.06728526231800447
       - -0.13466651668057086
       - 0.0
-config/scene/table:
-  revision: 1
-  t: 0
-  value:
-    frame: table
-    geometry:
-      size:
-      - 0.8
-      - 0.8
-      - 0.05
-      type: box
-    meta:
-      desc: example fixture geometry
-    pose:
-      quat:
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
-      xyz:
-      - 0.0
-      - 0.0
-      - -0.025
 config/scene/tool/1723-4811-76:
   revision: 1
   t: 0
@@ -390,8 +516,8 @@ config/scene/tool/1723-4811-76:
       quat:
       - 0.0
       - 0.0
-      - 0.0
       - 1.0
+      - 0.0
       xyz:
       - 0.0
       - 0.0

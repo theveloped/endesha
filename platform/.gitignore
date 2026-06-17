@@ -1,4 +1,5 @@
 deploy/bridge/
 deploy/logs/
 deploy/recordings/
+deploy/out/
 .pixi/

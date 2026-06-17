@@ -35,7 +35,7 @@ interface RobotProps {
   onLoaded: () => void;
 }
 
-function Robot({ jointsRef, onLoaded }: RobotProps) {
+export function Robot({ jointsRef, onLoaded }: RobotProps) {
   const [robot, setRobot] = useState<URDFRobot | null>(null);
 
   useEffect(() => {
@@ -44,6 +44,12 @@ function Robot({ jointsRef, onLoaded }: RobotProps) {
     loader.load(
       "/aubo_description/aubo_i10.urdf",
       (r) => {
+        // URDF limits are ±3.04 rad but the physical robot reaches ±2π on
+        // some joints (e.g. shoulder at -4.15 rad for belt poses). The driver
+        // enforces real limits; disable the renderer's redundant clamping.
+        for (const joint of Object.values(r.joints)) {
+          joint.ignoreLimits = true;
+        }
         setRobot(r);
         onLoaded();
       },

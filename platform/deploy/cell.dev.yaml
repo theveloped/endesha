@@ -32,6 +32,8 @@ resources:
       serial: null                  # null -> first enumerated device
       ip: 192.168.188.30            # informational; GenTL discovers by itself
       mount: flange                 # eye-in-hand on r1 (consumed in frames phase)
+      mount_xyz: [0.08685228895, 0.06511, 0.029]
+      mount_rpy_deg: [90.0, 0.0, 180.0]
       pixel_format: BayerRG8
       cti_path: "C:/Program Files/Teledyne/Spinnaker/cti64/vs2015/Spinnaker_GenTL_v140.cti"
       stream_defaults: { rate_hz: 15.0, scale: 0.25, encoding: jpeg, quality: 75 }
