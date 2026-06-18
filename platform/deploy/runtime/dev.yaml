@@ -1,0 +1,4 @@
+# Runtime overlay: full real machine (aubo_i10 + genicam).
+active_sources:
+  r1: live
+  cam0: live

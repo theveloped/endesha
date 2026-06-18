@@ -70,9 +70,10 @@ def test_supervisor_end_to_end(tmp_path):
         allow_module_level=False,
     )
 
+    import yaml
     import zenoh
 
-    from wf.services.supervisor.cell import load_cell
+    from wf.services.supervisor.cell import load_cell, realize_cell
     from wf.services.supervisor.service import SupervisorService
     from wf.services.config.service import ConfigService
     from wf.services.config.store import ConfigStore
@@ -145,12 +146,16 @@ def test_supervisor_end_to_end(tmp_path):
         cleanup.append(cfg.shutdown)
         _seed(session)  # poses + datamatrix board
 
-        cell = load_cell(str(_CELL))
+        cell = realize_cell(load_cell(str(_CELL)))
+        realized_cell_path = str(tmp_path / "realized-cell.yaml")
+        Path(realized_cell_path).write_text(
+            yaml.safe_dump(cell, sort_keys=False), encoding="utf-8"
+        )
         sup = SupervisorService(
             session,
             REALM,
             cell,
-            cell_path=str(_CELL),
+            cell_path=realized_cell_path,
             flows_dir=str(_FLOWS),
             with_config=False,
             zenoh_config=str(child_cfg_path),

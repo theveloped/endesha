@@ -25,9 +25,11 @@ from __future__ import annotations
 import argparse
 import os
 import signal
+import tempfile
 import threading
 from pathlib import Path
 
+import yaml
 import zenoh
 
 from wf.contracts.supervisor import keys as sup_keys
@@ -37,7 +39,7 @@ from wf.core.session import declare_alive, open_session
 from wf.core.time import now_ns
 from wf.services.task_runner.spec import load_spec
 
-from .cell import load_cell, resolve_roles
+from .cell import load_cell, load_runtime, realize_cell, resolve_roles
 from .procs import EXTERNAL_HAL, HAL_MODULES, ProcManager
 
 _log = get_logger("wf.services.supervisor.service")
@@ -431,6 +433,19 @@ class SupervisorService:
             _log.debug("publish failed", exc_info=True)
 
 
+def _write_realized_cell(realized: dict) -> str:
+    """Dump the realized inventory to a temp cell file for child HAL spawning.
+
+    The realized resources are the legacy ``{contract, hal, node, params}``
+    shape, so each HAL's existing ``load_resource(cell, rid)`` reads its merged
+    params with no change. Caller unlinks the file on shutdown.
+    """
+    fd, path = tempfile.mkstemp(prefix="wf-realized-cell-", suffix=".yaml")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        yaml.safe_dump(realized, f, sort_keys=False)
+    return path
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="wf.services.supervisor", description=__doc__)
     parser.add_argument(
@@ -439,6 +454,11 @@ def main(argv=None) -> int:
         help="realm (default env WF_REALM or 'sim')",
     )
     parser.add_argument("--cell", required=True, help="path to cell.yaml")
+    parser.add_argument(
+        "--runtime",
+        default=None,
+        help="path to a runtime overlay (active_sources) selecting source modes",
+    )
     parser.add_argument(
         "--flows-dir",
         default="packages/services/task_runner/flows",
@@ -458,13 +478,21 @@ def main(argv=None) -> int:
     parser.add_argument("--zenoh-config", default=None, help="zenoh config path")
     args = parser.parse_args(argv)
 
+    # cell = design-time truth; the runtime overlay selects a source mode per
+    # logical device. realize_cell collapses the two into the concrete inventory
+    # (one provider per resource). Children are spawned against a realized cell
+    # file so their existing per-resource loaders read merged params unchanged.
     cell = load_cell(args.cell)
+    active = load_runtime(args.runtime)["active_sources"] if args.runtime else {}
+    realized = realize_cell(cell, active)
+    realized_path = _write_realized_cell(realized)
+
     session = open_session(args.zenoh_config)
     service = SupervisorService(
         session,
         args.realm,
-        cell,
-        cell_path=args.cell,
+        realized,
+        cell_path=realized_path,
         flows_dir=args.flows_dir,
         config_dir=args.config_dir,
         with_config=args.with_config,
@@ -476,6 +504,10 @@ def main(argv=None) -> int:
         service.run_forever()
     finally:
         session.close()
+        try:
+            os.unlink(realized_path)
+        except OSError:
+            pass
     return 0
 
 
