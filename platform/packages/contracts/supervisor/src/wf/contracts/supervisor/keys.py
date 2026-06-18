@@ -70,3 +70,16 @@ def supervisor_alive(realm: str, node: str = "main") -> str:
 def supervisor_descriptor(realm: str, node: str = "main") -> str:
     """``{realm}/supervisor/{node}/descriptor`` — node state (pub + queryable)."""
     return key(supervisor_prefix(realm, node), "descriptor")
+
+
+def supervisor_devices(realm: str, node: str = "main") -> str:
+    """``{realm}/supervisor/{node}/devices`` — the cell's logical devices, their
+    available source modes, and the active mode per device (pub latest-wins +
+    queryable). Drives the UI device tree + per-device source picker."""
+    return key(supervisor_prefix(realm, node), "devices")
+
+
+def supervisor_cmd_set_source(realm: str, node: str = "main") -> str:
+    """``{realm}/supervisor/{node}/cmd/set_source`` — cold-switch a device's
+    source mode (queryable). Request ``{device_id, source}`` -> ``{ok, error}``."""
+    return key(supervisor_prefix(realm, node), "cmd", "set_source")

@@ -3,17 +3,22 @@ realization, and role resolution (no bus)."""
 
 from __future__ import annotations
 
+import os
+import tempfile
 import textwrap
+import threading
 
 import pytest
 
 from wf.services.supervisor.cell import (
+    devices_inventory,
     load_cell,
     load_runtime,
     realize_cell,
     resolve_roles,
 )
 from wf.services.supervisor.procs import PROVIDER_MODULES, provider_module
+from wf.services.supervisor.service import SupervisorService
 
 # Legacy single-`hal` cell (still accepted, normalized to one "default" source).
 _LEGACY_CELL = textwrap.dedent(
@@ -339,3 +344,95 @@ def test_provider_module_resolves_and_rejects_unknown():
     with pytest.raises(ValueError) as exc:
         provider_module("arm", "no_such_kind")
     assert str(exc.value) == "bad_cell:unknown_provider:arm:no_such_kind"
+
+
+# ── devices inventory ────────────────────────────────────────────────────────
+
+
+def test_devices_inventory(tmp_path):
+    cell = load_cell(_write(tmp_path, _SOURCES_CELL))
+    by_id = {d["id"]: d for d in devices_inventory(cell, {"r1": "sim", "cam0": "live"})}
+    assert by_id["r1"]["contract"] == "arm"
+    assert by_id["r1"]["model"] == "aubo_i10"
+    assert by_id["r1"]["active"] == "sim"
+    assert {s["mode"] for s in by_id["r1"]["sources"]} == {"live", "sim", "replay"}
+    assert by_id["cam0"]["active"] == "live"
+    cam_sim = next(s for s in by_id["cam0"]["sources"] if s["mode"] == "sim")
+    assert cam_sim["launch"] == "external"  # headless camera
+
+
+# ── runtime source switching (cold switch) ───────────────────────────────────
+
+
+class _FakeProcs:
+    def __init__(self):
+        self.calls: list = []
+
+    def stop(self, name, **k):
+        self.calls.append(("stop", name))
+        return True
+
+    def spawn(self, name, argv, **k):
+        self.calls.append(("spawn", name, argv))
+
+    def names(self):
+        return []
+
+
+class _FakePub:
+    def put(self, *a, **k):
+        pass
+
+
+def _switchable_service(tmp_path) -> SupervisorService:
+    cell = load_cell(_write(tmp_path, _SOURCES_CELL))
+    svc = object.__new__(SupervisorService)
+    svc.cell = cell
+    svc.active_sources = {"r1": "sim", "cam0": "live"}
+    svc.realized = realize_cell(cell, svc.active_sources)
+    fd, path = tempfile.mkstemp(suffix=".yaml")
+    os.close(fd)
+    svc.cell_path = path
+    svc.realm, svc.node, svc.zenoh_config = "cell", "main", None
+    svc._started_at = 0
+    svc._lock = threading.Lock()
+    svc._procs = _FakeProcs()
+    svc._devices_pub = _FakePub()
+    svc._descriptor_pub = _FakePub()
+    return svc
+
+
+def test_set_source_cold_switch_restarts_provider(tmp_path):
+    svc = _switchable_service(tmp_path)
+    r = svc._set_source_reply("r1", "replay")
+    assert r["ok"] and svc.active_sources["r1"] == "replay"
+    # old provider stopped, new (replay_arm) spawned.
+    assert ("stop", "hal:r1") in svc._procs.calls
+    spawn = next(c for c in svc._procs.calls if c[0] == "spawn" and c[1] == "hal:r1")
+    assert "wf.hal.replay.arm" in spawn[2]
+    os.unlink(svc.cell_path)
+
+
+def test_set_source_off_stops_without_spawn(tmp_path):
+    svc = _switchable_service(tmp_path)
+    r = svc._set_source_reply("cam0", "off")
+    assert r["ok"] and svc.active_sources["cam0"] == "off"
+    assert ("stop", "hal:cam0") in svc._procs.calls
+    assert not any(c[0] == "spawn" and c[1] == "hal:cam0" for c in svc._procs.calls)
+    os.unlink(svc.cell_path)
+
+
+def test_set_source_external_stops_without_spawn(tmp_path):
+    svc = _switchable_service(tmp_path)
+    # cam0 sim = headless (external) -> stopped, but supervisor spawns nothing.
+    r = svc._set_source_reply("cam0", "sim")
+    assert r["ok"] and svc.active_sources["cam0"] == "sim"
+    assert not any(c[0] == "spawn" and c[1] == "hal:cam0" for c in svc._procs.calls)
+    os.unlink(svc.cell_path)
+
+
+def test_set_source_rejects_unknown_device_and_mode(tmp_path):
+    svc = _switchable_service(tmp_path)
+    assert svc._set_source_reply("rX", "sim")["ok"] is False
+    assert svc._set_source_reply("r1", "bogus")["ok"] is False
+    os.unlink(svc.cell_path)

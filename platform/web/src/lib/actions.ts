@@ -18,6 +18,7 @@ import {
   configCmdSet,
   flowsCmdStart,
   flowsCmdStop,
+  supervisorCmdSetSource,
   taskCmdAbort,
   taskCmdStart,
 } from "./config";
@@ -29,6 +30,7 @@ import type {
   GoalReply,
   GoalResult,
   FlowCmdReply,
+  SetSourceReply,
   TaskStartReply,
   Waypoint,
 } from "./messages";
@@ -260,4 +262,20 @@ export async function stopFlow(
   if (reply === null)
     throw new Error("no reply from flows/cmd/stop (supervisor running?)");
   return reply as FlowCmdReply;
+}
+
+/** Cold-switch a device's source mode (live/sim/replay/off) via the supervisor. */
+export async function setDeviceSource(
+  session: Session,
+  realm: string,
+  deviceId: string,
+  source: string,
+): Promise<SetSourceReply> {
+  const reply = await query(session, supervisorCmdSetSource(realm), {
+    device_id: deviceId,
+    source,
+  });
+  if (reply === null)
+    throw new Error("no reply from supervisor cmd/set_source (supervisor running?)");
+  return reply as SetSourceReply;
 }

@@ -245,3 +245,11 @@ export function supervisorAlive(realm: string, node = "main"): string {
 export function supervisorDescriptor(realm: string, node = "main"): string {
   return `${realm}/supervisor/${node}/descriptor`;
 }
+
+export function supervisorDevices(realm: string, node = "main"): string {
+  return `${realm}/supervisor/${node}/devices`;
+}
+
+export function supervisorCmdSetSource(realm: string, node = "main"): string {
+  return `${realm}/supervisor/${node}/cmd/set_source`;
+}

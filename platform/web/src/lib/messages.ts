@@ -419,3 +419,34 @@ export interface SupervisorDescriptor {
   always_on: SupervisorService[];
   started_at: WireTimestamp;
 }
+
+// Device inventory (supervisor/devices): the cell's logical devices, their
+// available source modes, and the active mode per device (drives the UI tree).
+
+export interface DeviceSource {
+  mode: string; // live | sim | replay (declared)
+  kind: string;
+  launch: string; // "module" | "external"
+}
+
+export interface DeviceEntry {
+  id: string;
+  contract: string;
+  model: string | null;
+  active: string | null; // active mode, or null/off
+  sources: DeviceSource[];
+}
+
+export interface DevicesList {
+  t: WireTimestamp;
+  node: string;
+  devices: DeviceEntry[];
+}
+
+/** supervisor/cmd/set_source reply: `{ok, device_id?, source?, error?}`. */
+export interface SetSourceReply {
+  ok: boolean;
+  device_id?: string;
+  source?: string;
+  error?: string;
+}

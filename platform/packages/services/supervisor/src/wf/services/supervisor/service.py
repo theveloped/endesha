@@ -33,13 +33,19 @@ import yaml
 import zenoh
 
 from wf.contracts.supervisor import keys as sup_keys
-from wf.core.codec import encode
+from wf.core.codec import decode, encode
 from wf.core.log import get_logger
 from wf.core.session import declare_alive, open_session
 from wf.core.time import now_ns
 from wf.services.task_runner.spec import load_spec
 
-from .cell import load_cell, load_runtime, realize_cell, resolve_roles
+from .cell import (
+    devices_inventory,
+    load_cell,
+    load_runtime,
+    realize_cell,
+    resolve_roles,
+)
 from .procs import LAUNCH_EXTERNAL, ProcManager, provider_module
 
 _log = get_logger("wf.services.supervisor.service")
@@ -53,8 +59,8 @@ class SupervisorService:
         session: zenoh.Session,
         realm: str,
         cell: dict,
+        active_sources: dict,
         *,
-        cell_path: str,
         flows_dir: str,
         config_dir: str = "deploy/config",
         with_config: bool = False,
@@ -63,8 +69,13 @@ class SupervisorService:
     ) -> None:
         self.session = session
         self.realm = realm
+        # The full (multi-source) cell + a mutable active-source map: the service
+        # realizes the concrete inventory itself and rewrites the child-params
+        # file on a runtime source switch.
         self.cell = cell
-        self.cell_path = str(Path(cell_path).resolve())
+        self.active_sources = dict(active_sources)
+        self.realized = realize_cell(cell, self.active_sources)
+        self.cell_path = _write_realized_cell(self.realized)
         self.flows_dir = Path(flows_dir)
         self.config_dir = config_dir
         self.with_config = with_config
@@ -102,6 +113,10 @@ class SupervisorService:
             sup_keys.supervisor_descriptor(realm, node),
             congestion_control=zenoh.CongestionControl.DROP,
         )
+        self._devices_pub = session.declare_publisher(
+            sup_keys.supervisor_devices(realm, node),
+            congestion_control=zenoh.CongestionControl.DROP,
+        )
         self._status_pubs: dict[str, zenoh.Publisher] = {}
         self._queryables: list = []
 
@@ -123,12 +138,21 @@ class SupervisorService:
                 sup_keys.supervisor_descriptor(self.realm, self.node),
                 self._on_descriptor_query,
             ),
+            self.session.declare_queryable(
+                sup_keys.supervisor_devices(self.realm, self.node),
+                self._on_devices_query,
+            ),
+            self.session.declare_queryable(
+                sup_keys.supervisor_cmd_set_source(self.realm, self.node),
+                self._on_set_source,
+            ),
         ]
         self._alive_token = declare_alive(
             self.session, self.realm, "supervisor", self.node
         )
         self._publish_catalog()
         self._publish_descriptor()
+        self._publish_devices()
         self._start_reaper()
         _log.info(
             "supervisor up: realm=%s node=%s flows=%s errors=%s",
@@ -162,6 +186,10 @@ class SupervisorService:
         if self._alive_token is not None:
             del self._alive_token
             self._alive_token = None
+        try:
+            os.unlink(self.cell_path)
+        except OSError:
+            pass
         _log.info("supervisor stopped")
 
     # ── always-on bring-up ───────────────────────────────────────────────
@@ -180,27 +208,8 @@ class SupervisorService:
         # served outside the supervisor's control; the supervisor still carries
         # it in the inventory (role resolution, vision binding) but spawns no
         # Python child for it.
-        for rid, res in self.cell["resources"].items():
-            if res["launch"] == LAUNCH_EXTERNAL:
-                _log.info(
-                    "resource %s served externally (kind=%s); not spawning",
-                    rid,
-                    res["kind"],
-                )
-                continue
-            module = provider_module(res["contract"], res["kind"])
-            argv = [
-                module,
-                "--cell",
-                self.cell_path,
-                "--resource",
-                rid,
-                "--realm",
-                self.realm,
-            ]
-            if cfg:
-                argv += ["--zenoh-config", cfg]
-            self._procs.spawn(f"hal:{rid}", argv)
+        for rid in self.realized["resources"]:
+            self._spawn_provider(rid)
 
         # Always-on vision runtime: one process per distinct (pipeline, format)
         # found across the catalog, bound to the camera resource the flows
@@ -222,6 +231,25 @@ class SupervisorService:
             if cfg:
                 argv += ["--zenoh-config", cfg]
             self._procs.spawn(f"vision:{pipeline}", argv)
+
+    def _spawn_provider(self, rid: str) -> None:
+        """Spawn the realized provider child for ``rid`` (no-op for an
+        off / external-launched source). Raises RuntimeError on spawn failure."""
+        res = self.realized["resources"].get(rid)
+        if res is None:
+            return  # selected off -> no provider
+        if res["launch"] == LAUNCH_EXTERNAL:
+            _log.info(
+                "resource %s served externally (kind=%s); not spawning",
+                rid,
+                res["kind"],
+            )
+            return
+        module = provider_module(res["contract"], res["kind"])
+        argv = [module, "--cell", self.cell_path, "--resource", rid, "--realm", self.realm]
+        if self.zenoh_config:
+            argv += ["--zenoh-config", self.zenoh_config]
+        self._procs.spawn(f"hal:{rid}", argv)
 
     def _vision_runtimes(self) -> list[tuple[str, str, str]]:
         """Distinct ``(pipeline, format, cid)`` triples to spawn as always-on
@@ -391,6 +419,57 @@ class SupervisorService:
     def _on_descriptor_query(self, query: zenoh.Query) -> None:
         self._reply_dict(query, self._descriptor_payload())
 
+    # ── devices inventory + runtime source switching ─────────────────────
+
+    def _devices_payload(self) -> dict:
+        return {
+            "t": now_ns(),
+            "node": self.node,
+            "devices": devices_inventory(self.cell, self.active_sources),
+        }
+
+    def _publish_devices(self) -> None:
+        self._publish(self._devices_pub, self._devices_payload())
+
+    def _on_devices_query(self, query: zenoh.Query) -> None:
+        self._reply_dict(query, self._devices_payload())
+
+    def _on_set_source(self, query: zenoh.Query) -> None:
+        req: dict = {}
+        if query.payload is not None:
+            try:
+                decoded = decode(query.payload)
+                if isinstance(decoded, dict):
+                    req = decoded
+            except Exception:  # noqa: BLE001
+                req = {}
+        self._reply_dict(
+            query, self._set_source_reply(req.get("device_id"), req.get("source"))
+        )
+
+    def _set_source_reply(self, device_id, source) -> dict:
+        """Cold-switch a device's source: stop the old provider, re-realize +
+        rewrite the child-params file, start the new provider."""
+        if not isinstance(device_id, str) or device_id not in self.cell["resources"]:
+            return {"ok": False, "error": f"unknown_device:{device_id}"}
+        if source != "off" and source not in self.cell["resources"][device_id]["sources"]:
+            return {"ok": False, "error": f"no_source:{device_id}:{source}"}
+        error = None
+        with self._lock:
+            self._procs.stop(f"hal:{device_id}")  # idempotent
+            self.active_sources[device_id] = source
+            self.realized = realize_cell(self.cell, self.active_sources)
+            _dump_realized(self.realized, self.cell_path)
+            try:
+                self._spawn_provider(device_id)
+            except RuntimeError as exc:
+                error = str(exc)
+        self._publish_devices()
+        self._publish_descriptor()
+        if error:
+            return {"ok": False, "error": error, "device_id": device_id, "source": source}
+        return {"ok": True, "device_id": device_id, "source": source}
+
     # ── reaper ───────────────────────────────────────────────────────────
 
     def _start_reaper(self) -> None:
@@ -435,16 +514,20 @@ class SupervisorService:
             _log.debug("publish failed", exc_info=True)
 
 
-def _write_realized_cell(realized: dict) -> str:
-    """Dump the realized inventory to a temp cell file for child HAL spawning.
-
-    The realized resources are the legacy ``{contract, hal, node, params}``
-    shape, so each HAL's existing ``load_resource(cell, rid)`` reads its merged
-    params with no change. Caller unlinks the file on shutdown.
-    """
-    fd, path = tempfile.mkstemp(prefix="wf-realized-cell-", suffix=".yaml")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
+def _dump_realized(realized: dict, path: str) -> None:
+    """Write the realized inventory to ``path`` (overwriting). The realized
+    resources carry ``{contract, kind, launch, node, params}`` so each HAL's
+    existing ``load_resource(cell, rid)`` reads its merged params unchanged."""
+    with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(realized, f, sort_keys=False)
+
+
+def _write_realized_cell(realized: dict) -> str:
+    """Create a temp realized cell file for child HAL spawning; the service
+    rewrites it in place on a source switch and unlinks it on shutdown."""
+    fd, path = tempfile.mkstemp(prefix="wf-realized-cell-", suffix=".yaml")
+    os.close(fd)
+    _dump_realized(realized, path)
     return path
 
 
@@ -480,21 +563,18 @@ def main(argv=None) -> int:
     parser.add_argument("--zenoh-config", default=None, help="zenoh config path")
     args = parser.parse_args(argv)
 
-    # cell = design-time truth; the runtime overlay selects a source mode per
-    # logical device. realize_cell collapses the two into the concrete inventory
-    # (one provider per resource). Children are spawned against a realized cell
-    # file so their existing per-resource loaders read merged params unchanged.
+    # cell = design-time truth; the runtime overlay selects an initial source
+    # mode per logical device. The service holds both, realizes the concrete
+    # inventory, and cold-switches a device's source on cmd/set_source.
     cell = load_cell(args.cell)
     active = load_runtime(args.runtime)["active_sources"] if args.runtime else {}
-    realized = realize_cell(cell, active)
-    realized_path = _write_realized_cell(realized)
 
     session = open_session(args.zenoh_config)
     service = SupervisorService(
         session,
         args.realm,
-        realized,
-        cell_path=realized_path,
+        cell,
+        active,
         flows_dir=args.flows_dir,
         config_dir=args.config_dir,
         with_config=args.with_config,
@@ -506,10 +586,6 @@ def main(argv=None) -> int:
         service.run_forever()
     finally:
         session.close()
-        try:
-            os.unlink(realized_path)
-        except OSError:
-            pass
     return 0
 
 

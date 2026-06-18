@@ -67,11 +67,18 @@ interface FrameTriadsProps {
   frames: { name: string; def: FrameDef }[];
   /** Triad axis length (m). */
   size?: number;
+  selectedName?: string | null;
+  onSelect?: (name: string) => void;
 }
 
 /** Static RGB=XYZ triads at every frame, rendered at their WORLD poses (canvas
  *  origin = world). The robot base frame's triad lands on the robot. */
-export function FrameTriads({ frames, size = 0.12 }: FrameTriadsProps) {
+export function FrameTriads({
+  frames,
+  size = 0.12,
+  selectedName = null,
+  onSelect,
+}: FrameTriadsProps) {
   const placed = useMemo(() => {
     const map = new Map(frames.map((f) => [f.name, f.def]));
     return frames.map(({ name }) => {
@@ -90,8 +97,20 @@ export function FrameTriads({ frames, size = 0.12 }: FrameTriadsProps) {
           key={name}
           position={[pos.x, pos.y, pos.z]}
           quaternion={[quat.x, quat.y, quat.z, quat.w]}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect?.(name);
+          }}
         >
-          <axesHelper args={[size]} />
+          <axesHelper args={[selectedName === name ? size * 1.6 : size]} />
+          <mesh>
+            <sphereGeometry args={[selectedName === name ? 0.025 : 0.014, 12, 12]} />
+            <meshStandardMaterial
+              color={selectedName === name ? "#99f6e4" : "#64748b"}
+              transparent
+              opacity={selectedName === name ? 0.9 : 0.35}
+            />
+          </mesh>
           <Html center style={LABEL_STYLE}>
             {name}
           </Html>
@@ -516,6 +535,8 @@ interface SceneMeshesProps {
   objects: { name: string; obj: SceneObject }[];
   frames: { name: string; def: FrameDef }[];
   visible?: boolean;
+  selectedName?: string | null;
+  onSelect?: (name: string) => void;
 }
 
 /** Static `config/scene/**` geometry, rendered relative to `world` (canvas
@@ -526,6 +547,8 @@ export function SceneMeshes({
   objects,
   frames,
   visible = true,
+  selectedName = null,
+  onSelect,
 }: SceneMeshesProps) {
   const placed = useMemo(() => {
     const map = new Map(frames.map((f) => [f.name, f.def]));
@@ -568,7 +591,22 @@ export function SceneMeshes({
           key={name}
           position={[pos.x, pos.y, pos.z]}
           quaternion={[quat.x, quat.y, quat.z, quat.w]}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect?.(name);
+          }}
         >
+          {selectedName === name && (
+            <mesh>
+              <sphereGeometry args={[0.045, 16, 16]} />
+              <meshBasicMaterial
+                color="#61d9d1"
+                transparent
+                opacity={0.24}
+                depthWrite={false}
+              />
+            </mesh>
+          )}
           {obj.geometry.type === "mesh" && obj.geometry.uri ? (
             <MeshErrorBoundary>
               <Suspense fallback={null}>

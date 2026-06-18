@@ -241,16 +241,12 @@ def realize_cell(cell: dict, active_sources: dict[str, str] | None = None) -> di
         if mode == "off":
             continue
         if mode is None:
-            if _LEGACY_MODE in sources:
-                chosen = sources[_LEGACY_MODE]
-            elif len(sources) == 1:
-                chosen = next(iter(sources.values()))
-            else:
+            mode = _default_mode(sources)
+            if mode is None:
                 raise ValueError(f"bad_runtime:no_active_source:{rid}")
-        else:
-            if mode not in sources:
-                raise ValueError(f"bad_runtime:no_source:{rid}:{mode}")
-            chosen = sources[mode]
+        elif mode not in sources:
+            raise ValueError(f"bad_runtime:no_source:{rid}:{mode}")
+        chosen = sources[mode]
         realized[rid] = {
             "contract": res["contract"],
             "kind": chosen["kind"],
@@ -264,6 +260,38 @@ def realize_cell(cell: dict, active_sources: dict[str, str] | None = None) -> di
         "resources": realized,
         "bindings": cell["bindings"],
     }
+
+
+def _default_mode(sources: dict) -> str | None:
+    """The mode used when no overlay selection exists (legacy ``default`` or the
+    sole declared source); None when ambiguous."""
+    if _LEGACY_MODE in sources:
+        return _LEGACY_MODE
+    if len(sources) == 1:
+        return next(iter(sources))
+    return None
+
+
+def devices_inventory(cell: dict, active_sources: dict[str, str]) -> list[dict]:
+    """The device list the supervisor publishes for the UI tree: each logical
+    device with its declared source modes and the currently active mode."""
+    devices: list[dict] = []
+    for rid, res in cell["resources"].items():
+        sources = [
+            {"mode": mode, "kind": s["kind"], "launch": s["launch"]}
+            for mode, s in res["sources"].items()
+        ]
+        active = active_sources.get(rid) or _default_mode(res["sources"])
+        devices.append(
+            {
+                "id": rid,
+                "contract": res["contract"],
+                "model": res.get("model"),
+                "active": active,
+                "sources": sources,
+            }
+        )
+    return devices
 
 
 def resolve_roles(cell: dict, flow_spec: dict, flow_name: str) -> dict[str, str]:

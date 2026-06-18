@@ -7,9 +7,11 @@
     "sync-assets": "node scripts/sync-assets.mjs",
     "predev": "node scripts/sync-assets.mjs",
     "dev": "vite",
+    "dev:spatial": "vite --open /spatial.html",
     "prebuild": "node scripts/sync-assets.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:spatial": "node --test --experimental-strip-types tests/spatial-capabilities.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
