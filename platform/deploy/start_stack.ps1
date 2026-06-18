@@ -4,7 +4,11 @@
 # UI device tree when it's attached, and back to sim/replay/off when you remove it.
 #   .\deploy\start_stack.ps1                                   # default: sim arm + replay camera
 #   .\deploy\start_stack.ps1 -Runtime deploy/runtime/dev.yaml  # start everything live (real hardware)
-# Router is expected up already: docker compose -f deploy/compose.yaml up -d
+# This is the HOST hardware stack. Bring up ONLY the router first (the rest of
+# compose is the all-sim stack and would collide):
+#   docker compose -f deploy/compose.yaml up -d zenoh-router
+# For the full all-simulated cell + frontend in Docker instead, just run:
+#   docker compose -f deploy/compose.yaml up
 # Stop everything: .\deploy\stop_stack.ps1
 param([string]$Runtime = "deploy/runtime/default.yaml")
 $ErrorActionPreference = "Stop"
