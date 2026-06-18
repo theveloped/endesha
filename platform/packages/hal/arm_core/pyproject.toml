@@ -1,16 +1,13 @@
 [project]
-name = "wf-hal-arm-sim"
+name = "wf-hal-arm-core"
 version = "0.1.0"
-description = "WF platform L2: simulated arm HAL (arm contract, sim realm)"
+description = "WF platform L2: shared arm-contract core + backend seam"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "wf-core",
     "wf-world-model",
     "wf-contracts-arm",
-    "wf-hal-arm-core",
-    "wf-hal-aubo-i10",
     "numpy",
-    "pyyaml",
 ]
 
 [build-system]

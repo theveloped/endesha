@@ -143,6 +143,7 @@ environments:
       - pypi: ./packages/contracts/task
       - pypi: ./packages/contracts/vision
       - pypi: ./packages/core
+      - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/camera2d_sim
@@ -269,6 +270,7 @@ environments:
       - pypi: ./packages/contracts/task
       - pypi: ./packages/contracts/vision
       - pypi: ./packages/core
+      - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/camera2d_sim
@@ -393,6 +395,7 @@ environments:
       - pypi: ./packages/contracts/task
       - pypi: ./packages/contracts/vision
       - pypi: ./packages/core
+      - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/camera2d_sim
@@ -510,6 +513,7 @@ environments:
       - pypi: ./packages/contracts/task
       - pypi: ./packages/contracts/vision
       - pypi: ./packages/core
+      - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/camera2d_sim
@@ -5566,14 +5570,26 @@ packages:
   - numpy
   requires_python: '>=3.12,<3.13'
   editable: true
-- pypi: ./packages/hal/arm_sim
-  name: wf-hal-arm-sim
+- pypi: ./packages/hal/arm_core
+  name: wf-hal-arm-core
   version: 0.1.0
-  sha256: 299dc5e293c6af34c2cec2298bd26cfb9a9b668ae3fb61164a748c44d8f20385
+  sha256: f53a007df0436da7d01cc3bd0214f80989861f58b65559b6eea9cec8128dc627
   requires_dist:
   - wf-core
   - wf-world-model
   - wf-contracts-arm
+  - numpy
+  requires_python: '>=3.12,<3.13'
+  editable: true
+- pypi: ./packages/hal/arm_sim
+  name: wf-hal-arm-sim
+  version: 0.1.0
+  sha256: 788e73f4e6b42e9263adc195b78f3a98088cb85ce6550eac836b64d528701fa0
+  requires_dist:
+  - wf-core
+  - wf-world-model
+  - wf-contracts-arm
+  - wf-hal-arm-core
   - wf-hal-aubo-i10
   - numpy
   - pyyaml

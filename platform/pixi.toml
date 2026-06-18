@@ -33,6 +33,7 @@ wf-core = { path = "packages/core", editable = true }
 wf-world-model = { path = "packages/world_model", editable = true }
 wf-contracts-arm = { path = "packages/contracts/arm", editable = true }
 wf-contracts-camera2d = { path = "packages/contracts/camera2d", editable = true }
+wf-hal-arm-core = { path = "packages/hal/arm_core", editable = true }
 wf-hal-aubo-i10 = { path = "packages/hal/aubo_i10", editable = true }
 wf-hal-arm-sim = { path = "packages/hal/arm_sim", editable = true }
 wf-hal-camera2d-sim = { path = "packages/hal/camera2d_sim", editable = true }

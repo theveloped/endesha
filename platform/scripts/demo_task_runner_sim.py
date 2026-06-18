@@ -25,7 +25,8 @@ from wf.core.codec import decode, encode
 from wf.core.frames import make_transform, quaternion_to_rotation_matrix
 from wf.core.testing import linked_sessions
 from wf.hal.aubo_i10 import BUNDLED_URDF
-from wf.hal.arm_sim.__main__ import SimArmDriver
+from wf.hal.arm_core import ArmCore
+from wf.hal.arm_sim.backend import SimArmBackend
 from wf.hal.arm_sim.config import load_resource as load_arm
 from wf.hal.arm_sim.sim import SimArm
 from wf.hal.camera2d_sim.__main__ import SimCameraDriver
@@ -107,7 +108,9 @@ def main() -> None:
                 "geometry": {"type": "mesh", "uri": "asset://wf/datamatrix_part.glb"},
             },
         )
-        arm = SimArmDriver(sa, REALM, RID, load_arm(cell, RID), None)
+        arm_params = load_arm(cell, RID)
+        arm_params["urdf"] = arm_params.get("urdf") or BUNDLED_URDF
+        arm = ArmCore(sa, REALM, RID, arm_params, SimArmBackend(arm_params["home_q"]))
         arm.start()
         cam = SimCameraDriver(sa, REALM, CID, load_cam(cell, CID))
         cam.start()
