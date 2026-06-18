@@ -5598,11 +5598,12 @@ packages:
 - pypi: ./packages/hal/aubo_i10
   name: wf-hal-aubo-i10
   version: 0.1.0
-  sha256: bf4a19b27b3e0e87a1d214101789a7c71a3538f199e6733ff0cffff1f68a2298
+  sha256: 3ae81c5ef16f70575673168eb928660f7528346e47b50e401e628c33cfbc96d6
   requires_dist:
   - wf-core
   - wf-world-model
   - wf-contracts-arm
+  - wf-hal-arm-core
   - pyyaml
   requires_python: '>=3.12,<3.13'
   editable: true

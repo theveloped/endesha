@@ -420,6 +420,7 @@ class ArmCore:
                 self._jog_tree = self._live_frames.snapshot()
             self._jog_cmd = cmd
             self._jog_deadline = time.monotonic() + self._jog_watchdog_s
+        self.backend.on_jog_armed()
 
     def _jog_ref_R(self, cmd: JogCommand, q, tree) -> np.ndarray | None:
         """3x3 rotation of the reference frame's axes in the arm base, or None

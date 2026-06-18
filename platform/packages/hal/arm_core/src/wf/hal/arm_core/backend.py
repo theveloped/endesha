@@ -49,14 +49,11 @@ class ArmBackend(ABC):
         """
         return None
 
-    @abstractmethod
-    def apply_jog_velocity(self, qd: list[float]) -> None:
-        """Apply a commanded joint velocity (sim: integrate one tick with
-        joint-limit clamp; hardware: speed_joint)."""
-
-    @abstractmethod
-    def halt_jog(self) -> None:
-        """Stop jogging and hold (sim: zero velocity; hardware: halt_speed)."""
+    def on_jog_armed(self) -> None:
+        """Called by the core after a jog command is armed. Default no-op (the
+        sim polls ``core.jog_step`` every tick); a hardware backend wakes its
+        dedicated jog-runner thread here. Applying the jog velocity returned by
+        ``core.jog_step`` is the backend's own concern."""
 
     @abstractmethod
     def run_path(self, handle, trajectory, wp_idx, targets, snapshot) -> None:
