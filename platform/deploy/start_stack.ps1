@@ -1,15 +1,22 @@
 # Starts the cell (supervisor + recorder + remote-api bridge + web) detached; logs in deploy/logs/.
-# The supervisor reads the canonical deploy/cell.yaml + a runtime overlay (default
-# deploy/runtime/dev.yaml = real hardware: r1=live, cam0=live) and spawns one provider per
-# device, the config service, and the always-on vision runtime. Switch a device's source
-# (live/sim/replay/off) live from the UI device tree. For a hardware-free cell, pass
-#   .\deploy\start_stack.ps1 -Runtime deploy/runtime/replay-debug.yaml
+# Always starts — the default overlay is a fully simulated cell (sim arm + replayed camera) that
+# needs NO hardware and NO containers. Hotplug real hardware by switching a device to `live` in the
+# UI device tree when it's attached, and back to sim/replay/off when you remove it.
+#   .\deploy\start_stack.ps1                                   # default: sim arm + replay camera
+#   .\deploy\start_stack.ps1 -Runtime deploy/runtime/dev.yaml  # start everything live (real hardware)
 # Router is expected up already: docker compose -f deploy/compose.yaml up -d
 # Stop everything: .\deploy\stop_stack.ps1
-param([string]$Runtime = "deploy/runtime/dev.yaml")
+param([string]$Runtime = "deploy/runtime/default.yaml")
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 New-Item -ItemType Directory -Force -Path (Join-Path $root "deploy\logs") | Out-Null
+
+# The default overlay's camera replays deploy/recordings/demo.mcap; generate it once if missing so
+# the stack always comes up with a working camera.
+if (-not (Test-Path (Join-Path $root "deploy\recordings\demo.mcap"))) {
+    Write-Host "generating demo recording (deploy/recordings/demo.mcap) for the replay camera…"
+    Start-Process -Wait -WindowStyle Hidden -WorkingDirectory $root cmd -ArgumentList '/c', 'pixi run python scripts/make_demo_recording.py'
+}
 
 Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'wf.services.supervisor|wf.hal.aubo_i10|wf.hal.arm_sim|wf.hal.genicam|wf.hal.replay|wf.services.vision|wf.services.task_runner|wf.services.recording|wf.services.config|zenoh-bridge-remote-api' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
