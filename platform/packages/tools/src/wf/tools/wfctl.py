@@ -664,7 +664,7 @@ def cmd_cam_stream(session, args) -> int:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="wfctl", description=__doc__)
-    parser.add_argument("--realm", default="live")
+    parser.add_argument("--realm", default="cell")
     parser.add_argument("--rid", default="r1")
     parser.add_argument("--connect", default=None, help="zenoh endpoint, e.g. tcp/127.0.0.1:7447")
     sub = parser.add_subparsers(dest="command", required=True)

@@ -38,7 +38,7 @@ from wf.services.task_runner.spec import load_spec
 from wf.services.vision.service import DetectorPipeline
 from wf.world_model.fk import UrdfFk
 
-REALM, RID, CID = "sim", "r1", "cam0"
+REALM, RID, CID = "cell", "r1", "cam0"
 INSPECT_Q = [0.0, 0.6, 1.6727272727272728, -0.6981, 1.6384615384615384, 0.0]
 FLOW = "packages/services/task_runner/flows/demo_inspect.yaml"
 

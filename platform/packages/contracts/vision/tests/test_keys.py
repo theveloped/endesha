@@ -19,6 +19,13 @@ def test_prefix_key():
     assert keys.prefix("sim", "crop") == "sim/vision/crop"
 
 
+def test_cell_realm_ok():
+    # The namespace no longer encodes the backend: any single-segment token is
+    # valid (the operating namespace is "cell"); "bogus" is just another token.
+    assert keys.image("cell", "gray") == "cell/vision/gray/image"
+
+
 def test_invalid_realm_raises():
+    # Only empty or embedded-"/" tokens (that aren't replay/<id>) are invalid.
     with pytest.raises(ValueError):
-        keys.image("bogus", "gray")
+        keys.image("a/b", "gray")

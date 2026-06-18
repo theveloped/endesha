@@ -46,7 +46,7 @@ RUN npm run build
 # branch. The page reads the render block (resolution, intrinsics, mount) from
 # its query params, defaulting to the cell.sim.yaml cam0 values.
 ENV WS_URL=ws/bridge:10000 \
-    REALM=sim \
+    REALM=cell \
     CID=cam0 \
     W=800 \
     H=800 \

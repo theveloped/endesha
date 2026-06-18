@@ -303,7 +303,7 @@ export default function CameraHalPage() {
 
   const params = new URLSearchParams(window.location.search);
   const wsUrl = params.get("ws") ?? DEFAULT_WS_URL;
-  const realm = params.get("realm") ?? "sim";
+  const realm = params.get("realm") ?? "cell";
   const cid = params.get("cid") ?? "cam0";
 
   // Render block (cell.sim.yaml cam0 defaults), overridable via query params so

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-REALM_LIVE = "live"
-REALM_SIM = "sim"
+# The operating namespace is a single fixed token: the backend a device is
+# served by (live/sim/replay/off) is NOT encoded in the key — a consumer cannot
+# tell from a key whether a device is real or simulated, which is what lets one
+# session mix sources (RFC §3.1). Whole-session global replay keeps its own
+# ``replay/<id>`` namespace.
+REALM_DEFAULT = "cell"
 _REPLAY_PREFIX = "replay/"
 
 
@@ -20,13 +24,17 @@ def key(*parts: str) -> str:
 
 
 def realm_prefix(realm: str) -> str:
-    """Validate a realm name: "live" | "sim" | "replay/<nonempty id>"."""
-    if realm in (REALM_LIVE, REALM_SIM):
-        return realm
-    if realm.startswith(_REPLAY_PREFIX) and len(realm) > len(_REPLAY_PREFIX):
+    """Validate a namespace token: a single non-empty segment (the operating
+    namespace, default ``"cell"``) or ``"replay/<nonempty id>"`` for a global
+    replay session. The token no longer encodes the backend (RFC §3.1)."""
+    if realm.startswith(_REPLAY_PREFIX):
+        sid = realm[len(_REPLAY_PREFIX) :]
+        if sid and "/" not in sid:
+            return realm
+    elif realm and "/" not in realm:
         return realm
     raise ValueError(
-        f"invalid realm {realm!r}: expected 'live', 'sim', or 'replay/<id>'"
+        f"invalid realm {realm!r}: expected '<namespace>' or 'replay/<id>'"
     )
 
 

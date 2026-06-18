@@ -444,8 +444,8 @@ def main(argv=None) -> int:
     parser.add_argument("--resource", default="cam0", help="resource id (default cam0)")
     parser.add_argument(
         "--realm",
-        default=os.environ.get("WF_REALM", "live"),
-        help="realm (default env WF_REALM or 'live')",
+        default=os.environ.get("WF_REALM", "cell"),
+        help="namespace (default env WF_REALM or 'cell')",
     )
     parser.add_argument("--zenoh-config", default=None, help="zenoh config path")
     args = parser.parse_args(argv)
