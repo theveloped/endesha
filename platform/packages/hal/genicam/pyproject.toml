@@ -7,8 +7,8 @@ dependencies = [
     "wf-core",
     "wf-contracts-camera2d",
     "wf-contracts-arm",
+    "wf-hal-camera2d-core",
     "harvesters~=1.4",
-    "opencv-python",
     "pyyaml",
 ]
 

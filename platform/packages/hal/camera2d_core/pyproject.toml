@@ -1,16 +1,14 @@
 [project]
-name = "wf-hal-camera2d-sim"
+name = "wf-hal-camera2d-core"
 version = "0.1.0"
-description = "WF platform L2: simulated camera HAL (camera2d contract, sim realm)"
+description = "WF platform L2: shared camera2d-contract core + backend seam"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "wf-core",
-    "wf-world-model",
     "wf-contracts-camera2d",
     "wf-contracts-arm",
     "numpy",
     "opencv-python",
-    "pyyaml",
 ]
 
 [build-system]

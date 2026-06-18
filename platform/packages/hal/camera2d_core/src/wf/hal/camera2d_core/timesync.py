@@ -1,12 +1,14 @@
 """Camera hardware clock <-> host wall clock (camera half of the reference
-TimeSynchronizer; mirrors ``hal/aubo_i10/timesync.py:RobotTimeSync``)."""
+TimeSynchronizer; mirrors ``hal/aubo_i10/timesync.py:RobotTimeSync``).
+
+Moved from the genicam HAL into the shared camera2d core (RFC step 5)."""
 
 from __future__ import annotations
 
 from wf.core.log import get_logger
 from wf.core.time import CLOCK_CAMERA, CLOCK_HOST, now_ns
 
-_log = get_logger("wf.hal.genicam.timesync")
+_log = get_logger("wf.hal.camera2d_core.timesync")
 
 
 class CameraTimeSync:
@@ -22,8 +24,8 @@ class CameraTimeSync:
 
     @property
     def offset_ns(self) -> int:
-        """``host_epoch - camera_hw`` offset; 0 when uncalibrated (frames
-        then carry the raw hardware stamp — callers must check
+        """``host_epoch - camera_hw`` offset; 0 when uncalibrated (frames then
+        carry the raw hardware stamp — callers must check
         ``calibrated``/``clock_domain``)."""
         return 0 if self._offset_ns is None else self._offset_ns
 

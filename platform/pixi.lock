@@ -146,7 +146,7 @@ environments:
       - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
-      - pypi: ./packages/hal/camera2d_sim
+      - pypi: ./packages/hal/camera2d_core
       - pypi: ./packages/hal/genicam
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
@@ -273,7 +273,7 @@ environments:
       - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
-      - pypi: ./packages/hal/camera2d_sim
+      - pypi: ./packages/hal/camera2d_core
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
       - pypi: ./packages/services/supervisor
@@ -398,7 +398,7 @@ environments:
       - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
-      - pypi: ./packages/hal/camera2d_sim
+      - pypi: ./packages/hal/camera2d_core
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
       - pypi: ./packages/services/supervisor
@@ -516,7 +516,7 @@ environments:
       - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
-      - pypi: ./packages/hal/camera2d_sim
+      - pypi: ./packages/hal/camera2d_core
       - pypi: ./packages/hal/genicam
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
@@ -5607,30 +5607,28 @@ packages:
   - pyyaml
   requires_python: '>=3.12,<3.13'
   editable: true
-- pypi: ./packages/hal/camera2d_sim
-  name: wf-hal-camera2d-sim
+- pypi: ./packages/hal/camera2d_core
+  name: wf-hal-camera2d-core
   version: 0.1.0
-  sha256: d24eb6805fa899fc294f1643870cb3e722f805f03b3d52785fd6704b538f9846
+  sha256: 12ad9b930529f4a5cea86637a6b0f4b18be1cca3f8a6764b4bb60f68d1e62b1a
   requires_dist:
   - wf-core
-  - wf-world-model
   - wf-contracts-camera2d
   - wf-contracts-arm
   - numpy
   - opencv-python
-  - pyyaml
   requires_python: '>=3.12,<3.13'
   editable: true
 - pypi: ./packages/hal/genicam
   name: wf-hal-genicam
   version: 0.1.0
-  sha256: 66f1f503ae2463bc9768362934e5527e4647d93f8464065830ab53820efbc27a
+  sha256: 5ab5a048857aa68c4f545cb15fda525f3e6c2635b7698b99d834f3f67721833f
   requires_dist:
   - wf-core
   - wf-contracts-camera2d
   - wf-contracts-arm
+  - wf-hal-camera2d-core
   - harvesters~=1.4
-  - opencv-python
   - pyyaml
   requires_python: '>=3.12,<3.13'
   editable: true
