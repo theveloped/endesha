@@ -17,17 +17,31 @@ from wf.core.log import get_logger
 
 _log = get_logger("wf.services.supervisor.procs")
 
-# (contract, hal) -> python module to spawn. A pair absent here is a bad_cell.
-HAL_MODULES: dict[tuple[str, str], str] = {
+# How a source provider is brought up (from the cell source's ``launch:``).
+LAUNCH_MODULE = "module"  # spawn ``python -m <module>`` as a supervisor child
+LAUNCH_EXTERNAL = "external"  # served by a process OUTSIDE the supervisor
+
+# (contract, provider kind) -> python module for module-launched providers. A
+# module-launched kind absent here is a bad_cell. External-launched providers
+# (e.g. the headless-browser camera2d that renders the twin and serves the
+# contract over the bridge) are served outside the supervisor and need no entry;
+# the supervisor keeps them in the inventory for role resolution + vision
+# binding but spawns no child.
+PROVIDER_MODULES: dict[tuple[str, str], str] = {
     ("arm", "arm_sim"): "wf.hal.arm_sim",
     ("arm", "aubo_i10"): "wf.hal.aubo_i10",
     ("camera2d", "genicam"): "wf.hal.genicam",
+    # replay_arm / replay_camera providers land in migration step 6.
 }
 
-# A resource whose hal is this sentinel is served by a process OUTSIDE the
-# supervisor (e.g. the headless-browser camera2d HAL): the supervisor keeps it
-# in the inventory for role resolution + vision binding but spawns no child.
-EXTERNAL_HAL = "external"
+
+def provider_module(contract: str, kind: str) -> str:
+    """Module to spawn for a module-launched provider; raises on unknown kind."""
+    module = PROVIDER_MODULES.get((contract, kind))
+    if module is None:
+        raise ValueError(f"bad_cell:unknown_provider:{contract}:{kind}")
+    return module
+
 
 # A freshly-spawned child that exits within this window is treated as a failed
 # spawn (e.g. import error, bad args) rather than a transient running process.

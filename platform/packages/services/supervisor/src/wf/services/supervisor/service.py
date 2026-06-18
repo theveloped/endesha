@@ -40,7 +40,7 @@ from wf.core.time import now_ns
 from wf.services.task_runner.spec import load_spec
 
 from .cell import load_cell, load_runtime, realize_cell, resolve_roles
-from .procs import EXTERNAL_HAL, HAL_MODULES, ProcManager
+from .procs import LAUNCH_EXTERNAL, ProcManager, provider_module
 
 _log = get_logger("wf.services.supervisor.service")
 
@@ -174,19 +174,21 @@ class SupervisorService:
                 argv += ["--zenoh-config", cfg]
             self._procs.spawn("config", argv)
 
-        # One HAL per resource (single node -> all of them). A resource whose
-        # hal is EXTERNAL_HAL is served by a process outside the supervisor's
-        # control (e.g. the headless-browser camera2d HAL that renders the twin
-        # scene and serves the contract over the bridge); the supervisor still
-        # carries it in the inventory (role resolution, vision binding) but does
-        # NOT spawn a Python child for it.
+        # One provider per resource (single node -> all of them). An
+        # external-launched provider (e.g. the headless-browser camera2d that
+        # renders the twin scene and serves the contract over the bridge) is
+        # served outside the supervisor's control; the supervisor still carries
+        # it in the inventory (role resolution, vision binding) but spawns no
+        # Python child for it.
         for rid, res in self.cell["resources"].items():
-            if res["hal"] == EXTERNAL_HAL:
-                _log.info("resource %s hal=%s served externally; not spawning", rid, EXTERNAL_HAL)
+            if res["launch"] == LAUNCH_EXTERNAL:
+                _log.info(
+                    "resource %s served externally (kind=%s); not spawning",
+                    rid,
+                    res["kind"],
+                )
                 continue
-            module = HAL_MODULES.get((res["contract"], res["hal"]))
-            if module is None:
-                raise ValueError(f"bad_cell:unknown_hal:{res['hal']}")
+            module = provider_module(res["contract"], res["kind"])
             argv = [
                 module,
                 "--cell",

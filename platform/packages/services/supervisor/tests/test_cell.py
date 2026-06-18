@@ -13,7 +13,7 @@ from wf.services.supervisor.cell import (
     realize_cell,
     resolve_roles,
 )
-from wf.services.supervisor.procs import HAL_MODULES
+from wf.services.supervisor.procs import PROVIDER_MODULES, provider_module
 
 # Legacy single-`hal` cell (still accepted, normalized to one "default" source).
 _LEGACY_CELL = textwrap.dedent(
@@ -218,12 +218,14 @@ def test_realize_legacy_uses_default_source(tmp_path):
     realized = realize_cell(cell)
     assert realized["resources"]["r1"] == {
         "contract": "arm",
-        "hal": "arm_sim",
+        "kind": "arm_sim",
+        "launch": "module",
         "node": "main",
         "params": {},
     }
-    # legacy external -> hal sentinel preserved.
-    assert realized["resources"]["cam0"]["hal"] == "external"
+    # legacy external -> external launch preserved.
+    assert realized["resources"]["cam0"]["kind"] == "external"
+    assert realized["resources"]["cam0"]["launch"] == "external"
     assert realized["bindings"] == {"demo_inspect": {"arm": "r1", "cam": "cam0"}}
 
 
@@ -233,12 +235,14 @@ def test_realize_overlay_selects_mode_and_merges_config(tmp_path):
     # config merged under params; live params win on overlap.
     assert realized["resources"]["r1"] == {
         "contract": "arm",
-        "hal": "aubo_i10",
+        "kind": "aubo_i10",
+        "launch": "module",
         "node": "main",
         "params": {"lease_ttl_s": 30.0, "ip": "1.2.3.4"},
     }
-    # external launch -> hal sentinel.
-    assert realized["resources"]["cam0"]["hal"] == "external"
+    # external launch carried through (headless camera served outside supervisor).
+    assert realized["resources"]["cam0"]["kind"] == "headless_camera"
+    assert realized["resources"]["cam0"]["launch"] == "external"
     assert realized["resources"]["cam0"]["params"] == {"mount_arm": "r1"}
 
 
@@ -315,14 +319,22 @@ def test_resolve_roles_works_on_realized_cell(tmp_path):
     }
 
 
-# ── HAL_MODULES coverage ─────────────────────────────────────────────────────
+# ── PROVIDER_MODULES coverage ────────────────────────────────────────────────
 
 
-def test_hal_modules_cover_all_pairs():
-    # camera2d_sim (pyrender) was retired: the sim camera is now the external
-    # headless-browser HAL (launch: external), not a supervisor-spawned process.
-    assert HAL_MODULES == {
+def test_provider_modules_cover_module_launched_kinds():
+    # Module-launched providers only. External-launched kinds (headless_camera)
+    # are served outside the supervisor and need no module entry; replay_arm /
+    # replay_camera land in migration step 6.
+    assert PROVIDER_MODULES == {
         ("arm", "arm_sim"): "wf.hal.arm_sim",
         ("arm", "aubo_i10"): "wf.hal.aubo_i10",
         ("camera2d", "genicam"): "wf.hal.genicam",
     }
+
+
+def test_provider_module_resolves_and_rejects_unknown():
+    assert provider_module("arm", "arm_sim") == "wf.hal.arm_sim"
+    with pytest.raises(ValueError) as exc:
+        provider_module("arm", "replay_arm")  # not registered until step 6
+    assert str(exc.value) == "bad_cell:unknown_provider:arm:replay_arm"

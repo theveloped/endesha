@@ -30,13 +30,13 @@ from pathlib import Path
 
 import yaml
 
-from .procs import EXTERNAL_HAL
+from .procs import LAUNCH_EXTERNAL, LAUNCH_MODULE
 
 _CONTRACTS = ("arm", "camera2d")
 # Selectable provider modes. ``off`` is a selection (no provider), never a
 # declared source, so it is not in this tuple.
 _MODES = ("live", "sim", "replay")
-_LAUNCHES = ("module", "external")
+_LAUNCHES = (LAUNCH_MODULE, LAUNCH_EXTERNAL)
 # Synthetic mode under which a legacy single-``hal`` resource is normalized.
 _LEGACY_MODE = "default"
 
@@ -140,7 +140,7 @@ def load_cell(path: str | Path) -> dict:
             if not isinstance(params, dict):
                 raise ValueError(f"bad_cell:resource {rid}.params must be a mapping")
             config = {}
-            launch = "external" if hal == EXTERNAL_HAL else "module"
+            launch = LAUNCH_EXTERNAL if hal == LAUNCH_EXTERNAL else LAUNCH_MODULE
             sources = {_LEGACY_MODE: {"kind": hal, "params": params, "launch": launch}}
         else:
             raise ValueError(f"bad_cell:resource {rid} must declare 'sources' or 'hal'")
@@ -222,11 +222,11 @@ def load_runtime(path: str | Path) -> dict:
 def realize_cell(cell: dict, active_sources: dict[str, str] | None = None) -> dict:
     """Collapse cell + overlay into the realized inventory.
 
-    Returns a cell dict whose ``resources`` carry one concrete provider each in
-    the legacy shape ``{contract, hal, node, params}`` — ``hal`` is the source
-    ``kind`` (or ``EXTERNAL_HAL`` when the source is externally launched) and
-    ``params`` is the resource ``config`` merged with the chosen source's
-    ``params``. Resources selected ``off`` are omitted.
+    Returns a cell dict whose ``resources`` carry one concrete provider each:
+    ``{contract, kind, launch, node, params}`` — ``kind`` is the chosen source's
+    provider kind, ``launch`` is how the supervisor brings it up (module /
+    external), and ``params`` is the resource ``config`` merged with the chosen
+    source's ``params``. Resources selected ``off`` are omitted.
 
     Source selection per resource: the overlay's ``active_sources[rid]`` wins;
     otherwise the synthetic legacy ``"default"`` source, otherwise the sole
@@ -251,10 +251,10 @@ def realize_cell(cell: dict, active_sources: dict[str, str] | None = None) -> di
             if mode not in sources:
                 raise ValueError(f"bad_runtime:no_source:{rid}:{mode}")
             chosen = sources[mode]
-        hal = EXTERNAL_HAL if chosen["launch"] == "external" else chosen["kind"]
         realized[rid] = {
             "contract": res["contract"],
-            "hal": hal,
+            "kind": chosen["kind"],
+            "launch": chosen["launch"],
             "node": res["node"],
             "params": {**res["config"], **chosen["params"]},
         }
