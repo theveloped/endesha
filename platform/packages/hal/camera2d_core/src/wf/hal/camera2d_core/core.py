@@ -198,7 +198,9 @@ class Camera2dCore:
             gain_db=f.gain_db,
             seq=seq,
             clock_domain=self._timesync.clock_domain,
-            pose=self._camera_pose(),
+            # A replay source supplies the recorded pose; live sources leave it
+            # None so the core stamps the current eye-in-hand pose.
+            pose=f.pose if f.pose is not None else self._camera_pose(),
         )
         self._pub_image.put(f.data, attachment=encode(header.to_wire()))
         return header

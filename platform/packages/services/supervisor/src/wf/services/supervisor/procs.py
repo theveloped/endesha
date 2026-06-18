@@ -30,8 +30,9 @@ LAUNCH_EXTERNAL = "external"  # served by a process OUTSIDE the supervisor
 PROVIDER_MODULES: dict[tuple[str, str], str] = {
     ("arm", "arm_sim"): "wf.hal.arm_sim",
     ("arm", "aubo_i10"): "wf.hal.aubo_i10",
+    ("arm", "replay_arm"): "wf.hal.replay.arm",
     ("camera2d", "genicam"): "wf.hal.genicam",
-    # replay_arm / replay_camera providers land in migration step 6.
+    ("camera2d", "replay_camera"): "wf.hal.replay.camera",
 }
 
 

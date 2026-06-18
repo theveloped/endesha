@@ -40,10 +40,11 @@ resources:
         kind: arm_sim
         params: {}
       replay:
-        kind: replay_arm              # provider lands in migration step 6
+        kind: replay_arm
         params:
-          recording: null
-          topics: [state/joints, state/flange, state/tcp, state/io, state/status]
+          # Operator-set for v1 (runtime selection is step-7 tooling). A missing
+          # file surfaces as a status error rather than crashing the provider.
+          recording: deploy/recordings/demo.mcap
 
   cam0:
     contract: camera2d
@@ -80,10 +81,9 @@ resources:
             mount_rpy_deg: [90.0, 0.0, 180.0]
           grab_defaults: { encoding: jpeg, quality: 90, scale: 1.0 }
       replay:
-        kind: replay_camera           # provider lands in migration step 6
+        kind: replay_camera
         params:
-          recording: null
-          topics: [image]
+          recording: deploy/recordings/demo.mcap
 
 # Role bindings: the supervisor resolves a flow's contract-typed roles to these
 # concrete resources. demo_inspect's arm -> r1, cam -> cam0.

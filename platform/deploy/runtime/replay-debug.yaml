@@ -1,0 +1,7 @@
+# Runtime overlay: replay-debug — the camera replays a recording while the arm
+# stays simulated, so the live vision pipeline reprocesses recorded frames.
+# (Swap r1 to replay too for a fully-recorded session.) Recording paths come
+# from each device's `replay` source params in cell.yaml.
+active_sources:
+  r1: sim
+  cam0: replay

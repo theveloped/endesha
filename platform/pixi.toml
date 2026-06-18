@@ -37,6 +37,7 @@ wf-hal-arm-core = { path = "packages/hal/arm_core", editable = true }
 wf-hal-aubo-i10 = { path = "packages/hal/aubo_i10", editable = true }
 wf-hal-arm-sim = { path = "packages/hal/arm_sim", editable = true }
 wf-hal-camera2d-core = { path = "packages/hal/camera2d_core", editable = true }
+wf-hal-replay = { path = "packages/hal/replay", editable = true }
 wf-tools = { path = "packages/tools", editable = true }
 wf-services-recording = { path = "packages/services/recording", editable = true }
 wf-services-config = { path = "packages/services/config", editable = true }

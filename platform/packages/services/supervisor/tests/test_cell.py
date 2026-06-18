@@ -324,17 +324,18 @@ def test_resolve_roles_works_on_realized_cell(tmp_path):
 
 def test_provider_modules_cover_module_launched_kinds():
     # Module-launched providers only. External-launched kinds (headless_camera)
-    # are served outside the supervisor and need no module entry; replay_arm /
-    # replay_camera land in migration step 6.
+    # are served outside the supervisor and need no module entry.
     assert PROVIDER_MODULES == {
         ("arm", "arm_sim"): "wf.hal.arm_sim",
         ("arm", "aubo_i10"): "wf.hal.aubo_i10",
+        ("arm", "replay_arm"): "wf.hal.replay.arm",
         ("camera2d", "genicam"): "wf.hal.genicam",
+        ("camera2d", "replay_camera"): "wf.hal.replay.camera",
     }
 
 
 def test_provider_module_resolves_and_rejects_unknown():
-    assert provider_module("arm", "arm_sim") == "wf.hal.arm_sim"
+    assert provider_module("arm", "replay_arm") == "wf.hal.replay.arm"
     with pytest.raises(ValueError) as exc:
-        provider_module("arm", "replay_arm")  # not registered until step 6
-    assert str(exc.value) == "bad_cell:unknown_provider:arm:replay_arm"
+        provider_module("arm", "no_such_kind")
+    assert str(exc.value) == "bad_cell:unknown_provider:arm:no_such_kind"

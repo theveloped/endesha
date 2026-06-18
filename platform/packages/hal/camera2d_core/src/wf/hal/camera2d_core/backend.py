@@ -25,6 +25,10 @@ class CapturedFrame:
     hw_ts_ns: int  # hardware/source timestamp (end-of-exposure); 0 if none
     exposure_us: float
     gain_db: float
+    # Optional world<-optical pose to stamp into the FrameHeader. None (the
+    # live default) -> the core uses its eye-in-hand pose from the live flange;
+    # a replay source supplies the recorded pose so it is preserved.
+    pose: dict | None = None
 
 
 class Camera2dBackend(ABC):

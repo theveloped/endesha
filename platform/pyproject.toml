@@ -16,6 +16,7 @@ testpaths = [
     "packages/hal/aubo_i10/tests",
     "packages/hal/arm_sim/tests",
     "packages/hal/camera2d_core/tests",
+    "packages/hal/replay/tests",
     "packages/hal/genicam/tests",
     "packages/services/recording/tests",
     "packages/services/config/tests",

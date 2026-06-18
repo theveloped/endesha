@@ -148,6 +148,7 @@ environments:
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/camera2d_core
       - pypi: ./packages/hal/genicam
+      - pypi: ./packages/hal/replay
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
       - pypi: ./packages/services/supervisor
@@ -274,6 +275,7 @@ environments:
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/camera2d_core
+      - pypi: ./packages/hal/replay
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
       - pypi: ./packages/services/supervisor
@@ -399,6 +401,7 @@ environments:
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/camera2d_core
+      - pypi: ./packages/hal/replay
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
       - pypi: ./packages/services/supervisor
@@ -518,6 +521,7 @@ environments:
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/camera2d_core
       - pypi: ./packages/hal/genicam
+      - pypi: ./packages/hal/replay
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
       - pypi: ./packages/services/supervisor
@@ -5629,6 +5633,21 @@ packages:
   - wf-contracts-arm
   - wf-hal-camera2d-core
   - harvesters~=1.4
+  - pyyaml
+  requires_python: '>=3.12,<3.13'
+  editable: true
+- pypi: ./packages/hal/replay
+  name: wf-hal-replay
+  version: 0.1.0
+  sha256: a2bfa01190b7ee1eeb35d4af4ad8750c4cdb53f0944713f06a71565df4c71668
+  requires_dist:
+  - wf-core
+  - wf-hal-arm-core
+  - wf-hal-camera2d-core
+  - wf-hal-aubo-i10
+  - wf-services-recording
+  - wf-contracts-arm
+  - wf-contracts-camera2d
   - pyyaml
   requires_python: '>=3.12,<3.13'
   editable: true
