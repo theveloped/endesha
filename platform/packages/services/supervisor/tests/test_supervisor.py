@@ -26,7 +26,7 @@ from wf.core.codec import decode, encode
 
 REALM = "sim"
 _REPO = Path(__file__).resolve().parents[4]  # platform/
-_CELL = _REPO / "deploy" / "cell.sim.yaml"
+_CELL = _REPO / "deploy" / "cell.yaml"
 _FLOWS = _REPO / "packages" / "services" / "task_runner" / "flows"
 
 
@@ -150,7 +150,7 @@ def test_supervisor_end_to_end(tmp_path):
             session,
             REALM,
             cell,
-            {},
+            {"r1": "sim", "cam0": "sim"},
             flows_dir=str(_FLOWS),
             with_config=False,
             zenoh_config=str(child_cfg_path),

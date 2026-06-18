@@ -17,7 +17,8 @@ Single-node this slice: the supervisor spawns all resources locally and is its
 own master. The cell.yaml ``node:``/``master_node`` fields + the reserved
 per-node key builders lay in the distributed seams (config-only later).
 
-Run: ``python -m wf.services.supervisor --realm sim --cell cell.sim.yaml``.
+Run: ``python -m wf.services.supervisor --cell deploy/cell.yaml
+--runtime deploy/runtime/sim.yaml``.
 """
 
 from __future__ import annotations
@@ -209,7 +210,13 @@ class SupervisorService:
         # it in the inventory (role resolution, vision binding) but spawns no
         # Python child for it.
         for rid in self.realized["resources"]:
-            self._spawn_provider(rid)
+            try:
+                self._spawn_provider(rid)
+            except RuntimeError as exc:
+                # A provider that can't start (e.g. a live device with no
+                # hardware attached) must NOT kill the cell — log it, leave the
+                # device down; it can be switched to sim/replay at runtime.
+                _log.error("provider %s failed to start: %s; left down", rid, exc)
 
         # Always-on vision runtime: one process per distinct (pipeline, format)
         # found across the catalog, bound to the camera resource the flows
