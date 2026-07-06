@@ -29,6 +29,7 @@ from wf.contracts.arm.messages import (
     ControlOwnerState,
     ExecutePathGoal,
     FlangeState,
+    Freedom,
     IoState,
     JogCommand,
     JointState,
@@ -45,6 +46,7 @@ from wf.core.log import get_logger
 from wf.core.time import now_ns
 from wf.world_model.collision import CollisionModel
 from wf.world_model.fk import UrdfFk
+from wf.world_model.goal_sampling import candidate_qs, expand_freedom
 from wf.world_model.frames_live import build_live_tree
 from wf.world_model.jog import jog_joint_velocity
 from wf.world_model.preflight import preflight
@@ -529,6 +531,15 @@ class ArmCore:
         )
         if reason:
             return reason
+        last = resolution["waypoints"][-1]
+        if "constrained" in last:
+            reason = self._prune_loose_goal(
+                last, len(resolution["waypoints"]) - 1, tcp_T, tree
+            )
+            if reason:
+                return reason
+        # Preflight collision-checks the fixed (resolved_q) prefix; loose-goal
+        # candidates were already collision-checked at their final pose above.
         return preflight(
             resolution,
             self._live_scene.snapshot(),
@@ -537,11 +548,47 @@ class ArmCore:
             base_frame=self.base_frame,
         )
 
+    def _prune_loose_goal(self, entry: dict, index: int, tcp_T, tree) -> str | None:
+        """Sample + prune a loose-goal waypoint IN PLACE.
+
+        Fills ``entry["candidates"]`` with reachable, collision-free joint goals
+        (preference-ordered). Returns a rejection reason, or None on success.
+        """
+        pose = Pose.from_wire(entry["constrained"]["pose"])
+        free = Freedom.from_wire(entry["constrained"]["free"])
+        try:
+            poses = expand_freedom(
+                pose, free, max_candidates=self.params.get("max_goal_candidates", 256)
+            )
+        except ValueError as exc:
+            return f"bad_goal: {exc}"
+        cands = candidate_qs(
+            poses,
+            fk=self.fk,
+            q_seed=entry["seed_q"],
+            jmin=self.jmin,
+            jmax=self.jmax,
+            margin=self.params["joint_limit_margin_rad"],
+            tree=tree,
+            base_frame=self.base_frame,
+            tcp_T=tcp_T,
+            collision=self.collision,
+            scene=self._live_scene.snapshot(),
+        )
+        if not cands:
+            return f"no_feasible_goal:{index}"
+        entry["candidates"] = cands
+        return None
+
     def _execute_path(self, handle: GoalHandle) -> None:
         # Runs on the ActionServer worker thread; the server is serial and
         # enforces single-active-goal/busy for free.
         self.clear_stop()
         resolution = handle.goal.pop("_resolution", None) or {}
+        res_wps = resolution.get("waypoints", [])
+        if res_wps and "constrained" in res_wps[-1]:
+            self._execute_loose_path(handle, resolution)
+            return
         snapshot = {
             "t": now_ns(),
             "goal_id": handle.goal_id,
@@ -593,3 +640,79 @@ class ArmCore:
             len(targets),
         )
         self.backend.run_path(handle, traj, wp_idx, targets, snapshot)
+
+    def _execute_loose_path(self, handle: GoalHandle, resolution: dict) -> None:
+        """Execute a loose-goal path: plan every pruned candidate, run the
+        fastest collision-free one.
+
+        The final waypoint carries ``candidates`` (reachable, final-pose
+        collision-free joint goals from the accept gate). Each is planned as a
+        full Ruckig trajectory through the fixed prefix; survivors are ordered
+        by duration (sample count at a fixed servo_dt) and the first one whose
+        DENSE trajectory collision-check clears is executed.
+        """
+        start_q = self.backend.latest_q()
+        if start_q is None:
+            handle.fail(error="no_joint_state")
+            return
+        res_wps = resolution["waypoints"]
+        prefix_targets = [list(wp["resolved_q"]) for wp in res_wps[:-1]]
+        candidates = res_wps[-1].get("candidates") or []
+        tree = self._live_frames.snapshot()
+        scene = self._live_scene.snapshot()
+        ruckig = self.params["ruckig_defaults"]
+        margin = self.params["joint_limit_margin_rad"]
+        prefix = [list(start_q)] + prefix_targets
+
+        feasible: list[tuple[int, list, list, list]] = []
+        for cand in candidates:
+            try:
+                traj, wp_idx = generate_ruckig_trajectory(
+                    prefix + [list(cand)],
+                    self.servo_dt,
+                    vmax=ruckig["vmax"],
+                    amax=ruckig["amax"],
+                    jmax=ruckig["jmax"],
+                )
+            except TrajectoryError:
+                continue
+            if validate_trajectory(traj, self.jmin, self.jmax, margin=margin):
+                continue
+            feasible.append((len(traj), traj, wp_idx, list(cand)))
+        feasible.sort(key=lambda t: t[0])
+
+        chosen = None
+        for _n, traj, wp_idx, cand in feasible:
+            if self.collision.preflight(traj, scene, tree, self.base_frame)["ok"]:
+                chosen = (traj, wp_idx, cand)
+                break
+        if chosen is None:
+            handle.fail(error="no_collision_free_path")
+            return
+        traj, wp_idx, cand = chosen
+
+        # Record the actually-chosen goal for snapshot provenance.
+        res_wps[-1]["resolved_q"] = cand
+        res_wps[-1]["target"] = {**res_wps[-1]["target"], "q": cand}
+        snapshot = {
+            "t": now_ns(),
+            "goal_id": handle.goal_id,
+            "rid": self.rid,
+            "realm": self.realm,
+            "speed_scale": 1.0,
+            "versions": {"driver": self.driver_version},
+            **resolution,
+        }
+        self.session.put(
+            f"{keys.action_prefix(self.realm, self.rid)}/{handle.goal_id}/snapshot",
+            encode(snapshot),
+        )
+        _log.info(
+            "goal %s (loose): %d candidates, %d feasible, chosen %d samples, %.1fs",
+            handle.goal_id,
+            len(candidates),
+            len(feasible),
+            len(traj),
+            len(traj) * self.servo_dt,
+        )
+        self.backend.run_path(handle, traj, wp_idx, prefix_targets + [cand], snapshot)

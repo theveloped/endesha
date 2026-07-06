@@ -12,8 +12,16 @@ Rejection-reason taxonomy returned by the drivers' ``on_accept`` (this module
 plus the gate's own checks): ``bad_goal:``, ``empty_path``,
 ``unsupported_waypoint_type``, ``target_outside_limits``, ``frame_unknown:``,
 ``ik_failure:{i}``, ``collision:{a}|{b}`` (from the §5.10 collision preflight,
-see :mod:`wf.world_model.preflight`), ``no_joint_state``,
-``safety_stop_active``, ``mirroring``, ``busy``.
+see :mod:`wf.world_model.preflight`), ``unsupported_constraint`` (a ``free``
+loose-goal block on anything but the last waypoint), ``no_feasible_goal:{i}``
+(the gate found no reachable, collision-free sample of a loose goal),
+``no_joint_state``, ``safety_stop_active``, ``mirroring``, ``busy``.
+
+A ``free`` block on the LAST waypoint's pose target (see
+:class:`wf.contracts.arm.messages.Freedom`) leaves one goal DOF free/ranged.
+Such a waypoint is NOT resolved to a single ``q`` here: it is recorded as a
+``constrained`` resolution entry (nominal pose + freedom + IK seed) and the
+gate samples/prunes it after this returns.
 """
 
 from __future__ import annotations
@@ -21,7 +29,7 @@ from __future__ import annotations
 import numpy as np
 
 from wf.contracts.arm import keys
-from wf.contracts.arm.messages import ExecutePathGoal, Pose
+from wf.contracts.arm.messages import ExecutePathGoal, Freedom, Pose
 from wf.core.codec import decode
 from wf.core.frames import (
     invert_transform,
@@ -162,6 +170,38 @@ def resolve_goal(
             return "bad_goal: target must have exactly one of q|pose", None
 
         wp_wire = goal["waypoints"][i]
+
+        if "free" in wp.target:
+            # Loose end goal: one DOF free/ranged. Record it and defer the
+            # sample/prune/plan to the gate — no single q to resolve here.
+            if i != len(parsed.waypoints) - 1:
+                return "unsupported_constraint", None
+            if not has_pose:
+                return "bad_goal: free requires a pose target", None
+            try:
+                free = Freedom.from_wire(wp.target["free"])
+                pose = Pose.from_wire(wp.target["pose"])
+            except Exception as exc:
+                return f"bad_goal: {exc!r}", None
+            try:
+                tree.resolve(pose.frame, base_frame)
+            except FrameUnknown as e:
+                return f"frame_unknown:{e.frame}", None
+            if pose.frame != base_frame:
+                for name, node in (
+                    tree.chain(pose.frame) | tree.chain(base_frame)
+                ).items():
+                    frames_used[name] = node.to_wire()
+            resolved.append(
+                {
+                    "type": wp.type,
+                    "target": wp_wire["target"],
+                    "constrained": {"pose": pose.to_wire(), "free": free.to_wire()},
+                    "seed_q": list(seed),
+                }
+            )
+            continue
+
         if has_q:
             q = wp.target.get("q")
             if not isinstance(q, list) or len(q) != 6:

@@ -14,6 +14,8 @@ import yaml
 _PARAM_DEFAULTS = {
     "servo_cycle_s": 0.005,
     "joint_limit_margin_rad": 0.01,
+    # Max candidate poses a loose (free-DOF) goal may sample to (accept-time cap).
+    "max_goal_candidates": 256,
     # = make_demo_recording HOME_RAD, the demo recording's center pose.
     "home_q": [0.0, -0.5236, 2.0944, -0.6981, 1.5708, 0.0],
     "urdf": None,  # None -> aubo HAL's BUNDLED_URDF

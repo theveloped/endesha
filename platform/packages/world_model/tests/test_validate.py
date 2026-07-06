@@ -227,6 +227,63 @@ def test_tcp_composition_backs_off_flange(fk, limits, tree):
     )
 
 
+# ── loose end goal (free block) ──────────────────────────────────────────
+
+
+def _pose_at_home(fk):
+    T = fk.get_ee_transform(HOME_Q)
+    return {
+        "frame": "arm/r1/base",
+        "xyz": [float(v) for v in T[:3, 3]],
+        "quat": rotation_matrix_to_quaternion(T[:3, :3]),
+    }
+
+
+def test_free_on_last_waypoint_records_constrained(fk, limits, tree):
+    pose = _pose_at_home(fk)
+    goal = _goal(
+        [{"type": "movej", "target": {"pose": pose, "free": {"dof": "yaw"}}}]
+    )
+    reason, resolution = _resolve(goal, fk, limits, tree)
+    assert reason is None
+    entry = resolution["waypoints"][-1]
+    assert "constrained" in entry
+    assert "resolved_q" not in entry  # deferred to the gate
+    assert entry["constrained"]["free"]["dof"] == "yaw"
+    assert entry["seed_q"] == HOME_Q
+    assert "q" not in goal["waypoints"][0]["target"]  # no q injected
+
+
+def test_free_on_non_last_waypoint_rejected(fk, limits, tree):
+    pose = _pose_at_home(fk)
+    goal = _goal(
+        [
+            {"type": "movej", "target": {"pose": pose, "free": {"dof": "yaw"}}},
+            {"type": "movej", "target": {"q": HOME_Q}},
+        ]
+    )
+    reason, _ = _resolve(goal, fk, limits, tree)
+    assert reason == "unsupported_constraint"
+
+
+def test_free_requires_pose_not_q(fk, limits, tree):
+    goal = _goal(
+        [{"type": "movej", "target": {"q": HOME_Q, "free": {"dof": "yaw"}}}]
+    )
+    reason, _ = _resolve(goal, fk, limits, tree)
+    # q+pose mutual-exclusion fires first; either way it's a bad_goal.
+    assert reason.startswith("bad_goal")
+
+
+def test_free_malformed_is_bad_goal(fk, limits, tree):
+    pose = _pose_at_home(fk)
+    goal = _goal(
+        [{"type": "movej", "target": {"pose": pose, "free": {"dof": "spin"}}}]
+    )
+    reason, _ = _resolve(goal, fk, limits, tree)
+    assert reason.startswith("bad_goal")
+
+
 def test_multi_waypoint_seed_chains(fk, limits, tree):
     """Waypoint 1 (pose) seeds from waypoint 0's given q."""
     q0 = [v + 0.2 for v in HOME_Q]

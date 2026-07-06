@@ -11,6 +11,8 @@ _PARAM_DEFAULTS = {
     "rtde_port": 30010,
     "servo_cycle_s": 0.005,
     "joint_limit_margin_rad": 0.01,
+    # Max candidate poses a loose (free-DOF) goal may sample to (accept-time cap).
+    "max_goal_candidates": 256,
 }
 
 _RUCKIG_DEFAULTS = {
