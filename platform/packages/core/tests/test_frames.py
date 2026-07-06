@@ -12,6 +12,7 @@ from wf.core.frames import (
     rotation_matrix_to_quaternion,
     rotation_matrix_to_rotvec,
     rpy_to_matrix,
+    slerp,
 )
 
 
@@ -31,6 +32,26 @@ def test_quat_matrix_roundtrip(quat):
     q_out = np.asarray(out)
     # q and -q encode the same rotation.
     assert min(np.linalg.norm(q_out - q_in), np.linalg.norm(q_out + q_in)) < 1e-9
+
+
+def test_slerp_endpoints_and_midpoint():
+    q0 = [0.0, 0.0, 0.0, 1.0]
+    q1 = rotation_matrix_to_quaternion(rpy_to_matrix([0, 0, math.pi / 2]))
+    assert np.allclose(slerp(q0, q1, 0.0), q0, atol=1e-9)
+    assert np.allclose(np.abs(slerp(q0, q1, 1.0)), np.abs(q1), atol=1e-9)
+    # Midpoint is a 45 deg yaw.
+    mid = quaternion_to_rotation_matrix(slerp(q0, q1, 0.5))
+    ang = np.linalg.norm(rotation_matrix_to_rotvec(mid))
+    assert ang == pytest.approx(math.pi / 4, abs=1e-6)
+
+
+def test_slerp_takes_shortest_path():
+    # q1 = -q0 numerically distant but same rotation; slerp must not spin 360.
+    q0 = rotation_matrix_to_quaternion(rpy_to_matrix([0, 0, 0.1]))
+    q1 = [-v for v in q0]
+    mid = quaternion_to_rotation_matrix(slerp(q0, q1, 0.5))
+    ref = quaternion_to_rotation_matrix(q0)
+    assert np.linalg.norm(rotation_matrix_to_rotvec(mid @ ref.T)) < 1e-6
 
 
 def test_quaternion_wrong_length_raises():

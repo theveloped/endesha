@@ -316,10 +316,12 @@ class Waypoint:
 
     - ``{"q": [6 floats]}`` — joint-space target (any waypoint type).
     - ``{"pose": {frame, xyz, quat}}`` — frame-referenced Cartesian target
-      for the ACTIVE TCP; allowed on ``type: "movej"`` only (IK + joint
-      interpolation). Resolved against the static frame tree at goal
-      acceptance: the driver injects the solved ``q`` into the target and
-      records the resolution in the execution snapshot.
+      for the ACTIVE TCP. On ``type: "movej"`` the goal is reached by IK +
+      joint interpolation; on ``type: "movel"`` the TCP travels a straight
+      Cartesian line (position lerp + orientation slerp) to it. Resolved
+      against the static frame tree at goal acceptance: the driver injects
+      the solved endpoint ``q`` into the target and records the resolution in
+      the execution snapshot.
 
     A pose target on the LAST waypoint of a ``movej`` may additionally carry a
     ``free`` block (see :class:`Freedom`): ``{"pose": ..., "free": {...}}``.
@@ -327,8 +329,7 @@ class Waypoint:
     prunes by IK + collision, and executes the fastest collision-free option
     rather than a single pinned pose.
 
-    ``speed``/``accel`` are accepted and recorded but unused — per-waypoint
-    profiles arrive with movel.
+    ``speed``/``accel`` are accepted and recorded but currently unused.
     """
 
     type: str

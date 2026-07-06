@@ -39,11 +39,19 @@ from wf.contracts.arm.messages import (
 )
 from wf.core.action import ActionServer, GoalHandle
 from wf.core.codec import decode, encode
-from wf.core.frames import rotation_matrix_to_quaternion
+from wf.core.frames import (
+    make_transform,
+    quaternion_to_rotation_matrix,
+    rotation_matrix_to_quaternion,
+)
 from wf.core.frametree import FrameUnknown
 from wf.core.lease import ControlLease
 from wf.core.log import get_logger
 from wf.core.time import now_ns
+from wf.world_model.cartesian import (
+    CartesianTrajectoryError,
+    generate_cartesian_trajectory,
+)
 from wf.world_model.collision import CollisionModel
 from wf.world_model.fk import UrdfFk
 from wf.world_model.goal_sampling import candidate_qs, expand_freedom
@@ -589,6 +597,9 @@ class ArmCore:
         if res_wps and "constrained" in res_wps[-1]:
             self._execute_loose_path(handle, resolution)
             return
+        if any(wp.get("type") == "movel" for wp in res_wps):
+            self._execute_segmented_path(handle, resolution)
+            return
         snapshot = {
             "t": now_ns(),
             "goal_id": handle.goal_id,
@@ -716,3 +727,108 @@ class ArmCore:
             len(traj) * self.servo_dt,
         )
         self.backend.run_path(handle, traj, wp_idx, prefix_targets + [cand], snapshot)
+
+    def _execute_segmented_path(self, handle: GoalHandle, resolution: dict) -> None:
+        """Execute a path containing ``movel`` (Cartesian) segments.
+
+        Each waypoint is planned as its own segment from the running joint state
+        (movej -> joint Ruckig, movel -> straight-line Cartesian) and the
+        segments are concatenated, stopping at each boundary. The full joint
+        trajectory is joint-limit- and (densely) collision-checked before it
+        runs. All-movej paths never reach here (they keep the single-Ruckig
+        fast path).
+        """
+        start_q = self.backend.latest_q()
+        if start_q is None:
+            handle.fail(error="no_joint_state")
+            return
+        res_wps = resolution["waypoints"]
+        ruckig = self.params["ruckig_defaults"]
+        cart_limits = self.params.get("cartesian_defaults") or {}
+        margin = self.params["joint_limit_margin_rad"]
+        with self._tcp_lock:
+            _tcp_name, tcp_T = self._active_tcp
+
+        running_q = list(start_q)
+        traj: list[list[float]] = []
+        wp_idx: list[int] = []
+        targets: list[list[float]] = []
+        for entry in res_wps:
+            if entry["type"] == "movel":
+                T_start_tcp = self.fk.get_ee_transform(running_q) @ tcp_T
+                g = entry["cartesian"]["goal_tcp"]
+                T_goal_tcp = make_transform(
+                    quaternion_to_rotation_matrix(g["quat"]), g["xyz"]
+                )
+                try:
+                    seg, _ = generate_cartesian_trajectory(
+                        T_start_tcp, T_goal_tcp, self.servo_dt,
+                        fk=self.fk, q_seed=running_q, jmin=self.jmin,
+                        jmax=self.jmax, tcp_T=tcp_T, cart_limits=cart_limits,
+                        vmax_joint=ruckig["vmax"],
+                        manip_floor=self.params.get("manipulability_floor", 0.02),
+                        branch_tol=self.params.get("branch_jump_tol_rad", 0.8),
+                        margin=margin,
+                    )
+                except CartesianTrajectoryError as exc:
+                    handle.fail(error=f"movel:{exc}")
+                    return
+            else:  # movej
+                target = list(entry["resolved_q"])
+                if joints_close(running_q, target):
+                    seg = []
+                else:
+                    try:
+                        seg, _ = generate_ruckig_trajectory(
+                            [running_q, target], self.servo_dt,
+                            vmax=ruckig["vmax"], amax=ruckig["amax"],
+                            jmax=ruckig["jmax"],
+                        )
+                    except TrajectoryError as exc:
+                        handle.fail(error=str(exc))
+                        return
+            traj.extend(seg)
+            if seg:
+                running_q = list(seg[-1])
+            targets.append(list(running_q))
+            wp_idx.append(len(traj))
+
+        snapshot = {
+            "t": now_ns(),
+            "goal_id": handle.goal_id,
+            "rid": self.rid,
+            "realm": self.realm,
+            "speed_scale": 1.0,
+            "versions": {"driver": self.driver_version},
+            **resolution,
+        }
+        self.session.put(
+            f"{keys.action_prefix(self.realm, self.rid)}/{handle.goal_id}/snapshot",
+            encode(snapshot),
+        )
+        if not traj:  # already at every waypoint
+            handle.feedback(1.0, current_wp=len(targets))
+            handle.succeed(snapshot=snapshot)
+            return
+        violation = validate_trajectory(traj, self.jmin, self.jmax, margin=margin)
+        if violation:
+            handle.fail(error=violation)
+            return
+        # Dense collision-check the whole joint trajectory: a straight Cartesian
+        # segment can graze an obstacle mid-travel even with clear endpoints.
+        result = self.collision.preflight(
+            traj, self._live_scene.snapshot(),
+            self._live_frames.snapshot(), self.base_frame,
+        )
+        if not result["ok"]:
+            a, b = result["first_violation"]["pair"]
+            handle.fail(error=f"collision:{a}|{b}")
+            return
+        _log.info(
+            "goal %s (segmented): %d samples, %.1fs, %d waypoint(s)",
+            handle.goal_id,
+            len(traj),
+            len(traj) * self.servo_dt,
+            len(targets),
+        )
+        self.backend.run_path(handle, traj, wp_idx, targets, snapshot)

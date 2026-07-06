@@ -113,7 +113,13 @@ def _core(fk, collision, scene=None):
     core.params = {
         "joint_limit_margin_rad": 0.01,
         "max_goal_candidates": 256,
+        "manipulability_floor": 0.02,
+        "branch_jump_tol_rad": 0.8,
         "ruckig_defaults": {"vmax": [1.5] * 6, "amax": [3.0] * 6, "jmax": [20.0] * 6},
+        "cartesian_defaults": {
+            "vmax_lin": 0.25, "amax_lin": 1.0, "jmax_lin": 5.0,
+            "vmax_ang": 1.0, "amax_ang": 4.0, "jmax_ang": 20.0,
+        },
     }
     return core
 
@@ -180,3 +186,46 @@ def test_loose_goal_all_finals_blocked_is_no_feasible_goal(fk, collision):
 
     reason = core._accept_execute_path(goal)
     assert reason == "no_feasible_goal:0"
+
+
+# ── movel (Cartesian) integration ────────────────────────────────────────
+
+
+def _movel_goal(fk, dx=0.08):
+    from wf.core.frames import rotation_matrix_to_quaternion
+
+    T = fk.get_ee_transform(HOME_Q)
+    pose = {
+        "frame": BASE,
+        "xyz": [float(T[0, 3] + dx), float(T[1, 3]), float(T[2, 3])],
+        "quat": rotation_matrix_to_quaternion(T[:3, :3]),
+    }
+    return {
+        "client_id": "c1",
+        "waypoints": [{"type": "movel", "target": {"pose": pose}}],
+    }
+
+
+def test_movel_accepts_and_executes_straight_line(fk, collision):
+    core = _core(fk, collision)
+    goal = _movel_goal(fk)
+
+    reason = core._accept_execute_path(goal)
+    assert reason is None
+    assert goal["_resolution"]["waypoints"][0]["type"] == "movel"
+
+    handle = _FakeHandle(goal)
+    core._execute_path(handle)
+    assert handle.failed is None
+    ran = core.backend.ran
+    assert ran is not None and len(ran["traj"]) > 0
+    # The executed TCP endpoint sits on a straight line +8 cm along base-x.
+    p_start = fk.get_ee_transform(HOME_Q)[:3, 3]
+    p_end = fk.get_ee_transform(ran["traj"][-1])[:3, 3]
+    assert p_end[0] == pytest.approx(p_start[0] + 0.08, abs=2e-3)
+    assert p_end[1] == pytest.approx(p_start[1], abs=2e-3)
+    assert p_end[2] == pytest.approx(p_start[2], abs=2e-3)
+    # Midpoint stays on the line (Cartesian-straight, not joint-straight).
+    p_mid = fk.get_ee_transform(ran["traj"][len(ran["traj"]) // 2])[:3, 3]
+    assert p_mid[1] == pytest.approx(p_start[1], abs=1e-3)
+    assert p_mid[2] == pytest.approx(p_start[2], abs=1e-3)

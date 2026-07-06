@@ -110,6 +110,34 @@ def transform_to_xyz_quat(T) -> tuple[list[float], list[float]]:
     return xyz, quat
 
 
+def slerp(q0, q1, s: float) -> list[float]:
+    """Spherical linear interpolation between quaternions ``[qx,qy,qz,qw]``.
+
+    Returns the unit quaternion ``s`` of the way (``s in [0,1]``) from ``q0`` to
+    ``q1`` along the shortest geodesic (the nearer of ``q1``/``-q1`` is used, so
+    ``q`` and ``-q`` — the same rotation — never take the long way round). Falls
+    back to normalised linear interpolation for nearly-parallel inputs.
+    """
+    a = np.asarray(q0, dtype=np.float64)
+    b = np.asarray(q1, dtype=np.float64)
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
+    dot = float(np.dot(a, b))
+    if dot < 0.0:  # shortest path: q and -q are the same rotation
+        b = -b
+        dot = -dot
+    if dot > 0.9995:  # nearly parallel — lerp + renormalise
+        out = a + s * (b - a)
+        return [float(v) for v in out / np.linalg.norm(out)]
+    theta0 = math.acos(dot)
+    theta = theta0 * s
+    sin0 = math.sin(theta0)
+    w0 = math.sin(theta0 - theta) / sin0
+    w1 = math.sin(theta) / sin0
+    out = w0 * a + w1 * b
+    return [float(v) for v in out / np.linalg.norm(out)]
+
+
 def rpy_to_matrix(rpy) -> np.ndarray:
     """Convert roll-pitch-yaw (extrinsic XYZ) to a 3x3 rotation matrix.
 

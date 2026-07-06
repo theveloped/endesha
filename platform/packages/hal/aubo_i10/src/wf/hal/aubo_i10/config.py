@@ -13,12 +13,21 @@ _PARAM_DEFAULTS = {
     "joint_limit_margin_rad": 0.01,
     # Max candidate poses a loose (free-DOF) goal may sample to (accept-time cap).
     "max_goal_candidates": 256,
+    # movel singularity / branch guards (see wf.world_model.cartesian).
+    "manipulability_floor": 0.02,
+    "branch_jump_tol_rad": 0.8,
 }
 
 _RUCKIG_DEFAULTS = {
     "vmax": [1.5] * 6,
     "amax": [3.0] * 6,
     "jmax": [20.0] * 6,
+}
+
+# Cartesian (movel) limits: linear m/s.. and angular rad/s.. (SI).
+_CARTESIAN_DEFAULTS = {
+    "vmax_lin": 0.25, "amax_lin": 1.0, "jmax_lin": 5.0,
+    "vmax_ang": 1.0, "amax_ang": 4.0, "jmax_ang": 20.0,
 }
 
 
@@ -49,4 +58,8 @@ def load_resource(cell_yaml_path: str, resource_id: str) -> dict:
     for key, default in _RUCKIG_DEFAULTS.items():
         ruckig.setdefault(key, list(default))
     params["ruckig_defaults"] = ruckig
+    cartesian = dict(params.get("cartesian_defaults") or {})
+    for key, default in _CARTESIAN_DEFAULTS.items():
+        cartesian.setdefault(key, default)
+    params["cartesian_defaults"] = cartesian
     return params

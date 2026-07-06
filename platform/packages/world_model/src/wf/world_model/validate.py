@@ -22,6 +22,12 @@ A ``free`` block on the LAST waypoint's pose target (see
 Such a waypoint is NOT resolved to a single ``q`` here: it is recorded as a
 ``constrained`` resolution entry (nominal pose + freedom + IK seed) and the
 gate samples/prunes it after this returns.
+
+A ``movel`` waypoint (pose target only) resolves the same way as a movej pose
+target — the endpoint IK gives seed continuity and reachability — but also
+records the goal TCP pose in the base frame under ``cartesian`` so execute can
+drive a straight Cartesian line to it. The straight-line path itself (and its
+singularity / branch guards) is built at execute time.
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ from wf.core.frames import (
     invert_transform,
     make_transform,
     quaternion_to_rotation_matrix,
+    transform_to_xyz_quat,
 )
 from wf.core.frametree import FrameDef, FrameTree, FrameUnknown
 from wf.core.scene import SceneObject
@@ -162,18 +169,24 @@ def resolve_goal(
     frames_used: dict[str, dict] = {}
 
     for i, wp in enumerate(parsed.waypoints):
-        if wp.type != "movej":
+        if wp.type not in ("movej", "movel"):
             return "unsupported_waypoint_type", None
+        is_movel = wp.type == "movel"
         has_q = "q" in wp.target
         has_pose = "pose" in wp.target
         if has_q == has_pose:
             return "bad_goal: target must have exactly one of q|pose", None
+        if is_movel and not has_pose:
+            return "bad_goal: movel requires a pose target", None
 
         wp_wire = goal["waypoints"][i]
 
         if "free" in wp.target:
             # Loose end goal: one DOF free/ranged. Record it and defer the
             # sample/prune/plan to the gate — no single q to resolve here.
+            # movel + free (path-loose redundancy) is a later phase.
+            if is_movel:
+                return "unsupported_constraint", None
             if i != len(parsed.waypoints) - 1:
                 return "unsupported_constraint", None
             if not has_pose:
@@ -236,11 +249,18 @@ def resolve_goal(
             if not _q_within_limits(q, jmin, jmax, margin):
                 return "target_outside_limits", None
             wp_wire["target"]["q"] = q
+            if is_movel:
+                # Record the goal TCP pose in the BASE frame so execute drives a
+                # straight Cartesian line to it without re-resolving frames. The
+                # endpoint q above (seed continuity + reachability) is kept too.
+                g_xyz, g_quat = transform_to_xyz_quat(T_base_tcp_target)
+                cartesian_goal = {"goal_tcp": {"xyz": g_xyz, "quat": g_quat}}
 
         seed = q
-        resolved.append(
-            {"type": wp.type, "target": wp_wire["target"], "resolved_q": q}
-        )
+        entry = {"type": wp.type, "target": wp_wire["target"], "resolved_q": q}
+        if is_movel:
+            entry["cartesian"] = cartesian_goal
+        resolved.append(entry)
 
     resolution = {
         "waypoints": resolved,
