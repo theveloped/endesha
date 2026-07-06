@@ -16,6 +16,10 @@ _PARAM_DEFAULTS = {
     # movel singularity / branch guards (see wf.world_model.cartesian).
     "manipulability_floor": 0.02,
     "branch_jump_tol_rad": 0.8,
+    # Path-loose (movel + free) discretisation + knot blend (wf.world_model.redundancy).
+    "cart_path_step_m": 0.02,
+    "cart_path_step_rad": 0.1,
+    "cart_blend_mm": 5.0,
 }
 
 _RUCKIG_DEFAULTS = {

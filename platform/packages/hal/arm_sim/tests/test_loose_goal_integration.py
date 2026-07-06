@@ -229,3 +229,53 @@ def test_movel_accepts_and_executes_straight_line(fk, collision):
     p_mid = fk.get_ee_transform(ran["traj"][len(ran["traj"]) // 2])[:3, 3]
     assert p_mid[1] == pytest.approx(p_start[1], abs=1e-3)
     assert p_mid[2] == pytest.approx(p_start[2], abs=1e-3)
+
+
+# ── movel + free (path-loose) integration ────────────────────────────────
+
+
+def _path_loose_goal(fk, dx=0.06):
+    from wf.core.frames import rotation_matrix_to_quaternion
+
+    T = fk.get_ee_transform(HOME_Q)
+    pose = {
+        "frame": BASE,
+        "xyz": [float(T[0, 3] + dx), float(T[1, 3]), float(T[2, 3])],
+        "quat": rotation_matrix_to_quaternion(T[:3, :3]),
+    }
+    return {
+        "client_id": "c1",
+        "waypoints": [
+            {"type": "movel", "target": {"pose": pose, "free": {"dof": "yaw"}}}
+        ],
+    }
+
+
+def test_path_loose_accepts_and_executes(fk, collision):
+    core = _core(fk, collision)
+    goal = _path_loose_goal(fk)
+
+    reason = core._accept_execute_path(goal)
+    assert reason is None
+    assert "path_loose" in goal["_resolution"]["waypoints"][-1]
+
+    handle = _FakeHandle(goal)
+    core._execute_path(handle)
+    assert handle.failed is None
+    ran = core.backend.ran
+    assert ran is not None and len(ran["traj"]) > 0
+    # TCP reaches the goal position (yaw free along the path).
+    p_start = fk.get_ee_transform(HOME_Q)[:3, 3]
+    p_end = fk.get_ee_transform(ran["traj"][-1])[:3, 3]
+    assert np.linalg.norm(p_end - (p_start + np.array([0.06, 0, 0]))) < 5e-3
+    # The realised joint path never flips branch (bounded step between samples).
+    for a, b in zip(ran["traj"], ran["traj"][1:]):
+        assert max(abs(x - y) for x, y in zip(a, b)) < 0.8
+
+
+def test_path_loose_unreachable_is_no_feasible_goal(fk, collision):
+    core = _core(fk, collision)
+    goal = _path_loose_goal(fk)
+    goal["waypoints"][0]["target"]["pose"]["xyz"] = [5.0, 0.0, 0.0]
+    reason = core._accept_execute_path(goal)
+    assert reason == "no_feasible_goal:0"

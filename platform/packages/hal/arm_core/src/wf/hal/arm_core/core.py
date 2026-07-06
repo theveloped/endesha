@@ -55,6 +55,7 @@ from wf.world_model.cartesian import (
 from wf.world_model.collision import CollisionModel
 from wf.world_model.fk import UrdfFk
 from wf.world_model.goal_sampling import candidate_qs, expand_freedom
+from wf.world_model.redundancy import RedundancyError, resolve_redundant_path
 from wf.world_model.frames_live import build_live_tree
 from wf.world_model.jog import jog_joint_velocity
 from wf.world_model.preflight import preflight
@@ -540,10 +541,14 @@ class ArmCore:
         if reason:
             return reason
         last = resolution["waypoints"][-1]
+        last_idx = len(resolution["waypoints"]) - 1
         if "constrained" in last:
-            reason = self._prune_loose_goal(
-                last, len(resolution["waypoints"]) - 1, tcp_T, tree
-            )
+            reason = self._prune_loose_goal(last, last_idx, tcp_T, tree)
+            if reason:
+                return reason
+        elif "path_loose" in last:
+            # Cheap endpoint-feasibility gate; the full path DP runs at execute.
+            reason = self._prune_path_loose_goal(last, last_idx, tcp_T, tree)
             if reason:
                 return reason
         # Preflight collision-checks the fixed (resolved_q) prefix; loose-goal
@@ -586,6 +591,40 @@ class ArmCore:
         if not cands:
             return f"no_feasible_goal:{index}"
         entry["candidates"] = cands
+        return None
+
+    def _prune_path_loose_goal(
+        self, entry: dict, index: int, tcp_T, tree
+    ) -> str | None:
+        """Cheap endpoint-feasibility gate for a path-loose (movel + free) goal.
+
+        Confirms at least one free-DOF sample of the GOAL pose is reachable and
+        collision-free; the full on-branch path DP runs at execute. Returns a
+        rejection reason, or None.
+        """
+        pose = Pose.from_wire(entry["path_loose"]["pose"])
+        free = Freedom.from_wire(entry["path_loose"]["free"])
+        try:
+            poses = expand_freedom(
+                pose, free, max_candidates=self.params.get("max_goal_candidates", 256)
+            )
+        except ValueError as exc:
+            return f"bad_goal: {exc}"
+        cands = candidate_qs(
+            poses,
+            fk=self.fk,
+            q_seed=entry["seed_q"],
+            jmin=self.jmin,
+            jmax=self.jmax,
+            margin=self.params["joint_limit_margin_rad"],
+            tree=tree,
+            base_frame=self.base_frame,
+            tcp_T=tcp_T,
+            collision=self.collision,
+            scene=self._live_scene.snapshot(),
+        )
+        if not cands:
+            return f"no_feasible_goal:{index}"
         return None
 
     def _execute_path(self, handle: GoalHandle) -> None:
@@ -748,13 +787,21 @@ class ArmCore:
         margin = self.params["joint_limit_margin_rad"]
         with self._tcp_lock:
             _tcp_name, tcp_T = self._active_tcp
+        tree = self._live_frames.snapshot()
+        scene = self._live_scene.snapshot()
 
         running_q = list(start_q)
         traj: list[list[float]] = []
         wp_idx: list[int] = []
         targets: list[list[float]] = []
         for entry in res_wps:
-            if entry["type"] == "movel":
+            if entry.get("path_loose"):
+                seg = self._plan_path_loose_segment(
+                    handle, entry, running_q, tcp_T, tree, scene
+                )
+                if seg is None:
+                    return  # handle already failed with the reason
+            elif entry["type"] == "movel":
                 T_start_tcp = self.fk.get_ee_transform(running_q) @ tcp_T
                 g = entry["cartesian"]["goal_tcp"]
                 T_goal_tcp = make_transform(
@@ -816,10 +863,7 @@ class ArmCore:
             return
         # Dense collision-check the whole joint trajectory: a straight Cartesian
         # segment can graze an obstacle mid-travel even with clear endpoints.
-        result = self.collision.preflight(
-            traj, self._live_scene.snapshot(),
-            self._live_frames.snapshot(), self.base_frame,
-        )
+        result = self.collision.preflight(traj, scene, tree, self.base_frame)
         if not result["ok"]:
             a, b = result["first_violation"]["pair"]
             handle.fail(error=f"collision:{a}|{b}")
@@ -832,3 +876,50 @@ class ArmCore:
             len(targets),
         )
         self.backend.run_path(handle, traj, wp_idx, targets, snapshot)
+
+    def _plan_path_loose_segment(
+        self, handle: GoalHandle, entry: dict, running_q, tcp_T, tree, scene
+    ) -> list[list[float]] | None:
+        """Resolve + time-scale one path-loose (movel + free) segment.
+
+        Runs the redundancy lattice DP to get an on-branch ``q(s)`` corridor,
+        then blends a Ruckig trajectory through the joint knots. Returns the
+        joint samples, or None after failing the handle (redundancy / trajectory
+        error) so the caller can bail out.
+        """
+        pl = entry["path_loose"]
+        T_start_tcp = self.fk.get_ee_transform(running_q) @ tcp_T
+        g = pl["goal_tcp"]
+        T_goal_tcp = make_transform(
+            quaternion_to_rotation_matrix(g["quat"]), g["xyz"]
+        )
+        free = Freedom.from_wire(pl["free"])
+        try:
+            knots = resolve_redundant_path(
+                T_start_tcp, T_goal_tcp, free,
+                fk=self.fk, q_start=list(running_q), jmin=self.jmin,
+                jmax=self.jmax, tcp_T=tcp_T, collision=self.collision,
+                scene=scene, tree=tree, base_frame=self.base_frame,
+                manip_floor=self.params.get("manipulability_floor", 0.02),
+                branch_tol=self.params.get("branch_jump_tol_rad", 0.8),
+                margin=self.params["joint_limit_margin_rad"],
+                step_m=self.params.get("cart_path_step_m", 0.02),
+                step_rad=self.params.get("cart_path_step_rad", 0.1),
+                max_candidates=self.params.get("max_goal_candidates", 256),
+            )
+        except RedundancyError as exc:
+            handle.fail(error=f"path_loose:{exc}")
+            return None
+        if len(knots) < 2:
+            return []
+        ruckig = self.params["ruckig_defaults"]
+        try:
+            seg, _ = generate_ruckig_trajectory(
+                knots, self.servo_dt, vmax=ruckig["vmax"], amax=ruckig["amax"],
+                jmax=ruckig["jmax"],
+                corner_tolerance_mm=self.params.get("cart_blend_mm", 5.0),
+            )
+        except TrajectoryError as exc:
+            handle.fail(error=str(exc))
+            return None
+        return seg

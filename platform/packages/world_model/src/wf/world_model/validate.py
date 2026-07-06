@@ -28,6 +28,13 @@ target — the endpoint IK gives seed continuity and reachability — but also
 records the goal TCP pose in the base frame under ``cartesian`` so execute can
 drive a straight Cartesian line to it. The straight-line path itself (and its
 singularity / branch guards) is built at execute time.
+
+A ``movel`` + ``free`` block is a PATH-LOOSE move: one DOF is free along the
+whole straight-line path (functional redundancy). It is recorded under
+``path_loose`` (goal pose + freedom + goal TCP pose + IK seed); the gate does a
+cheap endpoint-feasibility prune (``no_feasible_goal``) and execute runs the
+redundancy lattice DP (which may fail with ``path_loose:...`` when no on-branch,
+singularity-free corridor exists).
 """
 
 from __future__ import annotations
@@ -182,11 +189,9 @@ def resolve_goal(
         wp_wire = goal["waypoints"][i]
 
         if "free" in wp.target:
-            # Loose end goal: one DOF free/ranged. Record it and defer the
-            # sample/prune/plan to the gate — no single q to resolve here.
-            # movel + free (path-loose redundancy) is a later phase.
-            if is_movel:
-                return "unsupported_constraint", None
+            # One DOF free/ranged. Recorded (not resolved to a single q) and
+            # deferred: movej -> loose END goal (gate samples/prunes/plans);
+            # movel -> path-loose redundancy (execute runs the lattice DP).
             if i != len(parsed.waypoints) - 1:
                 return "unsupported_constraint", None
             if not has_pose:
@@ -197,7 +202,7 @@ def resolve_goal(
             except Exception as exc:
                 return f"bad_goal: {exc!r}", None
             try:
-                tree.resolve(pose.frame, base_frame)
+                T_base_frame = tree.resolve(pose.frame, base_frame)
             except FrameUnknown as e:
                 return f"frame_unknown:{e.frame}", None
             if pose.frame != base_frame:
@@ -205,14 +210,35 @@ def resolve_goal(
                     tree.chain(pose.frame) | tree.chain(base_frame)
                 ).items():
                     frames_used[name] = node.to_wire()
-            resolved.append(
-                {
-                    "type": wp.type,
-                    "target": wp_wire["target"],
-                    "constrained": {"pose": pose.to_wire(), "free": free.to_wire()},
-                    "seed_q": list(seed),
-                }
-            )
+            if is_movel:
+                T_base_tcp_target = T_base_frame @ make_transform(
+                    quaternion_to_rotation_matrix(pose.quat), pose.xyz
+                )
+                g_xyz, g_quat = transform_to_xyz_quat(T_base_tcp_target)
+                resolved.append(
+                    {
+                        "type": "movel",
+                        "target": wp_wire["target"],
+                        "path_loose": {
+                            "pose": pose.to_wire(),
+                            "free": free.to_wire(),
+                            "goal_tcp": {"xyz": g_xyz, "quat": g_quat},
+                        },
+                        "seed_q": list(seed),
+                    }
+                )
+            else:
+                resolved.append(
+                    {
+                        "type": "movej",
+                        "target": wp_wire["target"],
+                        "constrained": {
+                            "pose": pose.to_wire(),
+                            "free": free.to_wire(),
+                        },
+                        "seed_q": list(seed),
+                    }
+                )
             continue
 
         if has_q:
