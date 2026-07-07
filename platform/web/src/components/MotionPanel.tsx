@@ -31,8 +31,10 @@ import {
 } from "../lib/config";
 import { rpyDegToQuat } from "../lib/geometry";
 import type {
+  Freedom,
   GoalResult,
   JointState,
+  Pose,
   PoseDef,
   TcpDef,
   Waypoint,
@@ -43,6 +45,11 @@ const RAD_TO_DEG = 180 / Math.PI;
 const HOME_DEG = [0, -30, 120, -40, 90, 0];
 const BASE_FRAME = "arm/r1/base";
 const TCP_FLANGE = "flange";
+
+type FreeDof = Freedom["dof"];
+const FREE_DOFS: FreeDof[] = ["x", "y", "z", "roll", "pitch", "yaw"];
+const isRotationDof = (d: FreeDof) => d === "roll" || d === "pitch" || d === "yaw";
+type MoveType = "movej" | "movel";
 
 interface ActiveGoal {
   goalId: string;
@@ -95,6 +102,18 @@ export default function MotionPanel({
   const [frame, setFrame] = useState(BASE_FRAME);
   const [xyz, setXyz] = useState<string[]>(["0", "0", "0"]);
   const [rpy, setRpy] = useState<string[]>(["180", "0", "0"]);
+
+  // Move type (pose mode only): movej = joint-interpolated, movel = straight
+  // Cartesian line. A free DOF makes movej a loose end goal and movel a
+  // path-loose move (one DOF resolved along the whole path).
+  const [moveType, setMoveType] = useState<MoveType>("movej");
+  const [freeOn, setFreeOn] = useState(false);
+  const [freeDof, setFreeDof] = useState<FreeDof>("yaw");
+  const [freeFrame, setFreeFrame] = useState<"reference" | "tool">("reference");
+  const [freeFull, setFreeFull] = useState(true); // rotation: full circle vs ranged
+  const [freeMin, setFreeMin] = useState("-90");
+  const [freeMax, setFreeMax] = useState("90");
+  const [freeStep, setFreeStep] = useState("5");
 
   const [poses, setPoses] = useState<StoredPose[]>([]);
   const [poseName, setPoseName] = useState("");
@@ -211,6 +230,45 @@ export default function MotionPanel({
     }
   };
 
+  const onFreeDof = (d: FreeDof) => {
+    setFreeDof(d);
+    // Keep bounds/step in the DOF's units (deg vs m); reset when crossing types.
+    if (isRotationDof(d)) {
+      if (Math.abs(Number(freeStep)) < 1) {
+        setFreeMin("-90");
+        setFreeMax("90");
+        setFreeStep("5");
+      }
+    } else {
+      setFreeFull(false); // a fully-free translation is not a valid goal
+      if (Math.abs(Number(freeMin)) >= 1 || Math.abs(Number(freeMax)) >= 1) {
+        setFreeMin("-0.05");
+        setFreeMax("0.05");
+        setFreeStep("0.01");
+      }
+    }
+  };
+
+  const buildFreedom = (): Freedom | null => {
+    const rot = isRotationDof(freeDof);
+    const scale = rot ? DEG_TO_RAD : 1;
+    const step = Number(freeStep) * scale;
+    if (!(step > 0)) {
+      setError("free step must be > 0");
+      return null;
+    }
+    if (rot && freeFull) {
+      return { dof: freeDof, frame: freeFrame, step };
+    }
+    const min = Number(freeMin) * scale;
+    const max = Number(freeMax) * scale;
+    if (Number.isNaN(min) || Number.isNaN(max) || min >= max) {
+      setError("free range needs min < max");
+      return null;
+    }
+    return { dof: freeDof, frame: freeFrame, min, max, step };
+  };
+
   const buildWaypoint = (): Waypoint | null => {
     if (mode === "joints") {
       const q = degs.map((d) => Number(d) * DEG_TO_RAD);
@@ -226,15 +284,15 @@ export default function MotionPanel({
       setError("invalid pose value");
       return null;
     }
-    return {
-      type: "movej",
-      target: {
-        pose: { frame, xyz: p, quat: rpyDegToQuat(r[0], r[1], r[2]) },
-      },
-      speed: null,
-      accel: null,
-      blend_radius: 0,
+    const target: { pose: Pose; free?: Freedom } = {
+      pose: { frame, xyz: p, quat: rpyDegToQuat(r[0], r[1], r[2]) },
     };
+    if (freeOn) {
+      const free = buildFreedom();
+      if (free === null) return null;
+      target.free = free;
+    }
+    return { type: moveType, target, speed: null, accel: null, blend_radius: 0 };
   };
 
   const move = async () => {
@@ -454,6 +512,124 @@ export default function MotionPanel({
                 </label>
               ))}
             </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">move</span>
+              <Button
+                variant={moveType === "movej" ? "secondary" : "outline"}
+                size="sm"
+                onClick={() => setMoveType("movej")}
+                title="joint-interpolated move"
+              >
+                movej
+              </Button>
+              <Button
+                variant={moveType === "movel" ? "secondary" : "outline"}
+                size="sm"
+                onClick={() => setMoveType("movel")}
+                title="straight-line Cartesian move"
+              >
+                movel
+              </Button>
+            </div>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={freeOn}
+                onChange={(e) => setFreeOn(e.target.checked)}
+              />
+              free DOF
+              {freeOn && (
+                <span className="text-muted-foreground/70">
+                  ({moveType === "movej" ? "loose end goal" : "path-loose"})
+                </span>
+              )}
+            </label>
+            {freeOn && (
+              <div className="space-y-1.5 rounded-md border p-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Select
+                    value={freeDof}
+                    onValueChange={(v) => onFreeDof(v as FreeDof)}
+                  >
+                    <SelectTrigger size="sm" className="flex-1" title="free DOF">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FREE_DOFS.map((d) => (
+                        <SelectItem key={d} value={d}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={freeFrame}
+                    onValueChange={(v) =>
+                      setFreeFrame(v as "reference" | "tool")
+                    }
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="flex-1"
+                      title="axis frame the free DOF acts in"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="reference">reference</SelectItem>
+                      <SelectItem value="tool">tool</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {isRotationDof(freeDof) && (
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={freeFull}
+                      onChange={(e) => setFreeFull(e.target.checked)}
+                    />
+                    full rotation (±180°)
+                  </label>
+                )}
+                <div className="grid grid-cols-3 gap-1.5">
+                  {!(isRotationDof(freeDof) && freeFull) && (
+                    <>
+                      <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                        min
+                        <Input
+                          type="number"
+                          className="h-7 px-1.5 font-mono text-xs tabular-nums"
+                          value={freeMin}
+                          onChange={(e) => setFreeMin(e.target.value)}
+                        />
+                      </label>
+                      <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                        max
+                        <Input
+                          type="number"
+                          className="h-7 px-1.5 font-mono text-xs tabular-nums"
+                          value={freeMax}
+                          onChange={(e) => setFreeMax(e.target.value)}
+                        />
+                      </label>
+                    </>
+                  )}
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    step
+                    <Input
+                      type="number"
+                      className="h-7 px-1.5 font-mono text-xs tabular-nums"
+                      value={freeStep}
+                      onChange={(e) => setFreeStep(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  {isRotationDof(freeDof) ? "degrees" : "metres"} · about {freeFrame}{" "}
+                  {freeDof}-axis
+                </p>
+              </div>
+            )}
           </>
         )}
         <div className="flex flex-wrap gap-1.5">
