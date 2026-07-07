@@ -124,7 +124,7 @@ def _core(fk, collision, scene=None):
     return core
 
 
-def _free_yaw_goal(fk):
+def _free_yaw_goal(fk, free=None):
     T = fk.get_ee_transform(HOME_Q)
     from wf.core.frames import rotation_matrix_to_quaternion
 
@@ -136,44 +136,57 @@ def _free_yaw_goal(fk):
     return {
         "client_id": "c1",
         "waypoints": [
-            {"type": "movej", "target": {"pose": pose, "free": {"dof": "yaw"}}}
+            {"type": "movej",
+             "target": {"pose": pose, "free": free or {"dof": "yaw"}}}
         ],
     }
 
 
-def test_loose_goal_accepts_and_executes_fastest(fk, collision):
+# Coarse sweep (few candidates) for the negative tests — the outcome doesn't
+# depend on resolution, and it keeps the per-candidate IK count (hence runtime)
+# small when every sample fails.
+_COARSE_YAW = {"dof": "yaw", "min": -3.14159, "max": 3.14159, "step": 1.05}
+
+
+def test_loose_goal_accepts_fast_and_executes_fastest(fk, collision):
     core = _core(fk, collision)
     goal = _free_yaw_goal(fk)
 
+    # Accept must be FAST: it defers sampling/IK to execute (no candidates yet),
+    # so it never blocks the client's query timeout.
     reason = core._accept_execute_path(goal)
     assert reason is None
     entry = goal["_resolution"]["waypoints"][-1]
-    assert entry["candidates"], "gate must leave pruned candidates"
+    assert "candidates" not in entry  # deferred to execute
 
     handle = _FakeHandle(goal)
     core._execute_path(handle)
     assert handle.failed is None
     assert core.backend.ran is not None, "run_path must be called"
-    traj = core.backend.ran["traj"]
-    assert len(traj) > 0
-    # The executed final target is one of the accepted candidates.
+    assert len(core.backend.ran["traj"]) > 0
+    # The chosen goal is recorded for snapshot provenance and executed.
     chosen = core.backend.ran["targets"][-1]
-    assert any(np.allclose(chosen, c, atol=1e-9) for c in entry["candidates"])
-    # Snapshot records the chosen pose provenance.
     assert entry["resolved_q"] == chosen
+    # It reaches the requested flange position (yaw free).
+    p_want = fk.get_ee_transform(HOME_Q)[:3, 3]
+    p_got = fk.get_ee_transform(core.backend.ran["traj"][-1])[:3, 3]
+    assert np.linalg.norm(p_got - p_want) < 5e-3
 
 
-def test_loose_goal_unreachable_is_no_feasible_goal(fk, collision):
+def test_loose_goal_unreachable_fails_in_execute(fk, collision):
     core = _core(fk, collision)
-    goal = _free_yaw_goal(fk)
+    goal = _free_yaw_goal(fk, free=_COARSE_YAW)
     # Push the target far out of reach: no yaw sample can be solved.
     goal["waypoints"][0]["target"]["pose"]["xyz"] = [5.0, 0.0, 0.0]
 
-    reason = core._accept_execute_path(goal)
-    assert reason == "no_feasible_goal:0"
+    assert core._accept_execute_path(goal) is None  # accepted (deferred)
+    handle = _FakeHandle(goal)
+    core._execute_path(handle)
+    assert handle.failed == "no_feasible_goal:0"
+    assert core.backend.ran is None
 
 
-def test_loose_goal_all_finals_blocked_is_no_feasible_goal(fk, collision):
+def test_loose_goal_all_finals_blocked_fails_in_execute(fk, collision):
     T = fk.get_ee_transform(HOME_Q)
     from wf.core.scene import SceneObject
 
@@ -182,10 +195,12 @@ def test_loose_goal_all_finals_blocked_is_no_feasible_goal(fk, collision):
         geometry={"type": "box", "size": [0.4, 0.4, 0.4]}, meta={"name": "blk"},
     )
     core = _core(fk, collision, scene=[blocker])
-    goal = _free_yaw_goal(fk)
+    goal = _free_yaw_goal(fk, free=_COARSE_YAW)
 
-    reason = core._accept_execute_path(goal)
-    assert reason == "no_feasible_goal:0"
+    assert core._accept_execute_path(goal) is None  # accepted (deferred)
+    handle = _FakeHandle(goal)
+    core._execute_path(handle)
+    assert handle.failed == "no_feasible_goal:0"
 
 
 # ── movel (Cartesian) integration ────────────────────────────────────────
@@ -273,9 +288,15 @@ def test_path_loose_accepts_and_executes(fk, collision):
         assert max(abs(x - y) for x, y in zip(a, b)) < 0.8
 
 
-def test_path_loose_unreachable_is_no_feasible_goal(fk, collision):
+def test_path_loose_unreachable_fails_in_execute(fk, collision):
     core = _core(fk, collision)
     goal = _path_loose_goal(fk)
+    goal["waypoints"][0]["target"]["free"] = _COARSE_YAW
     goal["waypoints"][0]["target"]["pose"]["xyz"] = [5.0, 0.0, 0.0]
-    reason = core._accept_execute_path(goal)
-    assert reason == "no_feasible_goal:0"
+    # Accept defers (fast); the redundancy DP fails in execute with no on-branch
+    # corridor to an unreachable goal.
+    assert core._accept_execute_path(goal) is None
+    handle = _FakeHandle(goal)
+    core._execute_path(handle)
+    assert handle.failed is not None and handle.failed.startswith("path_loose:")
+    assert core.backend.ran is None

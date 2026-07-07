@@ -540,19 +540,14 @@ class ArmCore:
         )
         if reason:
             return reason
-        last = resolution["waypoints"][-1]
-        last_idx = len(resolution["waypoints"]) - 1
-        if "constrained" in last:
-            reason = self._prune_loose_goal(last, last_idx, tcp_T, tree)
-            if reason:
-                return reason
-        elif "path_loose" in last:
-            # Cheap endpoint-feasibility gate; the full path DP runs at execute.
-            reason = self._prune_path_loose_goal(last, last_idx, tcp_T, tree)
-            if reason:
-                return reason
-        # Preflight collision-checks the fixed (resolved_q) prefix; loose-goal
-        # candidates were already collision-checked at their final pose above.
+        # Loose (movej + free) and path-loose (movel + free) goals DEFER their
+        # sampling / IK / redundancy DP to _execute_path: that work is far too
+        # slow (tens of IK solves) to run inside the accept query without
+        # blowing the client's timeout ("no reply from action server"). Accept
+        # only needs the cheap resolve_goal validation above plus the prefix
+        # collision preflight (constrained/path_loose entries carry no
+        # resolved_q, so preflight skips them). Feasibility (no_feasible_goal)
+        # is reported from the execute worker instead.
         return preflight(
             resolution,
             self._live_scene.snapshot(),
@@ -560,72 +555,6 @@ class ArmCore:
             tree=tree,
             base_frame=self.base_frame,
         )
-
-    def _prune_loose_goal(self, entry: dict, index: int, tcp_T, tree) -> str | None:
-        """Sample + prune a loose-goal waypoint IN PLACE.
-
-        Fills ``entry["candidates"]`` with reachable, collision-free joint goals
-        (preference-ordered). Returns a rejection reason, or None on success.
-        """
-        pose = Pose.from_wire(entry["constrained"]["pose"])
-        free = Freedom.from_wire(entry["constrained"]["free"])
-        try:
-            poses = expand_freedom(
-                pose, free, max_candidates=self.params.get("max_goal_candidates", 256)
-            )
-        except ValueError as exc:
-            return f"bad_goal: {exc}"
-        cands = candidate_qs(
-            poses,
-            fk=self.fk,
-            q_seed=entry["seed_q"],
-            jmin=self.jmin,
-            jmax=self.jmax,
-            margin=self.params["joint_limit_margin_rad"],
-            tree=tree,
-            base_frame=self.base_frame,
-            tcp_T=tcp_T,
-            collision=self.collision,
-            scene=self._live_scene.snapshot(),
-        )
-        if not cands:
-            return f"no_feasible_goal:{index}"
-        entry["candidates"] = cands
-        return None
-
-    def _prune_path_loose_goal(
-        self, entry: dict, index: int, tcp_T, tree
-    ) -> str | None:
-        """Cheap endpoint-feasibility gate for a path-loose (movel + free) goal.
-
-        Confirms at least one free-DOF sample of the GOAL pose is reachable and
-        collision-free; the full on-branch path DP runs at execute. Returns a
-        rejection reason, or None.
-        """
-        pose = Pose.from_wire(entry["path_loose"]["pose"])
-        free = Freedom.from_wire(entry["path_loose"]["free"])
-        try:
-            poses = expand_freedom(
-                pose, free, max_candidates=self.params.get("max_goal_candidates", 256)
-            )
-        except ValueError as exc:
-            return f"bad_goal: {exc}"
-        cands = candidate_qs(
-            poses,
-            fk=self.fk,
-            q_seed=entry["seed_q"],
-            jmin=self.jmin,
-            jmax=self.jmax,
-            margin=self.params["joint_limit_margin_rad"],
-            tree=tree,
-            base_frame=self.base_frame,
-            tcp_T=tcp_T,
-            collision=self.collision,
-            scene=self._live_scene.snapshot(),
-        )
-        if not cands:
-            return f"no_feasible_goal:{index}"
-        return None
 
     def _execute_path(self, handle: GoalHandle) -> None:
         # Runs on the ActionServer worker thread; the server is serial and
@@ -692,14 +621,15 @@ class ArmCore:
         self.backend.run_path(handle, traj, wp_idx, targets, snapshot)
 
     def _execute_loose_path(self, handle: GoalHandle, resolution: dict) -> None:
-        """Execute a loose-goal path: plan every pruned candidate, run the
-        fastest collision-free one.
+        """Execute a loose-goal path: sample the free DOF, prune by IK +
+        final-pose collision, then plan every survivor and run the fastest
+        collision-free one.
 
-        The final waypoint carries ``candidates`` (reachable, final-pose
-        collision-free joint goals from the accept gate). Each is planned as a
-        full Ruckig trajectory through the fixed prefix; survivors are ordered
-        by duration (sample count at a fixed servo_dt) and the first one whose
-        DENSE trajectory collision-check clears is executed.
+        The sampling/pruning runs HERE (not in accept) because it is too slow
+        for the accept query — see _accept_execute_path. Each surviving joint
+        goal is planned as a full Ruckig trajectory through the fixed prefix;
+        survivors are ordered by duration (sample count at a fixed servo_dt) and
+        the first one whose DENSE trajectory collision-check clears is executed.
         """
         start_q = self.backend.latest_q()
         if start_q is None:
@@ -707,12 +637,42 @@ class ArmCore:
             return
         res_wps = resolution["waypoints"]
         prefix_targets = [list(wp["resolved_q"]) for wp in res_wps[:-1]]
-        candidates = res_wps[-1].get("candidates") or []
         tree = self._live_frames.snapshot()
         scene = self._live_scene.snapshot()
         ruckig = self.params["ruckig_defaults"]
         margin = self.params["joint_limit_margin_rad"]
         prefix = [list(start_q)] + prefix_targets
+
+        # Sample + prune the loose end goal into reachable, collision-free joint
+        # candidates (deferred from accept).
+        entry = res_wps[-1]
+        pose = Pose.from_wire(entry["constrained"]["pose"])
+        free = Freedom.from_wire(entry["constrained"]["free"])
+        with self._tcp_lock:
+            _tcp_name, tcp_T = self._active_tcp
+        try:
+            poses = expand_freedom(
+                pose, free, max_candidates=self.params.get("max_goal_candidates", 256)
+            )
+        except ValueError as exc:
+            handle.fail(error=f"bad_goal: {exc}")
+            return
+        candidates = candidate_qs(
+            poses,
+            fk=self.fk,
+            q_seed=entry.get("seed_q", list(start_q)),
+            jmin=self.jmin,
+            jmax=self.jmax,
+            margin=margin,
+            tree=tree,
+            base_frame=self.base_frame,
+            tcp_T=tcp_T,
+            collision=self.collision,
+            scene=scene,
+        )
+        if not candidates:
+            handle.fail(error=f"no_feasible_goal:{len(res_wps) - 1}")
+            return
 
         feasible: list[tuple[int, list, list, list]] = []
         for cand in candidates:

@@ -118,6 +118,7 @@ def candidate_qs(
     tcp_T: np.ndarray,
     collision: CollisionModel,
     scene: list,
+    ik_max_iters: int = 100,
 ) -> list[list[float]]:
     """Reachable, collision-free joint goals for ``poses`` (order = preference).
 
@@ -125,6 +126,12 @@ def candidate_qs(
     failures and finals that collide, and sorts survivors by joint distance
     from ``q_seed`` (a cheap proxy that front-loads the likely-fastest options
     for the driver's duration-sorted planning).
+
+    Every candidate is seeded from the same ``q_seed`` (the pre-goal config), so
+    each solve lands on the branch consistent with the start rather than drifting
+    across branches. ``ik_max_iters`` caps each solve: a reachable pose converges
+    well within it from this seed, while an unreachable sample bails sooner —
+    bounding the cost of a sweep where many samples are out of reach.
     """
     if not poses:
         return []
@@ -136,7 +143,10 @@ def candidate_qs(
             quaternion_to_rotation_matrix(pose.quat), pose.xyz
         )
         T_base_flange = T_base_tcp @ tcp_T_inv
-        q = solve_ik(fk, T_base_flange, q_seed, jmin, jmax, margin=margin)
+        q = solve_ik(
+            fk, T_base_flange, q_seed, jmin, jmax, margin=margin,
+            max_iters=ik_max_iters,
+        )
         if q is None:
             continue
         if collision.check_collision(q, scene, tree, base_frame)["hit"]:
