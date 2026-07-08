@@ -17,7 +17,9 @@ from wf.contracts.arm.messages import (
     AcquireControl,
     ControlAck,
     ExecutePathGoal,
+    Freedom,
     IoState,
+    Pose,
     SetDo,
     Waypoint,
 )
@@ -35,9 +37,43 @@ _GRAB_TIMEOUT_S = 15.0
 _RESULT_SETTLE_S = 2.0
 _IO_POLL_S = 0.05
 
+MOTION_TYPES = ("movej", "movel")
+
 
 class LeafError(Exception):
     """A leaf operation failed; the statechart routes this to ``failed``."""
+
+
+def build_move_waypoint(
+    *,
+    motion: str = "movej",
+    q=None,
+    pose: Pose | dict | None = None,
+    free: Freedom | dict | None = None,
+    speed: float | None = None,
+    accel: float | None = None,
+) -> Waypoint:
+    """Assemble a single ``execute_path`` :class:`Waypoint` from graph params.
+
+    Exactly one of ``q`` (joint target) or ``pose`` (Cartesian target for the
+    active TCP) must be given. ``free`` (a :class:`Freedom` or its dict form)
+    leaves one goal DOF ranged for the loose-goal solver — valid only with a
+    ``pose`` target. ``motion`` is ``movej`` (IK + joint interpolation) or
+    ``movel`` (straight Cartesian line). Pure: no bus, unit-tested directly.
+    """
+    if motion not in MOTION_TYPES:
+        raise LeafError(f"bad_move:motion must be one of {MOTION_TYPES}")
+    if (q is None) == (pose is None):
+        raise LeafError("bad_move:give exactly one of q or pose")
+    if q is not None:
+        if free is not None:
+            raise LeafError("bad_move:free requires a pose target")
+        target: dict = {"q": [float(v) for v in q]}
+    else:
+        target = {"pose": pose.to_wire() if isinstance(pose, Pose) else dict(pose)}
+        if free is not None:
+            target["free"] = free.to_wire() if isinstance(free, Freedom) else dict(free)
+    return Waypoint(type=motion, target=target, speed=speed, accel=accel)
 
 
 class Leaves:
@@ -128,21 +164,62 @@ class Leaves:
     # ── motion ───────────────────────────────────────────────────────────
 
     def move_to(self, pose_name: str) -> None:
-        """Read named pose ``config/poses/{name}`` and execute a movej to its ``q``."""
+        """Read named pose ``config/poses/{name}`` and execute a movej to its ``q``.
+
+        The legacy statechart's mover; a thin wrapper over :meth:`move`.
+        """
+        self.move(motion="movej", pose_name=pose_name)
+
+    def move(
+        self,
+        *,
+        motion: str = "movej",
+        pose_name: str | None = None,
+        pose: Pose | dict | None = None,
+        frame: str | None = None,
+        q=None,
+        free: Freedom | dict | None = None,
+        speed: float | None = None,
+        accel: float | None = None,
+    ) -> None:
+        """Execute a single move to a joint / pose / frame / named-pose target.
+
+        Target forms (first non-None wins): ``q`` (joints), ``pose``
+        (``{frame,xyz,quat}`` Cartesian for the active TCP), ``frame`` (that
+        frame's origin, identity orientation), or ``pose_name`` (a
+        ``config/poses/{name}`` joint pose). ``motion`` is ``movej``/``movel``;
+        ``free`` ranges one goal DOF (pose targets only).
+        """
         if self._abort.is_set():
             raise LeafError("aborted")
-        reply = self._query(config_keys.pose(pose_name), {})
-        if reply is None:
-            raise LeafError(f"unknown_pose:{pose_name}")
-        q = [float(v) for v in reply["q"]]
+        rq, rpose = self._resolve_move_target(pose_name, pose, frame, q)
+        freedom = Freedom.from_wire(free) if isinstance(free, dict) else free
+        wp = build_move_waypoint(
+            motion=motion, q=rq, pose=rpose, free=freedom, speed=speed, accel=accel
+        )
+        self._execute_waypoints([wp])
+
+    def _resolve_move_target(self, pose_name, pose, frame, q):
+        """Resolve the four target forms to ``(q, pose)`` for the waypoint builder."""
+        if q is not None:
+            return list(q), None
+        if pose is not None:
+            return None, pose
+        if frame is not None:
+            return None, Pose(frame=frame, xyz=[0.0, 0.0, 0.0], quat=[0.0, 0.0, 0.0, 1.0])
+        if pose_name is not None:
+            reply = self._query(config_keys.pose(pose_name), {})
+            if reply is None or "q" not in reply:
+                raise LeafError(f"unknown_pose:{pose_name}")
+            return [float(v) for v in reply["q"]], None
+        raise LeafError("bad_move:no target (q/pose/frame/pose_name)")
+
+    def _execute_waypoints(self, waypoints: list[Waypoint]) -> None:
         self.acquire_lease()
         client = ActionClient(
             self.session, arm_keys.action_prefix(self.realm, self.rid), "execute_path"
         )
-        goal_msg = ExecutePathGoal(
-            waypoints=[Waypoint(type="movej", target={"q": q})],
-            client_id=self.client_id,
-        )
+        goal_msg = ExecutePathGoal(waypoints=waypoints, client_id=self.client_id)
         try:
             self._goal = client.send(goal_msg.to_wire())
         except ActionRejected as exc:
@@ -151,6 +228,45 @@ class Leaves:
         self._goal = None
         if result.get("state") != "succeeded":
             raise LeafError(f"motion_failed:{result.get('state')}")
+
+    def grip(
+        self, *, action: str | None = None, value: bool | None = None, pin: int = 0
+    ) -> None:
+        """Drive a gripper via the arm's **tool** DO bank.
+
+        ``action`` ``"close"``/``"open"`` maps to DO high/low; an explicit
+        ``value`` overrides when a gripper wires the opposite polarity.
+        """
+        if self._abort.is_set():
+            raise LeafError("aborted")
+        if value is None:
+            if action not in ("open", "close"):
+                raise LeafError("bad_grip:action must be 'open' or 'close'")
+            value = action == "close"
+        self._set_tool_do(int(pin), bool(value))
+
+    def _set_tool_do(self, pin: int, value: bool) -> None:
+        reply = self._query(
+            arm_keys.cmd_set_do(self.realm, self.rid),
+            SetDo("tool", pin, value).to_wire(),
+        )
+        if reply is None or not reply.get("ok"):
+            raise LeafError(f"grip:{None if reply is None else reply.get('error')}")
+
+    def wait_di(self, pin: int, *, timeout_s: float = 5.0, level: bool = True) -> dict:
+        """Block until standard DI ``pin`` reaches ``level`` or ``timeout_s`` elapses."""
+        start = time.monotonic()
+        want = bool(level)
+        while True:
+            if self._abort.is_set():
+                raise LeafError("aborted")
+            with self._lock:
+                io = self._latest_io
+            if io is not None and bool((io.di >> pin) & 1) == want:
+                return {"tripped": True, "elapsed_s": time.monotonic() - start}
+            if time.monotonic() - start >= timeout_s:
+                return {"tripped": False, "elapsed_s": time.monotonic() - start}
+            time.sleep(_IO_POLL_S)
 
     def cancel_motion(self) -> None:
         goal = getattr(self, "_goal", None)
