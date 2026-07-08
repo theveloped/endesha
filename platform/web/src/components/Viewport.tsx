@@ -33,9 +33,16 @@ const IDENTITY = new THREE.Matrix4();
 interface RobotProps {
   jointsRef: RefObject<JointState | null>;
   onLoaded: () => void;
+  selected?: boolean;
+  onSelect?: () => void;
 }
 
-export function Robot({ jointsRef, onLoaded }: RobotProps) {
+export function Robot({
+  jointsRef,
+  onLoaded,
+  selected = false,
+  onSelect,
+}: RobotProps) {
   const [robot, setRobot] = useState<URDFRobot | null>(null);
 
   useEffect(() => {
@@ -69,21 +76,53 @@ export function Robot({ jointsRef, onLoaded }: RobotProps) {
     }
   });
 
-  return robot === null ? null : <primitive object={robot} />;
+  useEffect(() => {
+    if (robot === null) return;
+    robot.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const materials = Array.isArray(mesh.material)
+        ? mesh.material
+        : [mesh.material];
+      for (const material of materials) {
+        const standard = material as THREE.MeshStandardMaterial;
+        if (!standard.emissive) continue;
+        standard.emissive.set(selected ? "#0d9488" : "#000000");
+        standard.emissiveIntensity = selected ? 0.28 : 0;
+      }
+    });
+  }, [robot, selected]);
+
+  return robot === null ? null : (
+    <primitive
+      object={robot}
+      onClick={(event: { stopPropagation: () => void }) => {
+        event.stopPropagation();
+        onSelect?.();
+      }}
+    />
+  );
 }
 
 export default function Viewport({
   jointsRef,
   children,
   controls,
+  topRight,
   baseMatrix = IDENTITY,
+  robotSelected = false,
+  onRobotSelect,
 }: {
   jointsRef: RefObject<JointState | null>;
   children?: ReactNode;
   controls?: ReactNode;
+  /** Absolutely-positioned DOM overlay pinned top-right (e.g. the device tree). */
+  topRight?: ReactNode;
   /** Robot base pose (Z-up world matrix). The robot + grid render in world;
    *  the robot nests inside this so world (grid) stays the canvas origin. */
   baseMatrix?: THREE.Matrix4;
+  robotSelected?: boolean;
+  onRobotSelect?: () => void;
 }) {
   const [robotLoaded, setRobotLoaded] = useState(false);
   // Orbit around the robot base (in three Y-up coords), not the world origin.
@@ -106,13 +145,21 @@ export default function Viewport({
           {controls}
         </div>
       )}
+      {topRight !== undefined && (
+        <div className="absolute top-2 right-2 z-10">{topRight}</div>
+      )}
       <Canvas camera={{ position: [2, 1.6, 2], fov: 50 }}>
         <ambientLight intensity={0.6} />
         <directionalLight position={[3, 6, 3]} intensity={1.2} />
         <gridHelper args={[6, 24, 0x666666, 0x333333]} />
         <group rotation={ZUP_TO_YUP}>
           <group matrix={baseMatrix} matrixAutoUpdate={false}>
-            <Robot jointsRef={jointsRef} onLoaded={() => setRobotLoaded(true)} />
+            <Robot
+              jointsRef={jointsRef}
+              onLoaded={() => setRobotLoaded(true)}
+              selected={robotSelected}
+              onSelect={onRobotSelect}
+            />
           </group>
         </group>
         {children}

@@ -28,9 +28,13 @@ def preflight(
     """Check the resolved waypoints against the scene; ``None`` if clear.
 
     Returns a ``collision:{a}|{b}`` rejection reason on the first colliding
-    body pair, else ``None``.
+    body pair, else ``None``. A loose-goal ``constrained`` waypoint carries no
+    ``resolved_q`` (its candidates are collision-checked at their final pose by
+    the gate); it is skipped here.
     """
-    trajectory = [wp["resolved_q"] for wp in resolution["waypoints"]]
+    trajectory = [
+        wp["resolved_q"] for wp in resolution["waypoints"] if "resolved_q" in wp
+    ]
     result = model.preflight(trajectory, scene, tree, base_frame)
     if not result["ok"]:
         a, b = result["first_violation"]["pair"]

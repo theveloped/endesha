@@ -283,8 +283,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="wf.services.task_runner", description=__doc__)
     parser.add_argument(
         "--realm",
-        default=os.environ.get("WF_REALM", "sim"),
-        help="realm (default env WF_REALM or 'sim')",
+        default=os.environ.get("WF_REALM", "cell"),
+        help="namespace (default env WF_REALM or 'cell')",
     )
     parser.add_argument("--flow", required=True, help="path to a flow YAML file")
     parser.add_argument("--rid", default="r1", help="arm resource id (default r1)")

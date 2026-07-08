@@ -87,7 +87,7 @@ def test_empty_path(fk, limits, tree):
 
 
 def test_unsupported_waypoint_type(fk, limits, tree):
-    goal = _goal([{"type": "movel", "target": {"q": HOME_Q}}])
+    goal = _goal([{"type": "movec", "target": {"q": HOME_Q}}])
     reason, _ = _resolve(goal, fk, limits, tree)
     assert reason == "unsupported_waypoint_type"
 
@@ -225,6 +225,136 @@ def test_tcp_composition_backs_off_flange(fk, limits, tree):
         )
         < 1e-2
     )
+
+
+# ── loose end goal (free block) ──────────────────────────────────────────
+
+
+def _pose_at_home(fk):
+    T = fk.get_ee_transform(HOME_Q)
+    return {
+        "frame": "arm/r1/base",
+        "xyz": [float(v) for v in T[:3, 3]],
+        "quat": rotation_matrix_to_quaternion(T[:3, :3]),
+    }
+
+
+def test_free_on_last_waypoint_records_constrained(fk, limits, tree):
+    pose = _pose_at_home(fk)
+    goal = _goal(
+        [{"type": "movej", "target": {"pose": pose, "free": {"dof": "yaw"}}}]
+    )
+    reason, resolution = _resolve(goal, fk, limits, tree)
+    assert reason is None
+    entry = resolution["waypoints"][-1]
+    assert "constrained" in entry
+    assert "resolved_q" not in entry  # deferred to the gate
+    assert entry["constrained"]["free"]["dof"] == "yaw"
+    assert entry["seed_q"] == HOME_Q
+    assert "q" not in goal["waypoints"][0]["target"]  # no q injected
+
+
+def test_free_on_non_last_waypoint_rejected(fk, limits, tree):
+    pose = _pose_at_home(fk)
+    goal = _goal(
+        [
+            {"type": "movej", "target": {"pose": pose, "free": {"dof": "yaw"}}},
+            {"type": "movej", "target": {"q": HOME_Q}},
+        ]
+    )
+    reason, _ = _resolve(goal, fk, limits, tree)
+    assert reason == "unsupported_constraint"
+
+
+def test_free_requires_pose_not_q(fk, limits, tree):
+    goal = _goal(
+        [{"type": "movej", "target": {"q": HOME_Q, "free": {"dof": "yaw"}}}]
+    )
+    reason, _ = _resolve(goal, fk, limits, tree)
+    # q+pose mutual-exclusion fires first; either way it's a bad_goal.
+    assert reason.startswith("bad_goal")
+
+
+def test_free_malformed_is_bad_goal(fk, limits, tree):
+    pose = _pose_at_home(fk)
+    goal = _goal(
+        [{"type": "movej", "target": {"pose": pose, "free": {"dof": "spin"}}}]
+    )
+    reason, _ = _resolve(goal, fk, limits, tree)
+    assert reason.startswith("bad_goal")
+
+
+# ── movel ──────────────────────────────────────────────────────────────────
+
+
+def test_movel_records_cartesian_goal(fk, limits, tree):
+    T_home = fk.get_ee_transform(HOME_Q)
+    pose = {
+        "frame": "arm/r1/base",
+        "xyz": [float(v) for v in T_home[:3, 3]],
+        "quat": rotation_matrix_to_quaternion(T_home[:3, :3]),
+    }
+    goal = _goal([{"type": "movel", "target": {"pose": pose}}])
+    reason, resolution = _resolve(goal, fk, limits, tree)
+    assert reason is None
+    entry = resolution["waypoints"][0]
+    assert entry["type"] == "movel"
+    assert "cartesian" in entry and "goal_tcp" in entry["cartesian"]
+    # Endpoint q is resolved for seed continuity + reachability.
+    assert len(entry["resolved_q"]) == 6
+    # Goal TCP pose (base frame) round-trips near the requested pose.
+    g = entry["cartesian"]["goal_tcp"]
+    assert np.allclose(g["xyz"], pose["xyz"], atol=1e-6)
+
+
+def test_movel_requires_pose(fk, limits, tree):
+    goal = _goal([{"type": "movel", "target": {"q": HOME_Q}}])
+    reason, _ = _resolve(goal, fk, limits, tree)
+    assert reason == "bad_goal: movel requires a pose target"
+
+
+def test_movel_unreachable_is_ik_failure(fk, limits, tree):
+    goal = _goal(
+        [{"type": "movel",
+          "target": {"pose": {"frame": "table", "xyz": [5, 0, 0], "quat": [0, 0, 0, 1]}}}]
+    )
+    reason, _ = _resolve(goal, fk, limits, tree)
+    assert reason == "ik_failure:0"
+
+
+def test_movel_with_free_records_path_loose(fk, limits, tree):
+    T_home = fk.get_ee_transform(HOME_Q)
+    pose = {
+        "frame": "arm/r1/base",
+        "xyz": [float(v) for v in T_home[:3, 3]],
+        "quat": rotation_matrix_to_quaternion(T_home[:3, :3]),
+    }
+    goal = _goal([{"type": "movel", "target": {"pose": pose, "free": {"dof": "yaw"}}}])
+    reason, resolution = _resolve(goal, fk, limits, tree)
+    assert reason is None
+    entry = resolution["waypoints"][-1]
+    assert entry["type"] == "movel"
+    assert "path_loose" in entry and "resolved_q" not in entry
+    assert entry["path_loose"]["free"]["dof"] == "yaw"
+    assert "goal_tcp" in entry["path_loose"]
+    assert entry["seed_q"] == HOME_Q
+
+
+def test_movel_free_on_non_last_rejected(fk, limits, tree):
+    T_home = fk.get_ee_transform(HOME_Q)
+    pose = {
+        "frame": "arm/r1/base",
+        "xyz": [float(v) for v in T_home[:3, 3]],
+        "quat": rotation_matrix_to_quaternion(T_home[:3, :3]),
+    }
+    goal = _goal(
+        [
+            {"type": "movel", "target": {"pose": pose, "free": {"dof": "yaw"}}},
+            {"type": "movej", "target": {"q": HOME_Q}},
+        ]
+    )
+    reason, _ = _resolve(goal, fk, limits, tree)
+    assert reason == "unsupported_constraint"
 
 
 def test_multi_waypoint_seed_chains(fk, limits, tree):

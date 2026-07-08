@@ -27,6 +27,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, "index.html"),
+        spatial: path.resolve(__dirname, "spatial.html"),
         headless: path.resolve(__dirname, "headless.html"),
       },
     },

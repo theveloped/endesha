@@ -26,6 +26,7 @@ import { Robot } from "../components/Viewport";
 import { cameraFromIntrinsics, eyeInHandPose } from "../lib/cameracam";
 import {
   connect,
+  query,
   subscribeConfigList,
   subscribeLatest,
   type Unsubscribe,
@@ -39,9 +40,11 @@ import {
   configSceneGlob,
   stateFlange,
   stateJoints,
+  supervisorDevices,
 } from "../lib/config";
 import { BASE_FRAME, ZUP_TO_YUP, frameWorldMatrix } from "../lib/framemath";
 import type {
+  DevicesList,
   FlangeState,
   FrameDef,
   Intrinsics,
@@ -300,10 +303,15 @@ export default function CameraHalPage() {
   const jointsRef = useRef<JointState | null>(null);
   const grabRef = useRef<GrabFrame | null>(null);
   const serviceRef = useRef<Camera2dService | null>(null);
+  // This device's active source mode (from the supervisor's devices inventory).
+  // The headless renderer serves the camera2d contract ONLY while it is `sim` —
+  // when switched to live/replay/off it backs off so the supervisor-spawned
+  // provider (genicam / replay_camera) or nothing owns the contract.
+  const [isSimActive, setIsSimActive] = useState(false);
 
   const params = new URLSearchParams(window.location.search);
   const wsUrl = params.get("ws") ?? DEFAULT_WS_URL;
-  const realm = params.get("realm") ?? "sim";
+  const realm = params.get("realm") ?? "cell";
   const cid = params.get("cid") ?? "cam0";
 
   // Render block (cell.sim.yaml cam0 defaults), overridable via query params so
@@ -410,11 +418,37 @@ export default function CameraHalPage() {
     };
   }, [session, realm]);
 
-  // Start the camera2d contract service once the session is up. The service's
+  // Track this device's active source from the supervisor; only `sim` means the
+  // headless renderer should serve the contract.
+  useEffect(() => {
+    if (session === null) return;
+    let disposed = false;
+    const unsubs: Unsubscribe[] = [];
+    const apply = (msg: unknown) => {
+      const dev = (msg as DevicesList).devices?.find((d) => d.id === cid);
+      setIsSimActive(dev?.active === "sim");
+    };
+    void (async () => {
+      const u = await subscribeLatest(session, supervisorDevices(realm), apply, 4);
+      if (disposed) u();
+      else unsubs.push(u);
+      const cur = await query(session, supervisorDevices(realm), {});
+      if (!disposed && cur !== null) apply(cur);
+    })();
+    return () => {
+      disposed = true;
+      unsubs.forEach((u) => u());
+    };
+  }, [session, realm, cid]);
+
+  // Serve the camera2d contract only while this device's source is `sim` (and a
+  // session is up). Switching to live/replay/off tears the service down
+  // (undeclares queryables + liveliness, stops publishing) so the supervisor's
+  // provider — or nothing, for `off` — owns the contract. The service's
   // renderFrame defers to the CameraDriver grab via renderRefs; if a grab
   // arrives before the GL context is live, it waits a tick then retries.
   useEffect(() => {
-    if (session === null) return;
+    if (session === null || !isSimActive) return;
     const service = new Camera2dService({
       session,
       realm,
@@ -442,7 +476,7 @@ export default function CameraHalPage() {
       serviceRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, realm, cid]);
+  }, [session, realm, cid, isSimActive]);
   return (
     <div style={{ width: rw, height: rh }}>
       <Canvas

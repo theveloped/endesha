@@ -7,6 +7,7 @@ dependencies = [
     "wf-core",
     "wf-world-model",
     "wf-contracts-arm",
+    "wf-hal-arm-core",
     "pyyaml",
 ]
 # NOTE: pyaubo_sdk is intentionally NOT a declared dependency. The vendor

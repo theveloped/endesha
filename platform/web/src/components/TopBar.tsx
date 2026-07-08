@@ -1,17 +1,6 @@
-// Top bar (spec §2): cell identity + WS connection dot, realm switcher with
-// confirm on switching TO live, safety cluster + control-lease chip, realm
-// name in small caps.
+// Top bar (spec §2): cell identity + WS connection dot, CELL/REPLAY namespace
+// switcher, safety cluster + control-lease chip, namespace name in small caps.
 import { useEffect, useState } from "react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,7 +49,6 @@ export default function TopBar({
   onAcquire,
   onRelease,
 }: TopBarProps) {
-  const [confirmLive, setConfirmLive] = useState(false);
   // Tick once a second so the lease countdown decrements between owner
   // republishes (the driver keepalive is 1 Hz; expires_at only moves on renew).
   const [now, setNow] = useState(() => Date.now());
@@ -71,10 +59,6 @@ export default function TopBar({
 
   const pickRealm = (kind: RealmKind) => {
     if (kind === realm.kind) return;
-    if (kind === "live") {
-      setConfirmLive(true); // switch only on confirm
-      return;
-    }
     if (kind === "replay") {
       onRealmChange({
         kind: "replay",
@@ -82,7 +66,7 @@ export default function TopBar({
       });
       return;
     }
-    onRealmChange({ kind: "sim", replaySession: null });
+    onRealmChange({ kind: "cell", replaySession: null });
   };
 
   const owner = controlOwner?.owner ?? null;
@@ -127,11 +111,8 @@ export default function TopBar({
             if (v) pickRealm(v as RealmKind);
           }}
         >
-          <ToggleGroupItem value="live" className={REALM_ITEM_CLASS}>
-            LIVE
-          </ToggleGroupItem>
-          <ToggleGroupItem value="sim" className={REALM_ITEM_CLASS}>
-            SIM
+          <ToggleGroupItem value="cell" className={REALM_ITEM_CLASS}>
+            CELL
           </ToggleGroupItem>
           <ToggleGroupItem value="replay" className={REALM_ITEM_CLASS}>
             REPLAY
@@ -143,6 +124,12 @@ export default function TopBar({
       </div>
 
       <div className="flex items-center gap-3">
+        <a
+          href="/spatial.html"
+          className="rounded border border-border px-2 py-1 text-xs font-semibold tracking-wide text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          SPATIAL UI
+        </a>
         <span
           className={cn(
             "text-xs",
@@ -191,28 +178,6 @@ export default function TopBar({
             : `${holdsControl ? "" : "🔒 "}${owner.user} · ${countdown} left`}
         </button>
       </div>
-
-      <AlertDialog open={confirmLive} onOpenChange={setConfirmLive}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Switch to LIVE?</AlertDialogTitle>
-            <AlertDialogDescription>
-              You will be commanding real hardware.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() =>
-                onRealmChange({ kind: "live", replaySession: null })
-              }
-            >
-              Switch to LIVE
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </header>
   );
 }

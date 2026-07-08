@@ -1,0 +1,6 @@
+# Runtime overlay: mixed bring-up — real camera against the simulated arm.
+# Exercises the namespace/source decoupling: both devices share one session
+# namespace while sourced from different backends.
+active_sources:
+  r1: sim
+  cam0: live

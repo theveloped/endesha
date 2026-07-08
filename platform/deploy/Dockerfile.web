@@ -1,0 +1,20 @@
+# Web dev server (Vite + HMR) for the sim stack — serves the twin UI at :5173.
+# Source (web/) and packages/ come via bind mounts at runtime for live reload;
+# node_modules is baked here (Linux) and masked by an anonymous volume in compose
+# so the host's (Windows) node_modules never shadows it. This is the dev server,
+# not the production bundle or the headless render page.
+FROM node:24-slim
+
+# The dev server doesn't need puppeteer's Chromium (that's the headless camera).
+ENV PUPPETEER_SKIP_DOWNLOAD=1
+
+WORKDIR /platform/web
+# Install deps first for layer caching; the source itself is bind-mounted at run.
+COPY web/package*.json ./
+RUN npm ci
+
+EXPOSE 5173
+# `npm run dev` runs predev (sync-assets.mjs), which copies the shared URDF/GLB
+# assets from the bind-mounted /platform/packages into web/public, then starts
+# Vite bound to 0.0.0.0 so it's reachable from the host browser.
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]

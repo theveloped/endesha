@@ -53,5 +53,6 @@ ENTRYPOINT ["/sim-entrypoint.sh"]
 # deploy/Dockerfile.headless); this image runs the other sim processes.
 # Default to the supervisor; compose overrides the command per service.
 CMD ["python", "-m", "wf.services.supervisor", \
-     "--realm", "sim", "--cell", "deploy/cell.sim.yaml", \
+     "--realm", "cell", "--cell", "deploy/cell.yaml", \
+     "--runtime", "deploy/runtime/sim.yaml", \
      "--flows-dir", "packages/services/task_runner/flows"]

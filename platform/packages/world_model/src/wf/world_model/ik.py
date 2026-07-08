@@ -50,6 +50,19 @@ def numeric_jacobian(
     return J
 
 
+def manipulability(fk: UrdfFk, q, *, T_current: np.ndarray | None = None) -> float:
+    """Smallest singular value of the flange Jacobian at ``q``.
+
+    A proximity-to-singularity measure used by the Cartesian planner: it tends
+    to 0 as the arm approaches a singularity (the Jacobian loses rank and a
+    bounded flange twist would demand unbounded joint speed). ``T_current`` is
+    the FK at ``q`` if already computed (passed through to
+    :func:`numeric_jacobian`).
+    """
+    J = numeric_jacobian(fk, q, T_current=T_current)
+    return float(np.linalg.svd(J, compute_uv=False)[-1])
+
+
 def solve_ik(
     fk: UrdfFk,
     T_target: np.ndarray,

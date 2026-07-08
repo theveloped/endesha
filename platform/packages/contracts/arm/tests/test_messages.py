@@ -2,6 +2,8 @@
 
 import pytest
 
+import math
+
 from wf.contracts.arm.messages import (
     Ack,
     AcquireControl,
@@ -11,6 +13,7 @@ from wf.contracts.arm.messages import (
     ControlOwnerState,
     ExecutePathGoal,
     FlangeState,
+    Freedom,
     IoState,
     JogCommand,
     JointState,
@@ -52,6 +55,9 @@ POSE = Pose(frame="arm/r1/base", xyz=[0.1, -0.2, 0.3], quat=[0.0, 0.0, 0.0, 1.0]
             waypoints=[Waypoint(type="movej", target={"q": [1.0] * 6})],
             client_id="lease-1",
         ),
+        Freedom(dof="yaw"),
+        Freedom(dof="pitch", frame="tool", min=-1.0, max=1.0, step=0.1),
+        Freedom(dof="z", min=-0.05, max=0.05, step=0.01),
         JogCommand(
             client_id="c1", mode="cartesian", frame="base",
             velocity=[0.05, 0.0, 0.0, 0.0, 0.0, 0.0], t=99,
@@ -93,3 +99,37 @@ def test_pose_rejects_bad_xyz_length():
 def test_setdo_rejects_unknown_bank():
     with pytest.raises(ValueError):
         SetDo(bank="aux", pin=0, value=True)
+
+
+def test_freedom_free_rotation_defaults_full_circle():
+    f = Freedom(dof="yaw")
+    assert f.is_rotation and f.axis == 2
+    assert f.min == pytest.approx(-math.pi)
+    assert f.max == pytest.approx(math.pi)
+    assert f.step == pytest.approx(math.radians(5.0))
+
+
+def test_freedom_translation_requires_bounds():
+    with pytest.raises(ValueError):
+        Freedom(dof="z")  # no min/max
+    with pytest.raises(ValueError):
+        Freedom(dof="z", min=-0.1, max=0.1)  # no step
+
+
+def test_freedom_rejects_partial_rotation_bounds():
+    with pytest.raises(ValueError):
+        Freedom(dof="roll", min=-1.0)  # only one bound
+
+
+def test_freedom_rejects_bad_dof_and_frame():
+    with pytest.raises(ValueError):
+        Freedom(dof="nope")
+    with pytest.raises(ValueError):
+        Freedom(dof="yaw", frame="world")
+
+
+def test_freedom_rejects_bad_range_and_step():
+    with pytest.raises(ValueError):
+        Freedom(dof="yaw", min=1.0, max=-1.0, step=0.1)
+    with pytest.raises(ValueError):
+        Freedom(dof="yaw", min=-1.0, max=1.0, step=0.0)

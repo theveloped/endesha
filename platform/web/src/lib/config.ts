@@ -1,7 +1,7 @@
 // Key space for the `arm` contract, mirroring wf/contracts/arm/keys.py.
-// The realm is caller-supplied: every builder takes the full realm prefix
-// string ("live", "sim", or "replay/{sid}") — the UI's realm switcher picks
-// it and identical components render any realm by prefix swap alone.
+// The realm is caller-supplied: every builder takes the full namespace prefix
+// string ("cell" or "replay/{sid}") — the UI's switcher picks it and identical
+// components render the live cell or a recording by prefix swap alone.
 
 export const RID = "r1";
 
@@ -9,7 +9,12 @@ export const DEFAULT_WS_URL = "ws/127.0.0.1:10000";
 
 export const CELL_NAME = "dev-cell"; // no cell registry on the bus yet — constant
 
-export type RealmKind = "live" | "sim" | "replay";
+// The operating namespace is the single fixed token "cell": live/sim/replay is
+// a per-device source mode, not a key prefix (RFC §3.1). "replay" here is the
+// whole-session global replayer, which keeps its own replay/{sid} namespace.
+export type RealmKind = "cell" | "replay";
+
+export const CELL_REALM = "cell";
 
 export interface Realm {
   kind: RealmKind;
@@ -18,7 +23,7 @@ export interface Realm {
 
 /** null while kind=replay and no session picked — subscribe nothing. */
 export function realmPrefix(r: Realm): string | null {
-  if (r.kind !== "replay") return r.kind;
+  if (r.kind !== "replay") return CELL_REALM;
   return r.replaySession === null ? null : `replay/${r.replaySession}`;
 }
 
@@ -239,4 +244,12 @@ export function supervisorAlive(realm: string, node = "main"): string {
 
 export function supervisorDescriptor(realm: string, node = "main"): string {
   return `${realm}/supervisor/${node}/descriptor`;
+}
+
+export function supervisorDevices(realm: string, node = "main"): string {
+  return `${realm}/supervisor/${node}/devices`;
+}
+
+export function supervisorCmdSetSource(realm: string, node = "main"): string {
+  return `${realm}/supervisor/${node}/cmd/set_source`;
 }

@@ -21,6 +21,7 @@ are inserted per query, posed through the static frame tree exactly as
 from __future__ import annotations
 
 import copy
+from functools import lru_cache
 from pathlib import Path
 
 import coal
@@ -55,6 +56,19 @@ def _se3(T: np.ndarray) -> pin.SE3:
     return pin.SE3(np.asarray(T, dtype=np.float64))
 
 
+@lru_cache(maxsize=128)
+def _load_mesh(path: str) -> coal.CollisionGeometry:
+    """Load (and CACHE) a mesh's Coal geometry by resolved filesystem path.
+
+    A scene mesh is otherwise re-loaded from disk on every collision query —
+    ~100 ms per load. A loose/redundant goal issues dozens of queries, so an
+    uncached load turns into seconds of pure GLB parsing. The geometry is an
+    immutable shape (placement lives on the per-query GeometryObject), so one
+    cached instance is safely shared across queries.
+    """
+    return coal.MeshLoader().load(path)
+
+
 def _scene_geometry(obj: SceneObject) -> coal.CollisionGeometry | None:
     """A Coal collision geometry for a scene object, or ``None`` to skip it.
 
@@ -74,7 +88,7 @@ def _scene_geometry(obj: SceneObject) -> coal.CollisionGeometry | None:
     if gtype == "mesh":
         uri = geom["uri"]
         try:
-            return coal.MeshLoader().load(resolve_asset(uri))
+            return _load_mesh(resolve_asset(uri))
         except Exception as exc:  # noqa: BLE001 — bad asset must not block accept
             _log.debug("scene mesh load failed; skipping uri=%s error=%r", uri, exc)
             return None

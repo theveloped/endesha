@@ -1,0 +1,10 @@
+# Always-on default for the host stack (start_stack.ps1): a cell that comes up
+# with NO hardware and NO containers — a simulated arm + a replayed camera
+# (frames from deploy/recordings/demo.mcap). The stack always starts; you then
+# "hotplug" real hardware by switching a device to `live` in the UI device tree
+# when it's attached, and back to `sim`/`replay`/`off` when you remove it.
+# (A device can only run `live` when its hardware is actually present — otherwise
+# its provider stays down and you switch it back.)
+active_sources:
+  r1: sim
+  cam0: replay

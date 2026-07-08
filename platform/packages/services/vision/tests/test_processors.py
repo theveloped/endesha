@@ -12,7 +12,7 @@ from wf.contracts.camera2d.messages import (
     ENCODING_MONO8,
     FrameHeader,
 )
-from wf.hal.camera2d_sim.processing import _bgr_to_bayer_rg8
+from wf.hal.camera2d_core.processing import _bgr_to_bayer_rg8
 from wf.services.vision.frames import decode_frame
 from wf.services.vision.processors import center_crop, grayscale
 

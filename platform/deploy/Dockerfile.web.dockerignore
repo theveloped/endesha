@@ -1,0 +1,11 @@
+# Scoped to the web dev-server build (BuildKit reads <dockerfile>.dockerignore
+# first). Only web/package*.json is COPYed; node_modules is rebuilt via npm ci.
+# Keep the platform/ context lean.
+web/node_modules
+web/dist
+deploy/recordings
+**/__pycache__
+**/.pytest_cache
+.pixi
+pixi.lock
+**/*.pyc

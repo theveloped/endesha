@@ -13,6 +13,7 @@ import {
 import type { Session } from "@eclipse-zenoh/zenoh-ts";
 import { decode } from "cbor-x";
 import { Button } from "@/components/ui/button";
+import DeviceTree from "../components/DeviceTree";
 import MotionPanel from "../components/MotionPanel";
 import StatusPanel from "../components/StatusPanel";
 import Viewport from "../components/Viewport";
@@ -211,6 +212,13 @@ export default function OverviewPage({
       <Viewport
         jointsRef={jointsRef}
         baseMatrix={baseMatrix}
+        topRight={
+          <DeviceTree
+            session={session}
+            realm={realm}
+            commandsEnabled={commandsEnabled}
+          />
+        }
         controls={
           <>
             <Button

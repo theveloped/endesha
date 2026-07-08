@@ -1,6 +1,7 @@
-// App shell (gui-design-spec §2): realm-tinted top bar with LIVE/SIM/REPLAY
-// switcher, nav rail, page workspace, global replay drawer. Identical page
-// components render live hardware AND recordings by realm-prefix swap alone.
+// App shell (gui-design-spec §2): top bar with CELL/REPLAY switcher, nav rail,
+// page workspace, global replay drawer. The operating namespace is the fixed
+// "cell" token (live/sim is a per-device source mode, not a realm); identical
+// page components render the live cell AND recordings by realm-prefix swap.
 // A dropped WebSocket is surfaced via Session.isClosed() on the top-bar dot;
 // the 3 s status-staleness rule only feeds the ALIVE badge (driverAlive) —
 // a paused replay is NOT a disconnect.
@@ -64,7 +65,7 @@ export default function App() {
   const [connectError, setConnectError] = useState<string | null>(null);
 
   const [realm, setRealm] = useState<Realm>({
-    kind: "live",
+    kind: "cell",
     replaySession: null,
   });
   const [page, setPage] = useState<PageId>("overview");

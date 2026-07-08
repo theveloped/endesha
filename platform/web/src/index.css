@@ -65,12 +65,7 @@
 
 /* Realm tint = primary (spec §1): every primary button and active toggle
    item is realm-tinted with zero per-component work. */
-[data-realm="live"] {
-    --tint: #ff6a00;
-    --primary: #ff6a00;
-    --primary-foreground: #16181d;
-}
-[data-realm="sim"] {
+[data-realm="cell"] {
     --tint: #22b8cf;
     --primary: #22b8cf;
     --primary-foreground: #16181d;

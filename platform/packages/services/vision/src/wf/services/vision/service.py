@@ -257,8 +257,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="wf.services.vision", description=__doc__)
     parser.add_argument(
         "--realm",
-        default=os.environ.get("WF_REALM", "sim"),
-        help="realm (default env WF_REALM or 'sim')",
+        default=os.environ.get("WF_REALM", "cell"),
+        help="namespace (default env WF_REALM or 'cell')",
     )
     parser.add_argument(
         "--pipeline", required=True, help="output pipeline name (vision/{pipeline}/image)"

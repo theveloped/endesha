@@ -12,8 +12,30 @@ Rejection-reason taxonomy returned by the drivers' ``on_accept`` (this module
 plus the gate's own checks): ``bad_goal:``, ``empty_path``,
 ``unsupported_waypoint_type``, ``target_outside_limits``, ``frame_unknown:``,
 ``ik_failure:{i}``, ``collision:{a}|{b}`` (from the §5.10 collision preflight,
-see :mod:`wf.world_model.preflight`), ``no_joint_state``,
-``safety_stop_active``, ``mirroring``, ``busy``.
+see :mod:`wf.world_model.preflight`), ``unsupported_constraint`` (a ``free``
+loose-goal block on anything but the last waypoint), ``no_feasible_goal:{i}``
+(the gate found no reachable, collision-free sample of a loose goal),
+``no_joint_state``, ``safety_stop_active``, ``mirroring``, ``busy``.
+
+A ``free`` block on the LAST waypoint's pose target (see
+:class:`wf.contracts.arm.messages.Freedom`) leaves one goal DOF free/ranged.
+Such a waypoint is NOT resolved to a single ``q`` here: it is recorded as a
+``constrained`` resolution entry (nominal pose + freedom + IK seed) and the
+gate samples/prunes it after this returns.
+
+A ``movel`` waypoint (pose target only) resolves the same way as a movej pose
+target — the endpoint IK gives seed continuity and reachability — but also
+records the goal TCP pose in the base frame under ``cartesian`` so execute can
+drive a straight Cartesian line to it. The straight-line path itself (and its
+singularity / branch guards) is built at execute time.
+
+A ``movel`` + ``free`` block is a PATH-LOOSE move: one DOF is free along the
+straight-line path. It is recorded under ``path_loose`` (goal pose + freedom +
+goal TCP pose + IK seed); execute tries a plain straight-line movel to the exact
+goal first and, only if that is infeasible, walks the free DOF nearest-first to
+the first feasible end orientation (the free DOF then varies continuously along
+the orientation slerp). It may fail with ``movel:no_feasible_path`` when no
+orientation yields a valid, collision-free straight-line move.
 """
 
 from __future__ import annotations
@@ -21,12 +43,13 @@ from __future__ import annotations
 import numpy as np
 
 from wf.contracts.arm import keys
-from wf.contracts.arm.messages import ExecutePathGoal, Pose
+from wf.contracts.arm.messages import ExecutePathGoal, Freedom, Pose
 from wf.core.codec import decode
 from wf.core.frames import (
     invert_transform,
     make_transform,
     quaternion_to_rotation_matrix,
+    transform_to_xyz_quat,
 )
 from wf.core.frametree import FrameDef, FrameTree, FrameUnknown
 from wf.core.scene import SceneObject
@@ -154,14 +177,72 @@ def resolve_goal(
     frames_used: dict[str, dict] = {}
 
     for i, wp in enumerate(parsed.waypoints):
-        if wp.type != "movej":
+        if wp.type not in ("movej", "movel"):
             return "unsupported_waypoint_type", None
+        is_movel = wp.type == "movel"
         has_q = "q" in wp.target
         has_pose = "pose" in wp.target
         if has_q == has_pose:
             return "bad_goal: target must have exactly one of q|pose", None
+        if is_movel and not has_pose:
+            return "bad_goal: movel requires a pose target", None
 
         wp_wire = goal["waypoints"][i]
+
+        if "free" in wp.target:
+            # One DOF free/ranged. Recorded (not resolved to a single q) and
+            # deferred to execute, which tries the exact pose first and only
+            # then searches the free DOF (movej -> loose END goal; movel ->
+            # path-loose straight line).
+            if i != len(parsed.waypoints) - 1:
+                return "unsupported_constraint", None
+            if not has_pose:
+                return "bad_goal: free requires a pose target", None
+            try:
+                free = Freedom.from_wire(wp.target["free"])
+                pose = Pose.from_wire(wp.target["pose"])
+            except Exception as exc:
+                return f"bad_goal: {exc!r}", None
+            try:
+                T_base_frame = tree.resolve(pose.frame, base_frame)
+            except FrameUnknown as e:
+                return f"frame_unknown:{e.frame}", None
+            if pose.frame != base_frame:
+                for name, node in (
+                    tree.chain(pose.frame) | tree.chain(base_frame)
+                ).items():
+                    frames_used[name] = node.to_wire()
+            if is_movel:
+                T_base_tcp_target = T_base_frame @ make_transform(
+                    quaternion_to_rotation_matrix(pose.quat), pose.xyz
+                )
+                g_xyz, g_quat = transform_to_xyz_quat(T_base_tcp_target)
+                resolved.append(
+                    {
+                        "type": "movel",
+                        "target": wp_wire["target"],
+                        "path_loose": {
+                            "pose": pose.to_wire(),
+                            "free": free.to_wire(),
+                            "goal_tcp": {"xyz": g_xyz, "quat": g_quat},
+                        },
+                        "seed_q": list(seed),
+                    }
+                )
+            else:
+                resolved.append(
+                    {
+                        "type": "movej",
+                        "target": wp_wire["target"],
+                        "constrained": {
+                            "pose": pose.to_wire(),
+                            "free": free.to_wire(),
+                        },
+                        "seed_q": list(seed),
+                    }
+                )
+            continue
+
         if has_q:
             q = wp.target.get("q")
             if not isinstance(q, list) or len(q) != 6:
@@ -196,11 +277,18 @@ def resolve_goal(
             if not _q_within_limits(q, jmin, jmax, margin):
                 return "target_outside_limits", None
             wp_wire["target"]["q"] = q
+            if is_movel:
+                # Record the goal TCP pose in the BASE frame so execute drives a
+                # straight Cartesian line to it without re-resolving frames. The
+                # endpoint q above (seed continuity + reachability) is kept too.
+                g_xyz, g_quat = transform_to_xyz_quat(T_base_tcp_target)
+                cartesian_goal = {"goal_tcp": {"xyz": g_xyz, "quat": g_quat}}
 
         seed = q
-        resolved.append(
-            {"type": wp.type, "target": wp_wire["target"], "resolved_q": q}
-        )
+        entry = {"type": wp.type, "target": wp_wire["target"], "resolved_q": q}
+        if is_movel:
+            entry["cartesian"] = cartesian_goal
+        resolved.append(entry)
 
     resolution = {
         "waypoints": resolved,

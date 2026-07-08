@@ -7,11 +7,19 @@ positions in meters, angles in radians, quaternions ``[qx, qy, qz, qw]``
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from wf.core.time import CLOCK_HOST
 
 DO_BANKS = ("standard", "tool")
+
+# Loose-goal DOF taxonomy: roll/pitch/yaw are rotations about the x/y/z axis;
+# x/y/z are translations along that axis. The int is the axis index (0=x…).
+ROTATION_DOF = {"roll": 0, "pitch": 1, "yaw": 2}
+TRANSLATION_DOF = {"x": 0, "y": 1, "z": 2}
+FREEDOM_FRAMES = ("reference", "tool")
+DEFAULT_ROT_STEP = math.radians(5.0)  # rad — sweep resolution for a free rotation
 
 
 @dataclass
@@ -38,6 +46,88 @@ class Pose:
     @classmethod
     def from_wire(cls, d: dict) -> "Pose":
         return cls(frame=d["frame"], xyz=list(d["xyz"]), quat=list(d["quat"]))
+
+
+@dataclass
+class Freedom:
+    """One free / ranged goal DOF sampled by the loose-goal solver.
+
+    Sits beside ``pose`` in a waypoint ``target`` (``target: {pose, free}``).
+    ``dof`` is one of ``x``/``y``/``z`` (translation along that axis, metres) or
+    ``roll``/``pitch``/``yaw`` (rotation about that axis, radians). ``frame``
+    selects the axis convention: ``"reference"`` (the pose's own reference
+    frame, default) or ``"tool"`` (the TCP-local axes).
+
+    ``[min, max]`` bounds the sweep (``step`` resolution). A rotation may omit
+    the bounds for a full ``[-pi, pi)`` sweep and defaults ``step`` to 5 deg; a
+    translation MUST give both bounds and a ``step`` (a fully free translation
+    is not a valid goal). Bounds/step are normalised to concrete numbers in
+    ``__post_init__`` so downstream consumers always see filled values.
+    """
+
+    dof: str
+    frame: str = "reference"
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+
+    def __post_init__(self):
+        if self.dof not in ROTATION_DOF and self.dof not in TRANSLATION_DOF:
+            raise ValueError(
+                f"dof must be one of {sorted(ROTATION_DOF) + sorted(TRANSLATION_DOF)}, "
+                f"got {self.dof!r}"
+            )
+        if self.frame not in FREEDOM_FRAMES:
+            raise ValueError(
+                f"frame must be one of {FREEDOM_FRAMES}, got {self.frame!r}"
+            )
+        if self.is_rotation:
+            if self.min is None and self.max is None:
+                self.min, self.max = -math.pi, math.pi
+            elif self.min is None or self.max is None:
+                raise ValueError("rotation free dof needs both min and max, or neither")
+            if self.step is None:
+                self.step = DEFAULT_ROT_STEP
+        else:
+            if self.min is None or self.max is None:
+                raise ValueError("translation free dof requires both min and max")
+            if self.step is None:
+                raise ValueError("translation free dof requires an explicit step")
+        self.min = float(self.min)
+        self.max = float(self.max)
+        self.step = float(self.step)
+        if self.min >= self.max:
+            raise ValueError(f"min ({self.min}) must be < max ({self.max})")
+        if self.step <= 0:
+            raise ValueError(f"step must be > 0, got {self.step}")
+
+    @property
+    def is_rotation(self) -> bool:
+        return self.dof in ROTATION_DOF
+
+    @property
+    def axis(self) -> int:
+        """Axis index 0=x/1=y/2=z the DOF acts on."""
+        return (ROTATION_DOF if self.is_rotation else TRANSLATION_DOF)[self.dof]
+
+    def to_wire(self) -> dict:
+        return {
+            "dof": self.dof,
+            "frame": self.frame,
+            "min": float(self.min),
+            "max": float(self.max),
+            "step": float(self.step),
+        }
+
+    @classmethod
+    def from_wire(cls, d: dict) -> "Freedom":
+        return cls(
+            dof=d["dof"],
+            frame=d.get("frame", "reference"),
+            min=d.get("min"),
+            max=d.get("max"),
+            step=d.get("step"),
+        )
 
 
 @dataclass
@@ -226,13 +316,20 @@ class Waypoint:
 
     - ``{"q": [6 floats]}`` — joint-space target (any waypoint type).
     - ``{"pose": {frame, xyz, quat}}`` — frame-referenced Cartesian target
-      for the ACTIVE TCP; allowed on ``type: "movej"`` only (IK + joint
-      interpolation). Resolved against the static frame tree at goal
-      acceptance: the driver injects the solved ``q`` into the target and
-      records the resolution in the execution snapshot.
+      for the ACTIVE TCP. On ``type: "movej"`` the goal is reached by IK +
+      joint interpolation; on ``type: "movel"`` the TCP travels a straight
+      Cartesian line (position lerp + orientation slerp) to it. Resolved
+      against the static frame tree at goal acceptance: the driver injects
+      the solved endpoint ``q`` into the target and records the resolution in
+      the execution snapshot.
 
-    ``speed``/``accel`` are accepted and recorded but unused — per-waypoint
-    profiles arrive with movel.
+    A pose target on the LAST waypoint of a ``movej`` may additionally carry a
+    ``free`` block (see :class:`Freedom`): ``{"pose": ..., "free": {...}}``.
+    One goal DOF is then left free / ranged and the driver samples it,
+    prunes by IK + collision, and executes the fastest collision-free option
+    rather than a single pinned pose.
+
+    ``speed``/``accel`` are accepted and recorded but currently unused.
     """
 
     type: str

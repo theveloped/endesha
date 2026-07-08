@@ -70,12 +70,30 @@ export interface Ack {
 }
 
 /**
- * Target is exactly one of {q: [6 floats]} | {pose: Pose}. Pose targets are
- * movej-only and resolved (frame lookup + IK) at goal acceptance.
+ * One free / ranged goal DOF (wf/contracts/arm/messages.py::Freedom).
+ * `dof`: x|y|z (translation, m) or roll|pitch|yaw (rotation, rad). `frame`:
+ * "reference" (pose's frame axes) | "tool" (TCP-local axes). A rotation may
+ * omit min/max for a full [-pi,pi) sweep; a translation requires both.
+ */
+export interface Freedom {
+  dof: "x" | "y" | "z" | "roll" | "pitch" | "yaw";
+  frame?: "reference" | "tool";
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
+/**
+ * Target is exactly one of {q: [6 floats]} | {pose: Pose}. A pose target is
+ * resolved (frame lookup + IK) at goal acceptance. On a `movej` it is reached
+ * by joint interpolation; on a `movel` the TCP travels a straight Cartesian
+ * line. A pose target on the last waypoint may carry a `free` block: on movej
+ * that is a loose END goal (one DOF free), on movel a path-loose move (one DOF
+ * free along the whole path).
  */
 export interface Waypoint {
-  type: string;
-  target: { q: number[] } | { pose: Pose };
+  type: "movej" | "movel";
+  target: { q: number[] } | { pose: Pose; free?: Freedom };
   speed: number | null;
   accel: number | null;
   blend_radius: number;
@@ -418,4 +436,35 @@ export interface SupervisorDescriptor {
   owns_resources: string[];
   always_on: SupervisorService[];
   started_at: WireTimestamp;
+}
+
+// Device inventory (supervisor/devices): the cell's logical devices, their
+// available source modes, and the active mode per device (drives the UI tree).
+
+export interface DeviceSource {
+  mode: string; // live | sim | replay (declared)
+  kind: string;
+  launch: string; // "module" | "external"
+}
+
+export interface DeviceEntry {
+  id: string;
+  contract: string;
+  model: string | null;
+  active: string | null; // active mode, or null/off
+  sources: DeviceSource[];
+}
+
+export interface DevicesList {
+  t: WireTimestamp;
+  node: string;
+  devices: DeviceEntry[];
+}
+
+/** supervisor/cmd/set_source reply: `{ok, device_id?, source?, error?}`. */
+export interface SetSourceReply {
+  ok: boolean;
+  device_id?: string;
+  source?: string;
+  error?: string;
 }
