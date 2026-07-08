@@ -58,6 +58,22 @@ def flow_status(realm: str, flow: str) -> str:
     return key(flows_prefix(realm), flow, "status")
 
 
+def flows_doc(realm: str) -> str:
+    """``{realm}/flows/doc`` — fetch one flow's authored doc (queryable).
+
+    Request ``{name}`` -> ``{ok, name, kind, doc, error}``; ``doc`` is the raw
+    graph/spec mapping the node editor loads onto its canvas."""
+    return key(flows_prefix(realm), "doc")
+
+
+def flows_cmd_save(realm: str) -> str:
+    """``{realm}/flows/cmd/save`` — persist an authored graph doc (queryable).
+
+    Request ``{name, doc}`` -> ``{ok, error}``; validates the doc and writes it
+    to the graphs dir as a repo file, then refreshes the catalog."""
+    return key(flows_prefix(realm), "cmd", "save")
+
+
 def supervisor_prefix(realm: str, node: str) -> str:
     return key(realm_prefix(realm), "supervisor", node)
 

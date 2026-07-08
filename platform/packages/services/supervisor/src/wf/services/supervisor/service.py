@@ -38,7 +38,7 @@ from wf.core.codec import decode, encode
 from wf.core.log import get_logger
 from wf.core.session import declare_alive, open_session
 from wf.core.time import now_ns
-from wf.services.task_runner.graph import Graph
+from wf.services.task_runner.graph import Graph, is_graph_doc, validate_graph
 from wf.services.task_runner.spec import load_flow
 
 from .cell import (
@@ -177,6 +177,12 @@ class SupervisorService:
             ),
             self.session.declare_queryable(
                 sup_keys.flows_catalog(self.realm), self._on_catalog_query
+            ),
+            self.session.declare_queryable(
+                sup_keys.flows_doc(self.realm), self._on_doc_query
+            ),
+            self.session.declare_queryable(
+                sup_keys.flows_cmd_save(self.realm), self._on_cmd_save
             ),
             self.session.declare_queryable(
                 sup_keys.supervisor_descriptor(self.realm, self.node),
@@ -388,6 +394,64 @@ class SupervisorService:
         self._publish_descriptor()
         return {"ok": True}
 
+    # ── graph doc read / save (node editor) ──────────────────────────────
+
+    def _on_doc_query(self, query: zenoh.Query) -> None:
+        self._reply_dict(query, self._doc_reply(self._req_field(query, "name")))
+
+    def _doc_reply(self, name: str | None) -> dict:
+        if not name or name not in self._flow_files:
+            return {"ok": False, "error": f"unknown_flow:{name or ''}"}
+        try:
+            raw = yaml.safe_load(
+                Path(self._flow_files[name]).read_text(encoding="utf-8")
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "name": name,
+            "kind": self._catalog[name]["kind"],
+            "doc": raw,
+        }
+
+    def _on_cmd_save(self, query: zenoh.Query) -> None:
+        req = self._req_payload(query)
+        self._reply_dict(query, self._save_reply(req.get("name"), req.get("doc")))
+
+    def _save_reply(self, name, doc) -> dict:
+        """Validate + persist an authored graph doc as a repo file, then refresh
+        the catalog. Only node graphs are editor-authored; legacy specs are not
+        overwritable here."""
+        if not isinstance(name, str) or not name:
+            return {"ok": False, "error": "bad_save:name"}
+        if not isinstance(doc, dict):
+            return {"ok": False, "error": "bad_save:doc must be a mapping"}
+        if self.graphs_dir is None:
+            return {"ok": False, "error": "bad_save:no_graphs_dir"}
+        doc = {**doc, "name": name}
+        if not is_graph_doc(doc):
+            return {"ok": False, "error": "bad_save:not_a_graph"}
+        existing = self._flow_files.get(name)
+        if existing is not None and self.graphs_dir not in Path(existing).parents:
+            return {"ok": False, "error": f"exists_as_spec:{name}"}
+        try:
+            graph = validate_graph(doc)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        try:
+            self.graphs_dir.mkdir(parents=True, exist_ok=True)
+            path = self.graphs_dir / f"{name}.yaml"
+            path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+        with self._lock:
+            self._catalog[name] = _describe_flow(graph)
+            self._flow_files[name] = str(path.resolve())
+            self._errors.pop(name, None)
+        self._publish_catalog()
+        return {"ok": True, "name": name}
+
     # ── catalog / descriptor / status ────────────────────────────────────
 
     def _catalog_payload(self) -> dict:
@@ -554,6 +618,22 @@ class SupervisorService:
             flow = req.get("flow")
             return flow if isinstance(flow, str) else None
         return None
+
+    @staticmethod
+    def _req_payload(query: zenoh.Query) -> dict:
+        payload = query.payload
+        if payload is None:
+            return {}
+        try:
+            req = decode(payload)
+        except Exception:  # noqa: BLE001
+            return {}
+        return req if isinstance(req, dict) else {}
+
+    @classmethod
+    def _req_field(cls, query: zenoh.Query, field: str) -> str | None:
+        value = cls._req_payload(query).get(field)
+        return value if isinstance(value, str) else None
 
     @staticmethod
     def _reply_dict(query: zenoh.Query, value: dict) -> None:
