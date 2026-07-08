@@ -16,8 +16,10 @@ import {
   cmdStop,
   configCmdDelete,
   configCmdSet,
+  flowsCmdSave,
   flowsCmdStart,
   flowsCmdStop,
+  flowsDoc,
   supervisorCmdSetSource,
   taskCmdAbort,
   taskCmdStart,
@@ -30,6 +32,9 @@ import type {
   GoalReply,
   GoalResult,
   FlowCmdReply,
+  FlowDocReply,
+  FlowSaveReply,
+  GraphDoc,
   SetSourceReply,
   TaskStartReply,
   Waypoint,
@@ -262,6 +267,31 @@ export async function stopFlow(
   if (reply === null)
     throw new Error("no reply from flows/cmd/stop (supervisor running?)");
   return reply as FlowCmdReply;
+}
+
+/** Fetch one flow's authored doc (graph/spec) for the node editor. */
+export async function fetchFlowDoc(
+  session: Session,
+  realm: string,
+  name: string,
+): Promise<FlowDocReply> {
+  const reply = await query(session, flowsDoc(realm), { name });
+  if (reply === null)
+    throw new Error("no reply from flows/doc (supervisor running?)");
+  return reply as FlowDocReply;
+}
+
+/** Persist an authored graph doc as a repo file via the supervisor. */
+export async function saveFlowDoc(
+  session: Session,
+  realm: string,
+  name: string,
+  doc: GraphDoc,
+): Promise<FlowSaveReply> {
+  const reply = await query(session, flowsCmdSave(realm), { name, doc });
+  if (reply === null)
+    throw new Error("no reply from flows/cmd/save (supervisor running?)");
+  return reply as FlowSaveReply;
 }
 
 /** Cold-switch a device's source mode (live/sim/replay/off) via the supervisor. */

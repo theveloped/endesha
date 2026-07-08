@@ -404,10 +404,54 @@ export interface FlowRoleBinding {
 export interface FlowCatalogEntry {
   name: string;
   roles: Record<string, FlowRoleBinding>;
+  /** "spec" (legacy statechart) or "graph" (node-graph doc). */
+  kind?: "spec" | "graph";
   pipeline: string | null;
   format: string | null;
   online: boolean;
   error: string | null;
+}
+
+// Node-graph doc model, mirroring wf/services/task_runner/graph.py. The editor
+// loads/saves this shape; the runtime walks its exec edges. Endpoint keys:
+// flowsDoc (get) + flowsCmdSave (persist).
+
+export interface GraphNodeDoc {
+  id: string;
+  type: string;
+  params?: Record<string, unknown>;
+}
+
+export interface GraphEdgeDoc {
+  from: string;
+  to: string;
+  kind?: "exec" | "data";
+  port?: string;
+}
+
+export interface GraphDoc {
+  name: string;
+  kind?: "flow" | "skill";
+  roles?: Record<string, { contract: string }>;
+  start?: string;
+  nodes: GraphNodeDoc[];
+  edges?: GraphEdgeDoc[];
+}
+
+/** flows/doc reply: the raw authored doc for one flow. */
+export interface FlowDocReply {
+  ok: boolean;
+  name?: string;
+  kind?: "spec" | "graph";
+  doc?: GraphDoc | Record<string, unknown>;
+  error?: string;
+}
+
+/** flows/cmd/save reply. */
+export interface FlowSaveReply {
+  ok: boolean;
+  name?: string;
+  error?: string;
 }
 
 export interface FlowsCatalog {

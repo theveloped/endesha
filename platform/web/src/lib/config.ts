@@ -238,6 +238,16 @@ export function flowsCmdStop(realm: string): string {
   return `${realm}/flows/cmd/stop`;
 }
 
+/** Fetch one flow's authored doc: request `{name}` -> `{ok, name, kind, doc}`. */
+export function flowsDoc(realm: string): string {
+  return `${realm}/flows/doc`;
+}
+
+/** Persist an authored graph doc: request `{name, doc}` -> `{ok, error}`. */
+export function flowsCmdSave(realm: string): string {
+  return `${realm}/flows/cmd/save`;
+}
+
 export function supervisorAlive(realm: string, node = "main"): string {
   return `${realm}/supervisor/${node}/alive`;
 }
