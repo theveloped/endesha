@@ -38,7 +38,8 @@ from wf.core.codec import decode, encode
 from wf.core.log import get_logger
 from wf.core.session import declare_alive, open_session
 from wf.core.time import now_ns
-from wf.services.task_runner.spec import load_spec
+from wf.services.task_runner.graph import Graph
+from wf.services.task_runner.spec import load_flow
 
 from .cell import (
     devices_inventory,
@@ -54,6 +55,39 @@ _log = get_logger("wf.services.supervisor.service")
 _REAP_PERIOD_S = 1.0
 
 
+def _describe_flow(obj: dict | Graph) -> dict:
+    """Normalize a loaded flow (legacy spec dict OR node :class:`Graph`) into a
+    uniform catalog descriptor the supervisor consumes regardless of format::
+
+        {"name", "roles", "kind": "spec"|"graph",
+         "vision_pipelines": [(pipeline, format), ...]}
+
+    ``roles`` keeps the ``{role: {"contract": ...}}`` shape ``resolve_roles``
+    expects. A graph's vision pipelines come from its ``vision.start`` nodes (an
+    arm-only graph has none)."""
+    if isinstance(obj, Graph):
+        pipelines: list[tuple[str, str]] = []
+        for node in obj.nodes.values():
+            if node.type == "vision.start":
+                pipeline = node.params.get("pipeline") or f"{obj.name}_detect"
+                fmt = node.params.get("format")
+                fmt = fmt if isinstance(fmt, str) else "Any"
+                if (pipeline, fmt) not in pipelines:
+                    pipelines.append((pipeline, fmt))
+        return {
+            "name": obj.name,
+            "roles": dict(obj.roles),
+            "kind": "graph",
+            "vision_pipelines": pipelines,
+        }
+    return {
+        "name": obj["name"],
+        "roles": dict(obj["roles"]),
+        "kind": "spec",
+        "vision_pipelines": [(obj["vision"]["pipeline"], obj["vision"]["format"])],
+    }
+
+
 class SupervisorService:
     def __init__(
         self,
@@ -63,6 +97,7 @@ class SupervisorService:
         active_sources: dict,
         *,
         flows_dir: str,
+        graphs_dir: str | None = None,
         config_dir: str = "deploy/config",
         with_config: bool = False,
         zenoh_config: str | None = None,
@@ -78,6 +113,7 @@ class SupervisorService:
         self.realized = realize_cell(cell, self.active_sources)
         self.cell_path = _write_realized_cell(self.realized)
         self.flows_dir = Path(flows_dir)
+        self.graphs_dir = Path(graphs_dir) if graphs_dir else None
         self.config_dir = config_dir
         self.with_config = with_config
         self.zenoh_config = zenoh_config
@@ -90,21 +126,28 @@ class SupervisorService:
         self._alive_token = None
         self._started_at = now_ns()
 
-        # Scan the flows directory: a valid spec lands in _catalog; a malformed
-        # file lands in _errors under its file stem (reported, never a crash).
+        # Scan the flow directories: a valid flow (legacy spec OR node graph)
+        # lands in _catalog as a normalized descriptor; a malformed file lands in
+        # _errors under its file stem (reported, never a crash).
         self._catalog: dict[str, dict] = {}
         self._flow_files: dict[str, str] = {}
         self._errors: dict[str, str] = {}
-        for path in sorted(self.flows_dir.glob("*.yaml")):
-            stem = path.stem
-            try:
-                spec = load_spec(path)
-            except Exception as exc:  # noqa: BLE001
-                self._errors[stem] = str(exc)
-                _log.warning("flow %s invalid: %s", stem, exc)
+        scan_dirs = [self.flows_dir]
+        if self.graphs_dir is not None:
+            scan_dirs.append(self.graphs_dir)
+        for scan_dir in scan_dirs:
+            if not scan_dir.exists():
                 continue
-            self._catalog[spec["name"]] = spec
-            self._flow_files[spec["name"]] = str(path.resolve())
+            for path in sorted(scan_dir.glob("*.yaml")):
+                stem = path.stem
+                try:
+                    desc = _describe_flow(load_flow(path))
+                except Exception as exc:  # noqa: BLE001
+                    self._errors[stem] = str(exc)
+                    _log.warning("flow %s invalid: %s", stem, exc)
+                    continue
+                self._catalog[desc["name"]] = desc
+                self._flow_files[desc["name"]] = str(path.resolve())
 
         self._catalog_pub = session.declare_publisher(
             sup_keys.flows_catalog(realm),
@@ -263,17 +306,16 @@ class SupervisorService:
         detectors. The camera is the one the flows using that pipeline resolve
         to (single-camera cell -> the one camera)."""
         seen: dict[str, tuple[str, str, str]] = {}
-        for name, spec in self._catalog.items():
-            pipeline = spec["vision"]["pipeline"]
-            fmt = spec["vision"]["format"]
+        for name, desc in self._catalog.items():
             try:
-                roles = resolve_roles(self.cell, spec, name)
+                roles = resolve_roles(self.cell, desc, name)
             except KeyError:
                 continue
             cid = roles.get("cam")
             if cid is None:
                 continue
-            seen.setdefault(pipeline, (pipeline, fmt, cid))
+            for pipeline, fmt in desc["vision_pipelines"]:
+                seen.setdefault(pipeline, (pipeline, fmt, cid))
         return list(seen.values())
 
     # ── flow orchestration ───────────────────────────────────────────────
@@ -294,16 +336,17 @@ class SupervisorService:
         with self._lock:
             if self._procs.alive(f"task:{name}"):
                 return {"ok": False, "error": "already_online"}
-            spec = self._catalog[name]
+            desc = self._catalog[name]
             try:
-                roles = resolve_roles(self.cell, spec, name)
+                roles = resolve_roles(self.cell, desc, name)
             except KeyError as exc:
                 return {"ok": False, "error": str(exc)}
-            try:
-                rid = roles["arm"]
-                cid = roles["cam"]
-            except KeyError as exc:
-                return {"ok": False, "error": f"unresolved_role:{exc.args[0]}"}
+            rid = roles.get("arm")
+            if rid is None:
+                return {"ok": False, "error": "unresolved_role:arm"}
+            # A flow needn't use a camera (e.g. an arm-only pick graph); the
+            # task_runner accepts a default cid it simply won't drive.
+            cid = roles.get("cam", "cam0")
             self._publish_status(name, "spawning", [])
             cfg = self.zenoh_config
             argv = [
@@ -362,24 +405,26 @@ class SupervisorService:
                     }
                 )
                 continue
-            spec = self._catalog[name]
+            desc = self._catalog[name]
             error = None
             roles: dict[str, dict] = {}
             try:
-                resolved = resolve_roles(self.cell, spec, name)
-                for role, decl in spec["roles"].items():
+                resolved = resolve_roles(self.cell, desc, name)
+                for role, decl in desc["roles"].items():
                     roles[role] = {
                         "contract": decl["contract"],
                         "resource_id": resolved[role],
                     }
             except KeyError as exc:
                 error = str(exc)
+            pipelines = desc["vision_pipelines"]
             flows.append(
                 {
                     "name": name,
                     "roles": roles,
-                    "pipeline": spec["vision"]["pipeline"],
-                    "format": spec["vision"]["format"],
+                    "kind": desc["kind"],
+                    "pipeline": pipelines[0][0] if pipelines else None,
+                    "format": pipelines[0][1] if pipelines else None,
                     "online": self._procs.alive(f"task:{name}"),
                     "error": error,
                 }
@@ -554,7 +599,12 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--flows-dir",
         default="packages/services/task_runner/flows",
-        help="directory of flow YAML specs",
+        help="directory of legacy flow YAML specs",
+    )
+    parser.add_argument(
+        "--graphs-dir",
+        default="packages/services/task_runner/graphs/flows",
+        help="directory of node-graph flow docs",
     )
     parser.add_argument(
         "--config-dir",
@@ -583,6 +633,7 @@ def main(argv=None) -> int:
         cell,
         active,
         flows_dir=args.flows_dir,
+        graphs_dir=args.graphs_dir,
         config_dir=args.config_dir,
         with_config=args.with_config,
         zenoh_config=args.zenoh_config,
