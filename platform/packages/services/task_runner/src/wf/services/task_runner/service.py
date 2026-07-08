@@ -23,14 +23,26 @@ from wf.core.log import get_logger
 from wf.core.session import declare_alive, open_session
 from wf.core.time import now_ns
 
-from .leaves import Leaves
 from .flow import build_flow_class
-from .spec import load_spec
+from .graph import Aborted, Graph, GraphRunner
+from .leaves import Leaves
+from .nodes import build_handlers
+from .spec import load_flow
 from wf.services.config import keys as config_keys
 
 _log = get_logger("wf.services.task_runner.service")
 
 _LEASE_RENEW_S = 10.0
+
+
+def _graph_pipeline(graph: Graph) -> str:
+    """The vision pipeline a graph drives: the first node's ``pipeline`` param,
+    else ``{name}_detect`` (matches the legacy spec default)."""
+    for node in graph.nodes.values():
+        pipeline = node.params.get("pipeline")
+        if isinstance(pipeline, str) and pipeline:
+            return pipeline
+    return f"{graph.name}_detect"
 
 
 class _Snapshot:
@@ -86,7 +98,7 @@ class TaskRunnerService:
         self,
         session: zenoh.Session,
         realm: str,
-        spec: dict,
+        spec: dict | Graph,
         *,
         rid: str = "r1",
         cid: str = "cam0",
@@ -94,14 +106,21 @@ class TaskRunnerService:
     ) -> None:
         self.session = session
         self.realm = realm
-        self.spec = spec
-        self.name = spec["name"]
+        self.flow = spec
+        self.is_graph = isinstance(spec, Graph)
         self.rid = rid
         self.cid = cid
+        if self.is_graph:
+            self.spec = None
+            self.name = spec.name
+            self.pipeline = _graph_pipeline(spec)
+            self._flow_cls = None
+        else:
+            self.spec = spec
+            self.name = spec["name"]
+            self.pipeline = spec["vision"]["pipeline"]
+            self._flow_cls = build_flow_class(spec)
         self.client_id = client_id or f"task_runner:{self.name}"
-        self.pipeline = spec["vision"]["pipeline"]
-
-        self._flow_cls = build_flow_class(spec)
         self._state_pub = session.declare_publisher(
             task_keys.state(realm, self.name),
             congestion_control=zenoh.CongestionControl.DROP,
@@ -180,12 +199,28 @@ class TaskRunnerService:
     # ── run ──────────────────────────────────────────────────────────────
 
     def _missing_pose(self) -> str | None:
-        """First spec pose with no ``config/poses/{name}`` entry, or None."""
-        for pose in self.spec["poses"]:
+        """First named pose with no ``config/poses/{name}`` entry, or None.
+
+        Covers both the legacy spec (``poses``) and a graph doc (``move`` nodes'
+        ``pose_name`` params), so a run naming an unknown pose is rejected before
+        any motion.
+        """
+        for pose in self._pose_names():
             reply = self._query(config_keys.pose(pose), {})
             if reply is None or "q" not in reply:
                 return pose
         return None
+
+    def _pose_names(self) -> list[str]:
+        if not self.is_graph:
+            return list(self.spec["poses"])
+        names: list[str] = []
+        for node in self.flow.nodes.values():
+            if node.type == "move":
+                name = node.params.get("pose_name")
+                if isinstance(name, str) and name and name not in names:
+                    names.append(name)
+        return names
 
     def _run(self) -> None:
         leaves = Leaves(
@@ -197,24 +232,13 @@ class TaskRunnerService:
             client_id=self.client_id,
         )
         self._leaves = leaves
-        snapshot = _Snapshot(self.name, self._publish_state)
         try:
             leaves.acquire_lease()
             self._start_lease_timer()
-            sm = self._flow_cls(leaves)
-            snapshot.sm = sm
-            sm.add_listener(snapshot)
-            snapshot._emit()  # initial configuration snapshot
-            sm.pump()
-            self._publish_result(
-                {
-                    "t": now_ns(),
-                    "flow": self.name,
-                    "ok": bool(getattr(sm, "ok", False)),
-                    "error": sm.error,
-                    "summary": sm.context.get("summary"),
-                }
+            result = (
+                self._run_graph(leaves) if self.is_graph else self._run_spec(leaves)
             )
+            self._publish_result(result)
         except Exception as exc:  # noqa: BLE001 — a run failure must not crash the service
             _log.exception("run failed")
             self._publish_result(
@@ -233,6 +257,74 @@ class TaskRunnerService:
             self._leaves = None
             with self._run_lock:
                 self._active = False
+
+    def _run_spec(self, leaves: Leaves) -> dict:
+        """Drive the legacy parallel statechart and return its result dict."""
+        snapshot = _Snapshot(self.name, self._publish_state)
+        sm = self._flow_cls(leaves)
+        snapshot.sm = sm
+        sm.add_listener(snapshot)
+        snapshot._emit()  # initial configuration snapshot
+        sm.pump()
+        return {
+            "t": now_ns(),
+            "flow": self.name,
+            "ok": bool(getattr(sm, "ok", False)),
+            "error": sm.error,
+            "summary": sm.context.get("summary"),
+        }
+
+    def _run_graph(self, leaves: Leaves) -> dict:
+        """Walk the control-flow graph, publishing the live active node.
+
+        ``state`` carries ``active`` (the running node id) + ``history`` +
+        ``context`` (the blackboard) so the editor can highlight the live node;
+        the terminal snapshot clears ``active``. Leaf/graph failures are captured
+        into the result rather than raised (the terminal snapshot still fires).
+        """
+        graph = self.flow
+        blackboard: dict = {}
+        history: list[dict] = []
+
+        def emit(active: str | None) -> None:
+            self._publish_state(
+                {
+                    "t": now_ns(),
+                    "flow": self.name,
+                    "kind": "graph",
+                    "active": active,
+                    "configuration": [active] if active is not None else [],
+                    "terminated": active is None,
+                    "history": list(history),
+                    "context": blackboard,
+                }
+            )
+
+        def on_node(node_id: str) -> None:
+            history.append({"node": node_id, "t": now_ns()})
+            emit(node_id)
+
+        runner = GraphRunner(
+            graph, build_handlers(leaves), on_node=on_node, is_aborted=leaves.aborted
+        )
+        emit(None)  # initial (pre-start) snapshot
+        try:
+            runner.run(blackboard)
+        except Aborted:
+            ok, error = False, "aborted"
+        except Exception as exc:  # noqa: BLE001 — a run failure is a flow result
+            _log.exception("graph run failed")
+            ok, error = False, repr(exc)
+        else:
+            ok, error = True, None
+        emit(None)  # terminal snapshot
+        return {
+            "t": now_ns(),
+            "flow": self.name,
+            "ok": ok,
+            "error": error,
+            "summary": blackboard,
+        }
 
     # ── lease renewal ────────────────────────────────────────────────────
 
@@ -298,12 +390,12 @@ def main(argv=None) -> int:
     parser.add_argument("--zenoh-config", default=None, help="zenoh config path")
     args = parser.parse_args(argv)
 
-    spec = load_spec(args.flow)
+    flow = load_flow(args.flow)
     session = open_session(args.zenoh_config)
     service = TaskRunnerService(
         session,
         args.realm,
-        spec,
+        flow,
         rid=args.rid,
         cid=args.cid,
         client_id=args.client_id,
@@ -312,7 +404,7 @@ def main(argv=None) -> int:
         service.start()
         if args.start:
             session.get(
-                task_keys.cmd_start(args.realm, spec["name"]),
+                task_keys.cmd_start(args.realm, service.name),
                 payload=encode({}),
                 timeout=5.0,
             )

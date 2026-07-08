@@ -13,11 +13,22 @@ from pathlib import Path
 
 import yaml
 
+from .graph import Graph, is_graph_doc, validate_graph
+
 _FORMATS = ("DataMatrix", "QRCode", "Any")
 
 
 def _fail(reason: str) -> "ValueError":
     return ValueError(f"bad_flow:{reason}")
+
+
+def load_flow(path: str | Path) -> dict | Graph:
+    """Load a flow file as either a node :class:`Graph` (has ``nodes``) or a
+    legacy statechart spec dict. The task_runner + supervisor consume both."""
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    if is_graph_doc(raw):
+        return validate_graph(raw)
+    return validate_spec(raw)
 
 
 def load_spec(path: str | Path) -> dict:

@@ -1,0 +1,24 @@
+# Demo pick FLOW as a control-flow node graph (design: node-graph authoring).
+#
+# The graph-doc counterpart to demo_inspect.yaml: instead of a hard-coded
+# parallel statechart, a sequence of typed nodes the GraphRunner walks —
+# move (movej to a named joint pose) -> grip close (tool DO) -> retreat.
+#
+# Role-bound (references the `arm` role, not a concrete rid) so it is cell-
+# agnostic. A live run needs the two poses taught first (wfctl pose save
+# pick_approach / pick_grasp); the integration test seeds them via config.
+name: demo_pick
+kind: flow
+roles:
+  arm: {contract: arm}
+nodes:
+  - {id: start, type: start}
+  - {id: approach, type: move, params: {motion: movej, pose_name: pick_approach}}
+  - {id: grasp, type: move, params: {motion: movej, pose_name: pick_grasp}}
+  - {id: close, type: grip, params: {action: close}}
+  - {id: retreat, type: move, params: {motion: movej, pose_name: pick_approach}}
+edges:
+  - {from: start, to: approach}
+  - {from: approach, to: grasp}
+  - {from: grasp, to: close}
+  - {from: close, to: retreat}
