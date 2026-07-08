@@ -24,7 +24,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { id: "overview", label: "Overview", glyph: "⌂", enabled: true },
   { id: "operate", label: "Operate", glyph: "✛", enabled: true },
-  { id: "programs", label: "Programs", glyph: "≡", enabled: false },
+  { id: "programs", label: "Editor", glyph: "≡", enabled: true },
   { id: "io", label: "IO", glyph: "⇄", enabled: true },
   { id: "cameras", label: "Cameras", glyph: "▣", enabled: true },
   { id: "vision", label: "Vision", glyph: "◎", enabled: false },

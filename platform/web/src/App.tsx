@@ -15,6 +15,7 @@ import FramesPage from "./pages/FramesPage";
 import IoPage from "./pages/IoPage";
 import OperatePage from "./pages/OperatePage";
 import OverviewPage from "./pages/OverviewPage";
+import EditorPage from "./pages/EditorPage";
 import FlowsPage from "./pages/FlowsPage";
 import TasksPage from "./pages/TasksPage";
 import {
@@ -316,6 +317,14 @@ export default function App() {
             status={status}
             jointsRef={jointsRef}
             driverAlive={driverAlive}
+            commandsEnabled={commandsEnabled}
+          />
+        ) : page === "programs" ? (
+          <EditorPage
+            key={prefix}
+            session={session}
+            realm={prefix}
+            wsConnected={wsConnected}
             commandsEnabled={commandsEnabled}
           />
         ) : page === "flows" ? (
