@@ -30,11 +30,12 @@ drive a straight Cartesian line to it. The straight-line path itself (and its
 singularity / branch guards) is built at execute time.
 
 A ``movel`` + ``free`` block is a PATH-LOOSE move: one DOF is free along the
-whole straight-line path (functional redundancy). It is recorded under
-``path_loose`` (goal pose + freedom + goal TCP pose + IK seed); the gate does a
-cheap endpoint-feasibility prune (``no_feasible_goal``) and execute runs the
-redundancy lattice DP (which may fail with ``path_loose:...`` when no on-branch,
-singularity-free corridor exists).
+straight-line path. It is recorded under ``path_loose`` (goal pose + freedom +
+goal TCP pose + IK seed); execute tries a plain straight-line movel to the exact
+goal first and, only if that is infeasible, walks the free DOF nearest-first to
+the first feasible end orientation (the free DOF then varies continuously along
+the orientation slerp). It may fail with ``movel:no_feasible_path`` when no
+orientation yields a valid, collision-free straight-line move.
 """
 
 from __future__ import annotations
@@ -190,8 +191,9 @@ def resolve_goal(
 
         if "free" in wp.target:
             # One DOF free/ranged. Recorded (not resolved to a single q) and
-            # deferred: movej -> loose END goal (gate samples/prunes/plans);
-            # movel -> path-loose redundancy (execute runs the lattice DP).
+            # deferred to execute, which tries the exact pose first and only
+            # then searches the free DOF (movej -> loose END goal; movel ->
+            # path-loose straight line).
             if i != len(parsed.waypoints) - 1:
                 return "unsupported_constraint", None
             if not has_pose:

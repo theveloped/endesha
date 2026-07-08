@@ -148,9 +148,9 @@ def _free_yaw_goal(fk, free=None):
 _COARSE_YAW = {"dof": "yaw", "min": -3.14159, "max": 3.14159, "step": 1.05}
 
 
-def test_loose_goal_accepts_fast_and_executes_fastest(fk, collision):
+def test_loose_goal_uses_nominal_when_feasible(fk, collision):
     core = _core(fk, collision)
-    goal = _free_yaw_goal(fk)
+    goal = _free_yaw_goal(fk)  # goal pose == current home flange pose
 
     # Accept must be FAST: it defers sampling/IK to execute (no candidates yet),
     # so it never blocks the client's query timeout.
@@ -164,13 +164,12 @@ def test_loose_goal_accepts_fast_and_executes_fastest(fk, collision):
     assert handle.failed is None
     assert core.backend.ran is not None, "run_path must be called"
     assert len(core.backend.ran["traj"]) > 0
-    # The chosen goal is recorded for snapshot provenance and executed.
     chosen = core.backend.ran["targets"][-1]
     assert entry["resolved_q"] == chosen
-    # It reaches the requested flange position (yaw free).
-    p_want = fk.get_ee_transform(HOME_Q)[:3, 3]
-    p_got = fk.get_ee_transform(core.backend.ran["traj"][-1])[:3, 3]
-    assert np.linalg.norm(p_got - p_want) < 5e-3
+    # Freedom as FALLBACK: the exact (nominal) pose is reachable + collision-free,
+    # so it is used directly — the solution is the nominal IK (~HOME_Q), not a
+    # swept yaw.
+    assert np.allclose(chosen, HOME_Q, atol=1e-2)
 
 
 def test_loose_goal_unreachable_fails_in_execute(fk, collision):
@@ -281,9 +280,13 @@ def test_path_loose_accepts_and_executes(fk, collision):
     assert ran is not None and len(ran["traj"]) > 0
     # TCP reaches the goal position (yaw free along the path).
     p_start = fk.get_ee_transform(HOME_Q)[:3, 3]
+    xs = [fk.get_ee_transform(q)[0, 3] for q in ran["traj"]]
     p_end = fk.get_ee_transform(ran["traj"][-1])[:3, 3]
     assert np.linalg.norm(p_end - (p_start + np.array([0.06, 0, 0]))) < 5e-3
-    # The realised joint path never flips branch (bounded step between samples).
+    # FLUID: the TCP advances monotonically along the straight line — no
+    # back-and-forth (the symptom that motivated dropping the DP corridor).
+    assert all(b >= a - 1e-4 for a, b in zip(xs, xs[1:]))
+    # And no branch flip between samples.
     for a, b in zip(ran["traj"], ran["traj"][1:]):
         assert max(abs(x - y) for x, y in zip(a, b)) < 0.8
 
@@ -293,10 +296,10 @@ def test_path_loose_unreachable_fails_in_execute(fk, collision):
     goal = _path_loose_goal(fk)
     goal["waypoints"][0]["target"]["free"] = _COARSE_YAW
     goal["waypoints"][0]["target"]["pose"]["xyz"] = [5.0, 0.0, 0.0]
-    # Accept defers (fast); the redundancy DP fails in execute with no on-branch
-    # corridor to an unreachable goal.
+    # Accept defers (fast); the movel fallback finds no feasible orientation to
+    # an unreachable goal and fails in execute.
     assert core._accept_execute_path(goal) is None
     handle = _FakeHandle(goal)
     core._execute_path(handle)
-    assert handle.failed is not None and handle.failed.startswith("path_loose:")
+    assert handle.failed == "movel:no_feasible_path"
     assert core.backend.ran is None

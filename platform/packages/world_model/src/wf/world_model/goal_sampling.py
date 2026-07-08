@@ -1,16 +1,13 @@
-"""Loose-goal sampling: expand one free/ranged DOF into candidate poses and
-prune them by IK + final-pose collision (design: loose end-goal, phase 1).
+"""Loose-goal sampling: expand one free/ranged DOF into candidate poses.
 
-A ``movej`` pose target may leave one DOF free (a full or ranged rotation, or a
-ranged translation; see :class:`wf.contracts.arm.messages.Freedom`). This module
-turns that into a discrete set of fully-defined candidate poses
-(:func:`expand_freedom`) and keeps the ones that are reachable and collision-free
-at the final pose (:func:`candidate_qs`). The surviving joint goals are handed
-to the driver, which plans a Ruckig trajectory per candidate and executes the
-fastest collision-free one.
-
-The per-station reuse of these two functions is what phase 3 (path-loose movel)
-builds on — same sampling + prune, run at every station of a Cartesian path.
+A pose target may leave one DOF free (a full or ranged rotation, or a ranged
+translation; see :class:`wf.contracts.arm.messages.Freedom`). :func:`expand_freedom`
+turns that into a discrete set of fully-defined candidate poses; the driver then
+resolves them one at a time (:func:`resolve_pose_to_q`), NOMINAL FIRST, and uses
+the first feasible one — freedom is a fallback for when the exact requested pose
+is infeasible, not a global optimisation. Requesting ``order="preference"``
+yields the candidates nominal-first then by ascending ``|theta|`` for exactly
+that lazy search.
 """
 
 from __future__ import annotations
@@ -27,7 +24,6 @@ from wf.core.frames import (
 )
 from wf.core.frametree import FrameTree
 
-from .collision import CollisionModel
 from .fk import UrdfFk
 from .ik import solve_ik
 
@@ -72,20 +68,33 @@ def _sample_thetas(free: Freedom, max_candidates: int) -> list[float]:
 
 
 def expand_freedom(
-    pose: Pose, free: Freedom, *, max_candidates: int = 256
+    pose: Pose,
+    free: Freedom,
+    *,
+    max_candidates: int = 256,
+    order: str = "sweep",
 ) -> list[Pose]:
     """Candidate poses over the free DOF, all in ``pose.frame`` coordinates.
 
     The nominal ``pose`` is the sweep centre (theta=0) and is always present
     when 0 is in range, so a loose goal never loses its unswept solution. Each
-    candidate is a fully-defined :class:`Pose` ready for the normal
-    resolve/IK path.
+    candidate is a fully-defined :class:`Pose` ready for the normal resolve/IK
+    path.
+
+    ``order``:
+    - ``"sweep"`` — ascending theta (min -> max).
+    - ``"preference"`` — nominal (theta=0) first, then by ascending ``|theta|``,
+      so a lazy caller tries the least-deviation options first and stops at the
+      first feasible one.
     """
+    thetas = _sample_thetas(free, max_candidates)
+    if order == "preference":
+        thetas = sorted(thetas, key=abs)
     R = quaternion_to_rotation_matrix(pose.quat)
     p = np.asarray(pose.xyz, dtype=np.float64)
     axis = free.axis
     out: list[Pose] = []
-    for theta in _sample_thetas(free, max_candidates):
+    for theta in thetas:
         if free.is_rotation:
             dR = _axis_rotation(axis, theta)
             R_c = dR @ R if free.frame == "reference" else R @ dR
@@ -105,53 +114,31 @@ def expand_freedom(
     return out
 
 
-def candidate_qs(
-    poses: list[Pose],
+def resolve_pose_to_q(
+    pose: Pose,
     *,
     fk: UrdfFk,
-    q_seed: list[float],
-    jmin: list[float],
-    jmax: list[float],
-    margin: float,
     tree: FrameTree,
     base_frame: str,
     tcp_T: np.ndarray,
-    collision: CollisionModel,
-    scene: list,
+    seed: list[float],
+    jmin: list[float],
+    jmax: list[float],
+    margin: float,
     ik_max_iters: int = 100,
-) -> list[list[float]]:
-    """Reachable, collision-free joint goals for ``poses`` (order = preference).
+) -> list[float] | None:
+    """Resolve one TCP ``pose`` to a joint config, or ``None`` if unreachable.
 
-    Mirrors ``resolve_goal``'s pose->flange->IK path per candidate, drops IK
-    failures and finals that collide, and sorts survivors by joint distance
-    from ``q_seed`` (a cheap proxy that front-loads the likely-fastest options
-    for the driver's duration-sorted planning).
-
-    Every candidate is seeded from the same ``q_seed`` (the pre-goal config), so
-    each solve lands on the branch consistent with the start rather than drifting
-    across branches. ``ik_max_iters`` caps each solve: a reachable pose converges
-    well within it from this seed, while an unreachable sample bails sooner —
-    bounding the cost of a sweep where many samples are out of reach.
+    Mirrors ``resolve_goal``'s pose -> base-frame -> flange -> IK path for a
+    single candidate. Seeded from ``seed`` (the pre-goal config) so the solution
+    lands on the branch consistent with the start; ``ik_max_iters`` caps the
+    solve so an unreachable candidate bails quickly during a fallback sweep.
     """
-    if not poses:
-        return []
-    tcp_T_inv = invert_transform(tcp_T)
-    T_base_frame = tree.resolve(poses[0].frame, base_frame)
-    survivors: list[list[float]] = []
-    for pose in poses:
-        T_base_tcp = T_base_frame @ make_transform(
-            quaternion_to_rotation_matrix(pose.quat), pose.xyz
-        )
-        T_base_flange = T_base_tcp @ tcp_T_inv
-        q = solve_ik(
-            fk, T_base_flange, q_seed, jmin, jmax, margin=margin,
-            max_iters=ik_max_iters,
-        )
-        if q is None:
-            continue
-        if collision.check_collision(q, scene, tree, base_frame)["hit"]:
-            continue
-        survivors.append(q)
-    seed = np.asarray(q_seed, dtype=np.float64)
-    survivors.sort(key=lambda q: float(np.sum((np.asarray(q) - seed) ** 2)))
-    return survivors
+    T_base_frame = tree.resolve(pose.frame, base_frame)
+    T_base_tcp = T_base_frame @ make_transform(
+        quaternion_to_rotation_matrix(pose.quat), pose.xyz
+    )
+    T_base_flange = T_base_tcp @ invert_transform(tcp_T)
+    return solve_ik(
+        fk, T_base_flange, seed, jmin, jmax, margin=margin, max_iters=ik_max_iters
+    )

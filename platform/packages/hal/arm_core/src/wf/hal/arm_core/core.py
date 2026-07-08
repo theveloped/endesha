@@ -54,8 +54,7 @@ from wf.world_model.cartesian import (
 )
 from wf.world_model.collision import CollisionModel
 from wf.world_model.fk import UrdfFk
-from wf.world_model.goal_sampling import candidate_qs, expand_freedom
-from wf.world_model.redundancy import RedundancyError, resolve_redundant_path
+from wf.world_model.goal_sampling import expand_freedom, resolve_pose_to_q
 from wf.world_model.frames_live import build_live_tree
 from wf.world_model.jog import jog_joint_velocity
 from wf.world_model.preflight import preflight
@@ -541,13 +540,13 @@ class ArmCore:
         if reason:
             return reason
         # Loose (movej + free) and path-loose (movel + free) goals DEFER their
-        # sampling / IK / redundancy DP to _execute_path: that work is far too
-        # slow (tens of IK solves) to run inside the accept query without
-        # blowing the client's timeout ("no reply from action server"). Accept
-        # only needs the cheap resolve_goal validation above plus the prefix
-        # collision preflight (constrained/path_loose entries carry no
-        # resolved_q, so preflight skips them). Feasibility (no_feasible_goal)
-        # is reported from the execute worker instead.
+        # free-DOF sampling / IK to _execute_path: a fallback search is too slow
+        # (many IK solves) to run inside the accept query without blowing the
+        # client's timeout ("no reply from action server"). Accept only needs
+        # the cheap resolve_goal validation above plus the prefix collision
+        # preflight (constrained/path_loose entries carry no resolved_q, so
+        # preflight skips them). Feasibility (no_feasible_goal) is reported from
+        # the execute worker instead.
         return preflight(
             resolution,
             self._live_scene.snapshot(),
@@ -621,15 +620,14 @@ class ArmCore:
         self.backend.run_path(handle, traj, wp_idx, targets, snapshot)
 
     def _execute_loose_path(self, handle: GoalHandle, resolution: dict) -> None:
-        """Execute a loose-goal path: sample the free DOF, prune by IK +
-        final-pose collision, then plan every survivor and run the fastest
-        collision-free one.
+        """Execute a loose (movej + free) goal: freedom as FALLBACK.
 
-        The sampling/pruning runs HERE (not in accept) because it is too slow
-        for the accept query — see _accept_execute_path. Each surviving joint
-        goal is planned as a full Ruckig trajectory through the fixed prefix;
-        survivors are ordered by duration (sample count at a fixed servo_dt) and
-        the first one whose DENSE trajectory collision-check clears is executed.
+        Try the exact requested pose (theta=0) first; only if it is unreachable
+        or collides do we walk the free DOF nearest-first and take the FIRST
+        orientation that yields a reachable, collision-free joint move. When the
+        exact pose already works this is one IK + one plan — identical cost to a
+        plain movej. The sampling runs HERE (not in accept) so a fallback search
+        never blocks the accept query.
         """
         start_q = self.backend.latest_q()
         if start_q is None:
@@ -643,61 +641,47 @@ class ArmCore:
         margin = self.params["joint_limit_margin_rad"]
         prefix = [list(start_q)] + prefix_targets
 
-        # Sample + prune the loose end goal into reachable, collision-free joint
-        # candidates (deferred from accept).
         entry = res_wps[-1]
         pose = Pose.from_wire(entry["constrained"]["pose"])
         free = Freedom.from_wire(entry["constrained"]["free"])
+        seed = entry.get("seed_q", list(start_q))
         with self._tcp_lock:
             _tcp_name, tcp_T = self._active_tcp
         try:
             poses = expand_freedom(
-                pose, free, max_candidates=self.params.get("max_goal_candidates", 256)
+                pose, free, order="preference",
+                max_candidates=self.params.get("max_goal_candidates", 256),
             )
         except ValueError as exc:
             handle.fail(error=f"bad_goal: {exc}")
             return
-        candidates = candidate_qs(
-            poses,
-            fk=self.fk,
-            q_seed=entry.get("seed_q", list(start_q)),
-            jmin=self.jmin,
-            jmax=self.jmax,
-            margin=margin,
-            tree=tree,
-            base_frame=self.base_frame,
-            tcp_T=tcp_T,
-            collision=self.collision,
-            scene=scene,
-        )
-        if not candidates:
-            handle.fail(error=f"no_feasible_goal:{len(res_wps) - 1}")
-            return
 
-        feasible: list[tuple[int, list, list, list]] = []
-        for cand in candidates:
+        chosen = None  # (traj, wp_idx, q)
+        for pose_c in poses:  # nominal (theta=0) first, then nearest
+            q = resolve_pose_to_q(
+                pose_c, fk=self.fk, tree=tree, base_frame=self.base_frame,
+                tcp_T=tcp_T, seed=seed, jmin=self.jmin, jmax=self.jmax,
+                margin=margin,
+            )
+            if q is None:
+                continue
+            if self.collision.check_collision(q, scene, tree, self.base_frame)["hit"]:
+                continue
             try:
                 traj, wp_idx = generate_ruckig_trajectory(
-                    prefix + [list(cand)],
-                    self.servo_dt,
-                    vmax=ruckig["vmax"],
-                    amax=ruckig["amax"],
-                    jmax=ruckig["jmax"],
+                    prefix + [q], self.servo_dt,
+                    vmax=ruckig["vmax"], amax=ruckig["amax"], jmax=ruckig["jmax"],
                 )
             except TrajectoryError:
                 continue
             if validate_trajectory(traj, self.jmin, self.jmax, margin=margin):
                 continue
-            feasible.append((len(traj), traj, wp_idx, list(cand)))
-        feasible.sort(key=lambda t: t[0])
-
-        chosen = None
-        for _n, traj, wp_idx, cand in feasible:
-            if self.collision.preflight(traj, scene, tree, self.base_frame)["ok"]:
-                chosen = (traj, wp_idx, cand)
-                break
+            if not self.collision.preflight(traj, scene, tree, self.base_frame)["ok"]:
+                continue
+            chosen = (traj, wp_idx, q)
+            break
         if chosen is None:
-            handle.fail(error="no_collision_free_path")
+            handle.fail(error=f"no_feasible_goal:{len(res_wps) - 1}")
             return
         traj, wp_idx, cand = chosen
 
@@ -718,10 +702,8 @@ class ArmCore:
             encode(snapshot),
         )
         _log.info(
-            "goal %s (loose): %d candidates, %d feasible, chosen %d samples, %.1fs",
+            "goal %s (loose): chosen %d samples, %.1fs",
             handle.goal_id,
-            len(candidates),
-            len(feasible),
             len(traj),
             len(traj) * self.servo_dt,
         )
@@ -840,46 +822,52 @@ class ArmCore:
     def _plan_path_loose_segment(
         self, handle: GoalHandle, entry: dict, running_q, tcp_T, tree, scene
     ) -> list[list[float]] | None:
-        """Resolve + time-scale one path-loose (movel + free) segment.
+        """Plan one path-loose (movel + free) segment: freedom as FALLBACK.
 
-        Runs the redundancy lattice DP to get an on-branch ``q(s)`` corridor,
-        then blends a Ruckig trajectory through the joint knots. Returns the
-        joint samples, or None after failing the handle (redundancy / trajectory
-        error) so the caller can bail out.
+        Try a plain straight-line movel to the EXACT requested end pose
+        (theta=0) first; only if that trips the reachability / singularity /
+        branch / collision guards do we walk the free DOF nearest-first and take
+        the FIRST end orientation whose movel is feasible and collision-free.
+        The free DOF varies continuously along the orientation slerp, so the
+        motion is a single smooth straight line — not a stitched DP corridor.
+        Returns the joint samples, or ``None`` after failing the handle.
         """
         pl = entry["path_loose"]
         T_start_tcp = self.fk.get_ee_transform(running_q) @ tcp_T
-        g = pl["goal_tcp"]
-        T_goal_tcp = make_transform(
-            quaternion_to_rotation_matrix(g["quat"]), g["xyz"]
-        )
+        goal_pose = Pose.from_wire(pl["pose"])
         free = Freedom.from_wire(pl["free"])
         try:
-            knots = resolve_redundant_path(
-                T_start_tcp, T_goal_tcp, free,
-                fk=self.fk, q_start=list(running_q), jmin=self.jmin,
-                jmax=self.jmax, tcp_T=tcp_T, collision=self.collision,
-                scene=scene, tree=tree, base_frame=self.base_frame,
-                manip_floor=self.params.get("manipulability_floor", 0.02),
-                branch_tol=self.params.get("branch_jump_tol_rad", 0.8),
-                margin=self.params["joint_limit_margin_rad"],
-                step_m=self.params.get("cart_path_step_m", 0.02),
-                step_rad=self.params.get("cart_path_step_rad", 0.1),
+            poses = expand_freedom(
+                goal_pose, free, order="preference",
                 max_candidates=self.params.get("max_goal_candidates", 256),
             )
-        except RedundancyError as exc:
-            handle.fail(error=f"path_loose:{exc}")
+        except ValueError as exc:
+            handle.fail(error=f"bad_goal: {exc}")
             return None
-        if len(knots) < 2:
-            return []
+        cart_limits = self.params.get("cartesian_defaults") or {}
         ruckig = self.params["ruckig_defaults"]
-        try:
-            seg, _ = generate_ruckig_trajectory(
-                knots, self.servo_dt, vmax=ruckig["vmax"], amax=ruckig["amax"],
-                jmax=ruckig["jmax"],
-                corner_tolerance_mm=self.params.get("cart_blend_mm", 5.0),
+        margin = self.params["joint_limit_margin_rad"]
+        for pose_c in poses:  # nominal (theta=0) first, then nearest
+            T_base_frame = tree.resolve(pose_c.frame, self.base_frame)
+            T_end_tcp = T_base_frame @ make_transform(
+                quaternion_to_rotation_matrix(pose_c.quat), pose_c.xyz
             )
-        except TrajectoryError as exc:
-            handle.fail(error=str(exc))
-            return None
-        return seg
+            try:
+                seg, _ = generate_cartesian_trajectory(
+                    T_start_tcp, T_end_tcp, self.servo_dt,
+                    fk=self.fk, q_seed=list(running_q), jmin=self.jmin,
+                    jmax=self.jmax, tcp_T=tcp_T, cart_limits=cart_limits,
+                    vmax_joint=ruckig["vmax"],
+                    manip_floor=self.params.get("manipulability_floor", 0.02),
+                    branch_tol=self.params.get("branch_jump_tol_rad", 0.8),
+                    margin=margin,
+                )
+            except CartesianTrajectoryError:
+                continue
+            if not seg:  # zero-motion (already at the goal)
+                return []
+            if not self.collision.preflight(seg, scene, tree, self.base_frame)["ok"]:
+                continue
+            return seg  # first feasible, least deviation
+        handle.fail(error="movel:no_feasible_path")
+        return None

@@ -1,4 +1,4 @@
-"""goal_sampling tests: expand_freedom sweep math + candidate_qs pruning."""
+"""goal_sampling tests: expand_freedom sweep/preference + resolve_pose_to_q."""
 
 from __future__ import annotations
 
@@ -14,11 +14,9 @@ from wf.core.frames import (
     rpy_to_matrix,
 )
 from wf.core.frametree import FrameDef, FrameTree
-from wf.core.scene import SceneObject
 from wf.hal.aubo_i10 import BUNDLED_URDF
-from wf.world_model.collision import CollisionModel
 from wf.world_model.fk import UrdfFk
-from wf.world_model.goal_sampling import candidate_qs, expand_freedom
+from wf.world_model.goal_sampling import expand_freedom, resolve_pose_to_q
 
 HOME_Q = [0.0, -0.5236, 2.0944, -0.6981, 1.5708, 0.0]
 BASE = "arm/r1/base"
@@ -28,11 +26,6 @@ _MARGIN = 0.01
 @pytest.fixture(scope="module")
 def fk() -> UrdfFk:
     return UrdfFk(BUNDLED_URDF)
-
-
-@pytest.fixture(scope="module")
-def model() -> CollisionModel:
-    return CollisionModel(BUNDLED_URDF, BUNDLED_URDF.parent.parent)
 
 
 @pytest.fixture(scope="module")
@@ -105,40 +98,43 @@ def test_max_candidates_overflow_raises():
         expand_freedom(_identity_pose(), free, max_candidates=100)
 
 
-# ── candidate_qs ───────────────────────────────────────────────────────────
+def test_sweep_order_is_ascending():
+    free = Freedom(dof="x", frame="reference", min=-0.2, max=0.2, step=0.1)
+    poses = expand_freedom(_identity_pose(), free)  # default "sweep"
+    dx = [round(p.xyz[0] - 0.4, 6) for p in poses]
+    assert dx == sorted(dx)  # -0.2, -0.1, 0, 0.1, 0.2
 
 
-def test_candidate_qs_prunes_and_sorts(fk, model, limits, tree):
-    jmin, jmax = limits
-    # A reachable free-yaw goal at the home flange pose: many candidates solve.
-    T = fk.get_ee_transform(HOME_Q)
-    pose = Pose(frame=BASE, xyz=[float(v) for v in T[:3, 3]],
-                quat=rotation_matrix_to_quaternion(T[:3, :3]))
-    poses = expand_freedom(pose, Freedom(dof="yaw"))
-    qs = candidate_qs(
-        poses, fk=fk, q_seed=HOME_Q, jmin=jmin, jmax=jmax, margin=_MARGIN,
-        tree=tree, base_frame=BASE, tcp_T=np.eye(4), collision=model, scene=[],
-    )
-    assert len(qs) > 0
-    # Sorted ascending by distance from the seed.
-    d = [float(np.sum((np.asarray(q) - np.asarray(HOME_Q)) ** 2)) for q in qs]
-    assert d == sorted(d)
+def test_preference_order_nominal_first_then_abs_ascending():
+    free = Freedom(dof="x", frame="reference", min=-0.2, max=0.2, step=0.1)
+    poses = expand_freedom(_identity_pose(), free, order="preference")
+    dx = [round(p.xyz[0] - 0.4, 6) for p in poses]
+    assert abs(dx[0]) < 1e-9  # nominal (theta=0) first
+    assert [abs(v) for v in dx] == sorted(abs(v) for v in dx)  # |theta| ascending
 
 
-def test_candidate_qs_drops_final_pose_collisions(fk, model, limits, tree):
+# ── resolve_pose_to_q ───────────────────────────────────────────────────────
+
+
+def test_resolve_pose_to_q_reachable(fk, limits, tree):
     jmin, jmax = limits
     T = fk.get_ee_transform(HOME_Q)
     pose = Pose(frame=BASE, xyz=[float(v) for v in T[:3, 3]],
                 quat=rotation_matrix_to_quaternion(T[:3, :3]))
-    poses = expand_freedom(pose, Freedom(dof="yaw"))
-    # A box sitting on the flange makes every final pose collide.
-    blocker = SceneObject(
-        frame=BASE, xyz=[float(v) for v in T[:3, 3]], quat=[0, 0, 0, 1],
-        geometry={"type": "box", "size": [0.3, 0.3, 0.3]}, meta={"name": "blk"},
+    q = resolve_pose_to_q(
+        pose, fk=fk, tree=tree, base_frame=BASE, tcp_T=np.eye(4),
+        seed=HOME_Q, jmin=jmin, jmax=jmax, margin=_MARGIN,
     )
-    qs = candidate_qs(
-        poses, fk=fk, q_seed=HOME_Q, jmin=jmin, jmax=jmax, margin=_MARGIN,
-        tree=tree, base_frame=BASE, tcp_T=np.eye(4), collision=model,
-        scene=[blocker],
+    assert q is not None and len(q) == 6
+    # FK of the solution lands back on the requested pose.
+    assert np.linalg.norm(fk.get_ee_transform(q)[:3, 3] - T[:3, 3]) < 1e-3
+
+
+def test_resolve_pose_to_q_unreachable_returns_none(fk, limits, tree):
+    jmin, jmax = limits
+    pose = Pose(frame=BASE, xyz=[5.0, 0.0, 0.0], quat=[0, 0, 0, 1])
+    q = resolve_pose_to_q(
+        pose, fk=fk, tree=tree, base_frame=BASE, tcp_T=np.eye(4),
+        seed=HOME_Q, jmin=jmin, jmax=jmax, margin=_MARGIN,
     )
-    assert qs == []
+    assert q is None
