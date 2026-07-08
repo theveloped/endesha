@@ -78,11 +78,16 @@ services:
       # supervisor reads the STALE copies baked into the wf-sim image at build.
       - ./cell.yaml:/platform/deploy/cell.yaml:ro
       - ./runtime:/platform/deploy/runtime:ro
+      # The node editor's Save (flows/cmd/save) writes graph docs back to the
+      # repo. packages/ is mounted read-only, so overlay JUST the graphs dir
+      # read-write (a nested, more-specific mount) so authored flows persist.
+      - ../packages/services/task_runner/graphs:/platform/packages/services/task_runner/graphs
     command: ["python", "-m", "wf.services.supervisor",
               "--realm", "cell",
               "--cell", "deploy/cell.yaml",
               "--runtime", "deploy/runtime/sim.yaml",
               "--flows-dir", "packages/services/task_runner/flows",
+              "--graphs-dir", "packages/services/task_runner/graphs/flows",
               "--zenoh-config", "deploy/zenoh/sim-container.json5"]
 
   seed:
