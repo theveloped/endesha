@@ -1,0 +1,22 @@
+# The sim image only consumes the Pixi manifests, Python workspace, deploy
+# configuration/runtime files, and helper scripts. Keep host environments and
+# unrelated frontend sources out of the Windows-to-Linux BuildKit context.
+**
+!pixi.toml
+!pixi.lock
+!packages/
+!packages/**
+!deploy/
+!deploy/**
+!scripts/
+!scripts/**
+
+# Host-only or generated files inside the allowed trees.
+packages/hal/aubo_i10/vendor/
+deploy/bridge/
+deploy/logs/
+deploy/out/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/*.pyc

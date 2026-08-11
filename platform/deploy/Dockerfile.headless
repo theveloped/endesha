@@ -34,10 +34,14 @@ WORKDIR /platform/web
 COPY web/package*.json ./
 RUN npm ci
 
-# The whole platform tree: web sources + packages/ (aubo URDF + core GLBs that
-# prebuild's sync-assets copies into public/). Then build the multi-entry
-# bundle -> dist/ has both entries + /assets + /aubo_description.
-COPY . /platform
+# Copy only the web source and the two canonical asset trees consumed by
+# prebuild's sync-assets script. Keeping their repository-relative layout makes
+# the same script work on the host and in the image.
+COPY web/ /platform/web/
+COPY packages/hal/aubo_i10/src/wf/hal/aubo_i10/assets/aubo_description/ \
+     /platform/packages/hal/aubo_i10/src/wf/hal/aubo_i10/assets/aubo_description/
+COPY packages/core/src/wf/core/assets/ \
+     /platform/packages/core/src/wf/core/assets/
 RUN npm run build
 
 # Long-running entrypoint: start the static preview server, wait for it, then

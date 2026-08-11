@@ -1,10 +1,28 @@
-# Scoped to the headless-cam build (BuildKit reads <dockerfile>.dockerignore
-# first). Keep the platform/ context lean: node_modules and dist are rebuilt
-# inside the image (npm ci + npm run build); pixi env + lockfiles are unused.
-web/node_modules
-web/dist
-**/__pycache__
-**/.pytest_cache
-.pixi
-pixi.lock
-**/*.pyc
+# The headless image builds the web app and synchronizes two canonical asset
+# trees. Explicit parent rules are required so Docker can traverse to each
+# allowlisted directory after the catch-all exclusion.
+**
+!web/
+!web/**
+!packages/
+!packages/hal/
+!packages/hal/aubo_i10/
+!packages/hal/aubo_i10/src/
+!packages/hal/aubo_i10/src/wf/
+!packages/hal/aubo_i10/src/wf/hal/
+!packages/hal/aubo_i10/src/wf/hal/aubo_i10/
+!packages/hal/aubo_i10/src/wf/hal/aubo_i10/assets/
+!packages/hal/aubo_i10/src/wf/hal/aubo_i10/assets/aubo_description/
+!packages/hal/aubo_i10/src/wf/hal/aubo_i10/assets/aubo_description/**
+!packages/core/
+!packages/core/src/
+!packages/core/src/wf/
+!packages/core/src/wf/core/
+!packages/core/src/wf/core/assets/
+!packages/core/src/wf/core/assets/**
+
+# Generated locally or recreated by npm ci / prebuild.
+web/node_modules/
+web/dist/
+web/public/aubo_description/
+web/public/assets/
