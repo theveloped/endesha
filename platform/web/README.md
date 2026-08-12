@@ -1,10 +1,10 @@
-# React + TypeScript + Vite
+# WF operator UI
 
-## Frontend entrypoints
+## Local development
 
-- Legacy UI: `npm run dev`, then open the root URL printed by Vite.
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Run `npm run dev`, then open the root URL printed by Vite. The root serves the
+single Catalyst-based operator workspace. The camera HAL remains available at
+`/headless.html` for the simulated headless camera service.
 
 Currently, two official plugins are available:
 

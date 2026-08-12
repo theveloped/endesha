@@ -179,7 +179,7 @@ export default function CamerasPage({
         ) / 1e9;
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[1fr_340px] gap-2 overflow-y-auto p-2">
+    <div className="grid h-full min-h-0 grid-cols-1 gap-2 overflow-y-auto p-2 @min-[560px]:grid-cols-[minmax(0,1fr)_280px]">
       <Card size="sm" className="min-h-0">
         <CardHeader>
           <CardTitle>cam0</CardTitle>

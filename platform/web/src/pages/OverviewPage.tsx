@@ -21,6 +21,7 @@ import {
   FrameTriads,
   FlangeToolMeshes,
   FrustumOverlay,
+  PoseGhost,
   SceneMeshes,
   TcpDragControls,
   TcpTipMarker,
@@ -47,6 +48,7 @@ import type {
   SceneObject,
   TcpDef,
 } from "../lib/messages";
+import type { ScenePreview } from "../scene/types";
 
 const TCP_FLANGE = "flange";
 
@@ -61,6 +63,9 @@ interface OverviewPageProps {
   commandsEnabled: boolean;
   clientId: string;
   holdsControl: boolean;
+  workspace?: boolean;
+  preview?: ScenePreview;
+  configurationRevision?: number;
 }
 
 export default function OverviewPage({
@@ -74,6 +79,9 @@ export default function OverviewPage({
   commandsEnabled,
   clientId,
   holdsControl,
+  workspace = false,
+  preview = null,
+  configurationRevision = 0,
 }: OverviewPageProps) {
   const [frames, setFrames] = useState<{ name: string; def: FrameDef }[]>([]);
   const [tcps, setTcps] = useState<{ name: string; def: TcpDef }[]>([]);
@@ -123,7 +131,7 @@ export default function OverviewPage({
         console.error("overview config fetch failed:", e);
       }
     })();
-  }, [session]);
+  }, [session, configurationRevision]);
 
   // Track the camera's per-frame pose from the image topic's CBOR attachment.
   // Realm-keyed: re-subscribe on realm/session change; clears the ref so a
@@ -208,16 +216,24 @@ export default function OverviewPage({
   );
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[1fr_340px]">
+    <div
+      className={
+        workspace
+          ? "h-full min-h-0"
+          : "grid h-full min-h-0 grid-cols-[1fr_340px]"
+      }
+    >
       <Viewport
         jointsRef={jointsRef}
         baseMatrix={baseMatrix}
         topRight={
-          <DeviceTree
-            session={session}
-            realm={realm}
-            commandsEnabled={commandsEnabled}
-          />
+          workspace ? undefined : (
+            <DeviceTree
+              session={session}
+              realm={realm}
+              commandsEnabled={commandsEnabled}
+            />
+          )
         }
         controls={
           <>
@@ -308,6 +324,17 @@ export default function OverviewPage({
             baseMatrix={baseMatrix}
           />
         )}
+        {preview?.kind === "pose" && (
+          <PoseGhost q={preview.q} baseMatrix={baseMatrix} />
+        )}
+        {preview?.kind === "tcp" && (
+          <TcpTipMarker
+            flangeRef={flangeRef}
+            tcpDef={preview.def}
+            label={preview.name}
+            baseMatrix={baseMatrix}
+          />
+        )}
         {dragMode !== "off" && dragAllowed && (
           <TcpDragControls
             flangeRef={flangeRef}
@@ -319,29 +346,31 @@ export default function OverviewPage({
           />
         )}
       </Viewport>
-      <div className="min-h-0 space-y-2 overflow-y-auto border-l border-border p-2">
-        <StatusPanel
-          status={status}
-          driverAlive={driverAlive}
-          jointsCountRef={jointsCountRef}
-          flangeRef={flangeRef}
-          onClearProtectiveStop={() => {
-            if (session === null)
-              return Promise.reject(new Error("not connected"));
-            return clearProtectiveStop(session, realm);
-          }}
-        />
-        <MotionPanel
-          session={session}
-          realm={realm}
-          enabled={commandsEnabled && driverAlive}
-          commandsEnabled={commandsEnabled}
-          clientId={clientId}
-          holdsControl={holdsControl}
-          jointsRef={jointsRef}
-          activeTcp={status?.active_tcp ?? null}
-        />
-      </div>
+      {!workspace && (
+        <div className="min-h-0 space-y-2 overflow-y-auto border-l border-border p-2">
+          <StatusPanel
+            status={status}
+            driverAlive={driverAlive}
+            jointsCountRef={jointsCountRef}
+            flangeRef={flangeRef}
+            onClearProtectiveStop={() => {
+              if (session === null)
+                return Promise.reject(new Error("not connected"));
+              return clearProtectiveStop(session, realm);
+            }}
+          />
+          <MotionPanel
+            session={session}
+            realm={realm}
+            enabled={commandsEnabled && driverAlive}
+            commandsEnabled={commandsEnabled}
+            clientId={clientId}
+            holdsControl={holdsControl}
+            jointsRef={jointsRef}
+            activeTcp={status?.active_tcp ?? null}
+          />
+        </div>
+      )}
     </div>
   );
 }

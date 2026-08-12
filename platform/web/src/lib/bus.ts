@@ -79,6 +79,26 @@ export async function subscribeRaw(
   return () => void sub.undeclare();
 }
 
+/** Issue a raw get and collect every successful Sample reply without decoding
+ * its payload. Used by diagnostics where encoding, attachments, and raw bytes
+ * are part of the data being inspected. */
+export async function queryRawAll(
+  session: Session,
+  key: string,
+  timeoutMs = 2000,
+): Promise<Sample[]> {
+  const receiver = await session.get(key, {
+    timeout: Duration.milliseconds.of(timeoutMs),
+  });
+  const samples: Sample[] = [];
+  if (receiver === undefined) return samples;
+  for await (const reply of receiver) {
+    const result = reply.result();
+    if (result instanceof Sample) samples.push(result);
+  }
+  return samples;
+}
+
 /**
  * Issue a get, return the first Sample reply decoded; null on no reply
  * (timeout) or error-only replies.

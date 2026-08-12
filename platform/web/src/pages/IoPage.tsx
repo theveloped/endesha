@@ -51,7 +51,7 @@ export default function IoPage({
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[1fr_auto] gap-2 overflow-y-auto p-2">
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 @min-[480px]:grid-cols-2">
         <Card size="sm">
           <CardHeader>
             <CardTitle>Digital out</CardTitle>
