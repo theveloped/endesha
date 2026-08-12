@@ -1,22 +1,17 @@
-# `docker compose -f deploy/compose.yaml up` brings up the FULL all-simulated
-# cell + frontend in one command: router -> bridge -> config -> supervisor
-# (cell.yaml + runtime/sim.yaml = sim arm + headless-browser sim camera) -> seed
-# -> camera -> web (Vite dev server at http://localhost:5173). No hardware, no
-# file choices. Switch a device to live/replay/off at runtime from the UI device
-# tree. For the HOST hardware stack instead, run only the router
-# (`docker compose up -d zenoh-router`) and use deploy/start_stack.ps1.
+# `docker compose -f deploy/compose.yaml up` brings up the complete simulated
+# cell and frontend: router, bridge, config, supervisor, simulated arm,
+# headless-browser camera, and Vite at http://localhost:5173. Switch devices
+# between live, replay, and off sources from the UI. For the host hardware
+# stack, start only the router and use deploy/start_stack.ps1.
 #
 # Phase-1 router topology. Dev/tests run peer-to-peer without the router;
 # the router is for the multi-host/live-cell topology (and is exercised once
 # during the hardware verification gate).
 #
 # If the exact 1.8.0 tag is absent at pull time, use the newest plain 1.8.x.
-# Live-reload our own source: bind-mount the host workspace `packages/` over the
-# image's baked copy so Python/flow-YAML edits land in the container without a
-# rebuild. The pixi env runs these sources directly (not pip-installed), so a
-# process restart (`docker compose restart <svc>`) is a true hot reload. The
-# `pixi install` image layer (deps) is untouched. Read-only: containers never
-# write back into the repo.
+# Live-reload our own source by mounting `packages/` over the image copy. The
+# Pixi environment runs these sources directly, so restarting a service applies
+# Python edits without rebuilding the dependency layer. The mount is read-only.
 x-code-mount: &code ../packages:/platform/packages:ro
 
 services:
@@ -42,13 +37,9 @@ services:
       - "127.0.0.1:10000:10000"
 
   # ── the simulated cell ──────────────────────────────────────────────────
-  # The supervisor realizes cell.yaml + runtime/sim.yaml: it spawns the sim arm
-  # (r1=sim) and the always-on demo_detect vision runtime, then publishes the
-  # flow catalog + device inventory. The sim camera (cam0=sim) is the separate
-  # camera2d-headless service (an external-launch source the supervisor does NOT
-  # spawn). The seeder one-shots the demo poses + board. The Python services
-  # share the build context `platform/` via Dockerfile.sim and connect to the
-  # router by name.
+  # The supervisor realizes cell.yaml + runtime/sim.yaml, spawns the simulated
+  # arm, and publishes the device inventory. The simulated camera is the
+  # separate camera2d-headless service because its source is external.
   config:
     build:
       context: ..
@@ -78,26 +69,12 @@ services:
       # supervisor reads the STALE copies baked into the wf-sim image at build.
       - ./cell.yaml:/platform/deploy/cell.yaml:ro
       - ./runtime:/platform/deploy/runtime:ro
-      # The node editor's Save (flows/cmd/save) writes graph docs back to the
-      # repo. packages/ is mounted read-only, so overlay JUST the graphs dir
-      # read-write (a nested, more-specific mount) so authored flows persist.
-      - ../packages/services/task_runner/graphs:/platform/packages/services/task_runner/graphs
     command: ["python", "-m", "wf.services.supervisor",
               "--realm", "cell",
               "--cell", "deploy/cell.yaml",
               "--runtime", "deploy/runtime/sim.yaml",
-              "--flows-dir", "packages/services/task_runner/flows",
-              "--graphs-dir", "packages/services/task_runner/graphs/flows",
               "--zenoh-config", "deploy/zenoh/sim-container.json5"]
 
-  seed:
-    image: wf-sim:latest
-    depends_on: [config]
-    restart: "no"
-    volumes:
-      - *code
-    command: ["python", "scripts/seed_demo_cell.py",
-              "--connect", "tcp/zenoh-router:7447"]
 
   # The headless-browser camera2d HAL: serves the camera2d contract for cid=cam0
   # by rendering the shared Three.js twin scene under headless Chromium

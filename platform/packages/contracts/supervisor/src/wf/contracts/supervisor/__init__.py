@@ -1,1 +1,1 @@
-"""WF platform L1 `supervisor` contract: flow-orchestration key space."""
+"""WF platform L1 supervisor contract: device inventory and source control."""

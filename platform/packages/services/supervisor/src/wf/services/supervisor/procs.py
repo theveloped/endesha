@@ -21,12 +21,9 @@ _log = get_logger("wf.services.supervisor.procs")
 LAUNCH_MODULE = "module"  # spawn ``python -m <module>`` as a supervisor child
 LAUNCH_EXTERNAL = "external"  # served by a process OUTSIDE the supervisor
 
-# (contract, provider kind) -> python module for module-launched providers. A
-# module-launched kind absent here is a bad_cell. External-launched providers
-# (e.g. the headless-browser camera2d that renders the twin and serves the
-# contract over the bridge) are served outside the supervisor and need no entry;
-# the supervisor keeps them in the inventory for role resolution + vision
-# binding but spawns no child.
+# (contract, provider kind) -> module for supervisor-launched providers.
+# External providers such as the headless browser camera remain in the device
+# inventory but are managed outside the supervisor.
 PROVIDER_MODULES: dict[tuple[str, str], str] = {
     ("arm", "arm_sim"): "wf.hal.arm_sim",
     ("arm", "aubo_i10"): "wf.hal.aubo_i10",

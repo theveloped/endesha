@@ -3,7 +3,7 @@
 # logical device (live/sim/replay/off); the supervisor realizes cell + overlay
 # into the concrete inventory. Replaces the duplicated cell.dev.yaml /
 # cell.sim.yaml (retired at the end of the migration).
-cell_type: vision-pick-cell@0.1
+cell_type: manual-cell@0.1
 platform: 0.1.0
 
 # Distributed seams: single node is its own master this slice.
@@ -84,10 +84,3 @@ resources:
         kind: replay_camera
         params:
           recording: deploy/recordings/demo.mcap
-
-# Role bindings: the supervisor resolves a flow's contract-typed roles to these
-# concrete resources. demo_inspect's arm -> r1, cam -> cam0.
-bindings:
-  demo_inspect:
-    arm: r1
-    cam: cam0

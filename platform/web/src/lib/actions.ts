@@ -16,13 +16,7 @@ import {
   cmdStop,
   configCmdDelete,
   configCmdSet,
-  flowsCmdSave,
-  flowsCmdStart,
-  flowsCmdStop,
-  flowsDoc,
   supervisorCmdSetSource,
-  taskCmdAbort,
-  taskCmdStart,
 } from "./config";
 import type {
   Ack,
@@ -31,12 +25,7 @@ import type {
   GoalFeedback,
   GoalReply,
   GoalResult,
-  FlowCmdReply,
-  FlowDocReply,
-  FlowSaveReply,
-  GraphDoc,
   SetSourceReply,
-  TaskStartReply,
   Waypoint,
 } from "./messages";
 
@@ -226,73 +215,6 @@ export async function configDelete(
   return reply as ConfigDeleteReply;
 }
 
-export async function startTask(
-  session: Session,
-  realm: string,
-  flow: string,
-): Promise<TaskStartReply> {
-  const reply = await query(session, taskCmdStart(realm, flow), {});
-  if (reply === null)
-    throw new Error("no reply from task/cmd/start (task_runner running?)");
-  return reply as TaskStartReply;
-}
-
-export async function abortTask(
-  session: Session,
-  realm: string,
-  flow: string,
-): Promise<{ ok: boolean }> {
-  const reply = await query(session, taskCmdAbort(realm, flow), {});
-  if (reply === null) throw new Error("no reply from task/cmd/abort");
-  return reply as { ok: boolean };
-}
-
-export async function startFlow(
-  session: Session,
-  realm: string,
-  flow: string,
-): Promise<FlowCmdReply> {
-  const reply = await query(session, flowsCmdStart(realm), { flow });
-  if (reply === null)
-    throw new Error("no reply from flows/cmd/start (supervisor running?)");
-  return reply as FlowCmdReply;
-}
-
-export async function stopFlow(
-  session: Session,
-  realm: string,
-  flow: string,
-): Promise<FlowCmdReply> {
-  const reply = await query(session, flowsCmdStop(realm), { flow });
-  if (reply === null)
-    throw new Error("no reply from flows/cmd/stop (supervisor running?)");
-  return reply as FlowCmdReply;
-}
-
-/** Fetch one flow's authored doc (graph/spec) for the node editor. */
-export async function fetchFlowDoc(
-  session: Session,
-  realm: string,
-  name: string,
-): Promise<FlowDocReply> {
-  const reply = await query(session, flowsDoc(realm), { name });
-  if (reply === null)
-    throw new Error("no reply from flows/doc (supervisor running?)");
-  return reply as FlowDocReply;
-}
-
-/** Persist an authored graph doc as a repo file via the supervisor. */
-export async function saveFlowDoc(
-  session: Session,
-  realm: string,
-  name: string,
-  doc: GraphDoc,
-): Promise<FlowSaveReply> {
-  const reply = await query(session, flowsCmdSave(realm), { name, doc });
-  if (reply === null)
-    throw new Error("no reply from flows/cmd/save (supervisor running?)");
-  return reply as FlowSaveReply;
-}
 
 /** Cold-switch a device's source mode (live/sim/replay/off) via the supervisor. */
 export async function setDeviceSource(

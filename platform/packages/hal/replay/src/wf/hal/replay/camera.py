@@ -2,10 +2,9 @@
 
 Republishes the recorded ``camera2d/{cid}/image`` frames into the active
 namespace via the shared ``Camera2dCore``: each recorded frame's bytes go out
-with a fresh ``seq``/``t_capture`` but the RECORDED eye-in-hand pose preserved
-(so the frustum + any pose-based placement stay spatially correct, while the
-vision pipeline reprocesses the frames). Grab is rejected (the source is a
-recording); the frame stream flows automatically.
+with a fresh ``seq``/``t_capture`` while preserving the recorded eye-in-hand
+pose for the camera frustum and scene placement. Grab is rejected because the
+source is a recording; the frame stream flows automatically.
 
 Run: ``python -m wf.hal.replay.camera --cell <realized cell> --resource cam0``.
 """

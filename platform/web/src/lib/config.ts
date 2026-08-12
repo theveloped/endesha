@@ -188,65 +188,7 @@ export function camCmd(realm: string, action: string, cid = CID): string {
   return `${camPrefix(realm, cid)}/cmd/${action}`;
 }
 
-// Key space for the `task` contract, mirroring wf/contracts/task/keys.py.
-// `{flow}` is the YAML statechart name. The UI discovers running flows
-// by watching the per-realm `task/*/alive` liveliness glob.
-
-function taskPrefix(realm: string, flow: string): string {
-  return `${realm}/task/${flow}`;
-}
-
-export function taskState(realm: string, flow: string): string {
-  return `${taskPrefix(realm, flow)}/state`;
-}
-
-export function taskResult(realm: string, flow: string): string {
-  return `${taskPrefix(realm, flow)}/result`;
-}
-
-export function taskAlive(realm: string, flow: string): string {
-  return `${taskPrefix(realm, flow)}/alive`;
-}
-
-export function taskCmdStart(realm: string, flow: string): string {
-  return `${taskPrefix(realm, flow)}/cmd/start`;
-}
-
-export function taskCmdAbort(realm: string, flow: string): string {
-  return `${taskPrefix(realm, flow)}/cmd/abort`;
-}
-
-/** Matches `{realm}/task/{flow}/alive` liveliness tokens for one realm. */
-export function taskAliveGlob(realm: string): string {
-  return `${realm}/task/*/alive`;
-}
-
-// Key space for the `supervisor` contract, mirroring
-// wf/contracts/supervisor/keys.py. The supervisor is the sole interpreter of
-// flows: it publishes a catalog of selectable flows with resolved role
-// bindings, and brings each online/offline on demand.
-
-export function flowsCatalog(realm: string): string {
-  return `${realm}/flows/catalog`;
-}
-
-export function flowsCmdStart(realm: string): string {
-  return `${realm}/flows/cmd/start`;
-}
-
-export function flowsCmdStop(realm: string): string {
-  return `${realm}/flows/cmd/stop`;
-}
-
-/** Fetch one flow's authored doc: request `{name}` -> `{ok, name, kind, doc}`. */
-export function flowsDoc(realm: string): string {
-  return `${realm}/flows/doc`;
-}
-
-/** Persist an authored graph doc: request `{name, doc}` -> `{ok, error}`. */
-export function flowsCmdSave(realm: string): string {
-  return `${realm}/flows/cmd/save`;
-}
+// Supervisor process and device-inventory key space.
 
 export function supervisorAlive(realm: string, node = "main"): string {
   return `${realm}/supervisor/${node}/alive`;

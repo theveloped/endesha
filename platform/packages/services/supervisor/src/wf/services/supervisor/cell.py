@@ -1,27 +1,12 @@
-"""Cell file loader + runtime overlay + role->resource resolution (RFC §3).
+"""Cell definition and runtime source selection.
 
-A cell is the design-time truth: ``resources`` (each a contract-typed logical
-device with shared ``config`` and a ``sources`` map of selectable provider
-modes), optional ``bindings`` (``{flow: {role: resource_id}}`` — the role
-indirection), and the reserved distributed seams ``master_node`` / per-resource
-``node``.
+A cell is the design-time truth: contract-typed logical resources with shared
+configuration and selectable provider sources. A runtime overlay selects one
+live, simulated, replay, or off source per resource. ``realize_cell`` collapses
+both documents into the concrete provider inventory consumed by the supervisor.
 
-The selected source mode per resource is NOT in the cell — it comes from a thin
-runtime overlay (``active_sources: {rid: mode}``, loaded by ``load_runtime``).
-``realize_cell`` collapses cell + overlay into the realized inventory the rest
-of the supervisor consumes: one concrete provider per resource (``hal`` + merged
-``params``), exactly the legacy single-hal shape.
-
-``resolve_roles`` is the supervisor's core duty: for a flow's contract-typed
-roles, bind each to a concrete resource id — explicit ``bindings`` win,
-otherwise the first resource of the role's contract.
-
-Legacy single-``hal`` resources are still accepted (normalized into a synthetic
-single source under mode ``"default"``) so existing cell files keep working
-through the migration.
-
-Violations raise ``ValueError("bad_cell:<reason>")`` / ``("bad_runtime:...")``
-(mirrors the config store's ``bad_*:`` convention).
+Legacy single-``hal`` resources remain accepted and are normalized into one
+synthetic ``default`` source.
 """
 
 from __future__ import annotations
@@ -65,21 +50,9 @@ def _parse_source(rid: str, mode: str, sdecl: object) -> dict:
 def load_cell(path: str | Path) -> dict:
     """Load and validate a cell.yaml into a normalized dict.
 
-    Returned shape::
-
-        {
-          "cell_type": str | None,
-          "master_node": str | None,
-          "resources": {rid: {"contract": str, "node": str, "model": str | None,
-                              "config": dict,
-                              "sources": {mode: {"kind": str, "params": dict,
-                                                 "launch": "module"|"external"}}}},
-          "bindings": {flow: {role: resource_id}},
-        }
-
-    Each resource declares either a new-schema ``sources`` map (with shared
-    ``config``) or a legacy single ``hal`` (normalized to one source under mode
-    ``"default"``) — not both.
+    Returned resources contain their contract, node, model, shared config, and
+    selectable provider sources. Each resource declares either a ``sources``
+    map or a legacy single ``hal``.
     """
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
@@ -105,7 +78,9 @@ def load_cell(path: str | Path) -> dict:
             raise ValueError(f"bad_cell:resource {rid}.node must be a non-empty string")
         model = decl.get("model")
         if model is not None and (not isinstance(model, str) or not model):
-            raise ValueError(f"bad_cell:resource {rid}.model must be a non-empty string")
+            raise ValueError(
+                f"bad_cell:resource {rid}.model must be a non-empty string"
+            )
 
         has_sources = "sources" in decl
         has_hal = "hal" in decl
@@ -153,28 +128,6 @@ def load_cell(path: str | Path) -> dict:
             "sources": sources,
         }
 
-    bindings_in = raw.get("bindings") or {}
-    if not isinstance(bindings_in, dict):
-        raise ValueError("bad_cell:bindings must be a mapping")
-    bindings: dict[str, dict] = {}
-    for flow_name, role_map in bindings_in.items():
-        if not isinstance(flow_name, str) or not flow_name:
-            raise ValueError("bad_cell:binding flow must be a non-empty string")
-        if not isinstance(role_map, dict):
-            raise ValueError(f"bad_cell:binding {flow_name} must be a mapping")
-        resolved: dict[str, str] = {}
-        for role, resource_id in role_map.items():
-            if not isinstance(role, str) or not role:
-                raise ValueError(
-                    f"bad_cell:binding {flow_name} role must be a non-empty string"
-                )
-            if resource_id not in resources:
-                raise ValueError(
-                    f"bad_cell:unknown_binding:{flow_name}.{role}={resource_id}"
-                )
-            resolved[role] = resource_id
-        bindings[flow_name] = resolved
-
     master_node = raw.get("master_node")
     if master_node is not None and (
         not isinstance(master_node, str) or not master_node
@@ -185,7 +138,6 @@ def load_cell(path: str | Path) -> dict:
         "cell_type": raw.get("cell_type"),
         "master_node": master_node,
         "resources": resources,
-        "bindings": bindings,
     }
 
 
@@ -208,7 +160,9 @@ def load_runtime(path: str | Path) -> dict:
     active: dict[str, str] = {}
     for rid, mode in active_in.items():
         if not isinstance(rid, str) or not rid:
-            raise ValueError("bad_runtime:active_sources key must be a non-empty string")
+            raise ValueError(
+                "bad_runtime:active_sources key must be a non-empty string"
+            )
         # YAML 1.1 parses bare ``off``/``no``/``false`` as boolean False; accept
         # that as the explicit "off" selection so overlays needn't quote it.
         if mode is False:
@@ -258,7 +212,6 @@ def realize_cell(cell: dict, active_sources: dict[str, str] | None = None) -> di
         "cell_type": cell["cell_type"],
         "master_node": cell["master_node"],
         "resources": realized,
-        "bindings": cell["bindings"],
     }
 
 
@@ -292,30 +245,3 @@ def devices_inventory(cell: dict, active_sources: dict[str, str]) -> list[dict]:
             }
         )
     return devices
-
-
-def resolve_roles(cell: dict, flow_spec: dict, flow_name: str) -> dict[str, str]:
-    """Bind each of a flow's roles to a concrete resource id.
-
-    Explicit ``bindings[flow_name][role]`` wins; otherwise the first resource
-    whose ``contract`` matches the role's declared contract. Raises
-    ``KeyError("unresolved_role:<role>")`` when no resource of the role's
-    contract exists in the cell. Operates on either a normalized or a realized
-    cell (both carry ``resources[rid]["contract"]`` + ``bindings``).
-    """
-    resources = cell["resources"]
-    explicit = cell["bindings"].get(flow_name, {})
-    out: dict[str, str] = {}
-    for role, decl in flow_spec["roles"].items():
-        if role in explicit:
-            out[role] = explicit[role]
-            continue
-        contract = decl["contract"]
-        match = next(
-            (rid for rid, r in resources.items() if r["contract"] == contract),
-            None,
-        )
-        if match is None:
-            raise KeyError(f"unresolved_role:{role}")
-        out[role] = match
-    return out

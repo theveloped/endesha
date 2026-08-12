@@ -322,31 +322,3 @@ export async function watchReplaySessions(
     });
   return () => void sub.undeclare();
 }
-
-/**
- * Watch `{realm}/task/{flow}/alive` liveliness for one realm; reports the
- * set of currently-running flow names (sorted). Mirrors watchReplaySessions
- * — a flow appears only while its task_runner process holds the token.
- */
-export async function watchTaskFlows(
-  session: Session,
-  realm: string,
-  onChange: (flows: string[]) => void,
-): Promise<Unsubscribe> {
-  const live = new Set<string>();
-  const emit = () => onChange([...live].sort());
-  const sub = await session
-    .liveliness()
-    .declareSubscriber(new KeyExpr(`${realm}/task/*/alive`), {
-      history: true,
-      handler: (sample: Sample) => {
-        // key = {realm}/task/{flow}/alive
-        const flow = sample.keyexpr().toString().split("/").at(-2);
-        if (flow === undefined) return;
-        if (sample.kind() === SampleKind.PUT) live.add(flow);
-        else if (sample.kind() === SampleKind.DELETE) live.delete(flow);
-        emit();
-      },
-    });
-  return () => void sub.undeclare();
-}

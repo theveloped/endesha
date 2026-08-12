@@ -1,6 +1,5 @@
-# Linux sim container: runs the sim Python processes (supervisor, arm_sim,
-# config service, vision runtime) via pixi (dev parity). Build context is
-# `platform/` so the whole workspace (pixi.toml + packages/*) is available.
+# Linux simulation image for the supervisor, arm providers, and config service.
+# The build context is `platform/` so Pixi can install the workspace packages.
 #
 # The sim CAMERA is no longer rendered here: the retired pyrender camera2d_sim
 # HAL was replaced by the external camera2d-headless service (headless-browser
@@ -54,5 +53,4 @@ ENTRYPOINT ["/sim-entrypoint.sh"]
 # Default to the supervisor; compose overrides the command per service.
 CMD ["python", "-m", "wf.services.supervisor", \
      "--realm", "cell", "--cell", "deploy/cell.yaml", \
-     "--runtime", "deploy/runtime/sim.yaml", \
-     "--flows-dir", "packages/services/task_runner/flows"]
+     "--runtime", "deploy/runtime/sim.yaml"]

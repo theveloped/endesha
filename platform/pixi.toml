@@ -41,8 +41,6 @@ mcap = ">=1.1,<2"
 # latest backend) fails. Built WITHOUT isolation (see [pypi-options]) against the
 # pinned scikit-build-core<0.10 + nanobind provided as conda deps above.
 ruckig = "*"
-python-statemachine = "*"
-zxing-cpp = "*"
 wf-core = { path = "packages/core", editable = true }
 wf-world-model = { path = "packages/world_model", editable = true }
 wf-contracts-arm = { path = "packages/contracts/arm", editable = true }
@@ -55,10 +53,6 @@ wf-hal-replay = { path = "packages/hal/replay", editable = true }
 wf-tools = { path = "packages/tools", editable = true }
 wf-services-recording = { path = "packages/services/recording", editable = true }
 wf-services-config = { path = "packages/services/config", editable = true }
-wf-contracts-vision = { path = "packages/contracts/vision", editable = true }
-wf-services-vision = { path = "packages/services/vision", editable = true }
-wf-contracts-task = { path = "packages/contracts/task", editable = true }
-wf-services-task-runner = { path = "packages/services/task_runner", editable = true }
 wf-contracts-supervisor = { path = "packages/contracts/supervisor", editable = true }
 wf-services-supervisor = { path = "packages/services/supervisor", editable = true }
 

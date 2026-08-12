@@ -124,12 +124,6 @@ export default function TopBar({
       </div>
 
       <div className="flex items-center gap-3">
-        <a
-          href="/spatial.html"
-          className="rounded border border-border px-2 py-1 text-xs font-semibold tracking-wide text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          SPATIAL UI
-        </a>
         <span
           className={cn(
             "text-xs",

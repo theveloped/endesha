@@ -3,9 +3,6 @@
 ## Frontend entrypoints
 
 - Legacy UI: `npm run dev`, then open the root URL printed by Vite.
-- Spatial UI: open `/spatial.html` on that same URL.
-- Spatial UI kit: open `/spatial.html?lab=1`.
-- Direct spatial development: `npm run dev:spatial`.
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

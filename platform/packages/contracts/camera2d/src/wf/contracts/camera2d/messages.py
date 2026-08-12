@@ -41,13 +41,11 @@ class Ack:
 class FrameHeader:
     """CBOR attachment on every frame topic; embedded in GrabReply.
 
-    THE bus-wide frame-stream convention: any frame producer (camera HAL now,
-    processing nodes in the vision phase) publishes payload = image bytes,
-    attachment = this header, on its own ``.../image`` topic. Processors
-    preserve ``t_capture`` and ``frame_id``, set their own ``seq``, and
-    update ``w``/``h``/``encoding`` — frames stay uniformly consumable
-    across camera streams, grab sets, and pipeline outputs. Origin is
-    carried by the topic; there is no ``source`` field.
+    The bus-wide frame convention: producers publish image bytes as the payload
+    and this header as the attachment on an ``.../image`` topic. Derived frame
+    producers preserve ``t_capture`` and ``frame_id``, assign their own ``seq``,
+    and update ``w``/``h``/``encoding``.
+    Origin is carried by the topic; there is no ``source`` field.
     """
 
     t_capture: int  # ns, exposure midpoint
@@ -210,7 +208,9 @@ class ConfigureCmd:
 
     def to_wire(self) -> dict:
         return {
-            "exposure_us": None if self.exposure_us is None else float(self.exposure_us),
+            "exposure_us": None
+            if self.exposure_us is None
+            else float(self.exposure_us),
             "gain_db": None if self.gain_db is None else float(self.gain_db),
             "auto_exposure": self.auto_exposure,
             "auto_gain": self.auto_gain,
@@ -283,7 +283,9 @@ class CameraStatus:
             "connected": bool(self.connected),
             "streaming": bool(self.streaming),
             "stream": None if self.stream is None else self.stream.to_wire(),
-            "exposure_us": None if self.exposure_us is None else float(self.exposure_us),
+            "exposure_us": None
+            if self.exposure_us is None
+            else float(self.exposure_us),
             "gain_db": None if self.gain_db is None else float(self.gain_db),
             "achieved_rate_hz": float(self.achieved_rate_hz),
             "error": self.error,
