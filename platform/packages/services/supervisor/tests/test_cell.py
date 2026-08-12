@@ -262,8 +262,10 @@ def test_devices_inventory(tmp_path):
     assert by_id["r1"]["contract"] == "arm"
     assert by_id["r1"]["model"] == "aubo_i10"
     assert by_id["r1"]["active"] == "sim"
+    assert by_id["r1"]["config"] == {"lease_ttl_s": 30.0}
     assert {s["mode"] for s in by_id["r1"]["sources"]} == {"live", "sim", "replay"}
     assert by_id["cam0"]["active"] == "live"
+    assert by_id["cam0"]["config"] == {"mount_arm": "r1"}
     cam_sim = next(s for s in by_id["cam0"]["sources"] if s["mode"] == "sim")
     assert cam_sim["launch"] == "external"  # headless camera
 

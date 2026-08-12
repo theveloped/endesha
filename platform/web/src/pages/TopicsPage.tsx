@@ -8,6 +8,7 @@ import {
 import type { Sample, Session } from "@eclipse-zenoh/zenoh-ts";
 import { CongestionControl, Priority, SampleKind } from "@eclipse-zenoh/zenoh-ts";
 import {
+  ArrowLeft,
   CirclePause,
   CirclePlay,
   Download,
@@ -200,9 +201,11 @@ function formatBytes(value: number): string {
 export default function TopicsPage({
   session,
   wsConnected,
+  compact = false,
 }: {
   session: Session | null;
   wsConnected: boolean;
+  compact?: boolean;
 }) {
   const [filterDraft, setFilterDraft] = useState("**");
   const [activeFilter, setActiveFilter] = useState("**");
@@ -248,7 +251,9 @@ export default function TopicsPage({
       if (batch.length > 0) {
         const newest = [...batch].reverse();
         setEvents((previous) => [...newest, ...previous].slice(0, MAX_EVENTS));
-        setSelectedId((current) => current ?? newest[0]?.id ?? null);
+        if (!compact) {
+          setSelectedId((current) => current ?? newest[0]?.id ?? null);
+        }
       }
       const now = Date.now();
       // Map iteration preserves first-seen order, so live updates never move a
@@ -274,7 +279,7 @@ export default function TopicsPage({
       setTopics(nextTopics);
     }, 250);
     return () => clearInterval(timer);
-  }, []);
+  }, [compact]);
 
   useEffect(() => {
     if (session === null || !running) return;
@@ -350,7 +355,7 @@ export default function TopicsPage({
 
   return (
     <div className="flex h-full min-h-0 bg-white dark:bg-zinc-900">
-      <aside className="hidden h-full w-64 shrink-0 flex-col border-r border-zinc-950/5 xl:flex dark:border-white/10">
+      <aside className={compact ? "hidden" : "hidden h-full w-64 shrink-0 flex-col border-r border-zinc-950/5 xl:flex dark:border-white/10"}>
         <div className="border-b border-zinc-950/5 px-4 py-3 dark:border-white/10">
           <div className="flex items-center gap-2">
             <RadioTower className="size-4 text-zinc-500 dark:text-zinc-400" />
@@ -403,7 +408,7 @@ export default function TopicsPage({
         </div>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col">
+      <section className={`${compact && selectedId !== null ? "hidden" : "flex"} min-w-0 flex-1 flex-col`}>
         <header className="space-y-2 border-b border-zinc-950/5 p-3 dark:border-white/10">
           <div className="flex items-center gap-2">
             <Input
@@ -508,10 +513,20 @@ export default function TopicsPage({
         </div>
       </section>
 
-      <aside className="hidden h-full w-96 shrink-0 flex-col border-l border-zinc-950/5 md:flex dark:border-white/10">
+      <aside className={compact ? (selectedId === null ? "hidden" : "flex h-full w-full flex-col") : "hidden h-full w-96 shrink-0 flex-col border-l border-zinc-950/5 md:flex dark:border-white/10"}>
         <div className="border-b border-zinc-950/5 px-4 py-3 dark:border-white/10">
-          <h2 className="text-sm/6 font-semibold text-zinc-950 dark:text-white">Sample detail</h2>
-          <p className="mt-0.5 text-xs/5 text-zinc-500 dark:text-zinc-400">Metadata and bounded raw payload preview</p>
+          <div className="flex items-center gap-2">
+            {compact && selectedId !== null && (
+              <Button plain onClick={() => setSelectedId(null)}>
+                <ArrowLeft data-slot="icon" />
+                Back
+              </Button>
+            )}
+            <div>
+              <h2 className="text-sm/6 font-semibold text-zinc-950 dark:text-white">Sample detail</h2>
+              <p className="mt-0.5 text-xs/5 text-zinc-500 dark:text-zinc-400">Metadata and bounded raw payload preview</p>
+            </div>
+          </div>
         </div>
         {selected === null ? (
           <div className="flex flex-1 items-center justify-center p-6 text-center text-sm/6 text-zinc-500 dark:text-zinc-400">

@@ -241,6 +241,7 @@ def devices_inventory(cell: dict, active_sources: dict[str, str]) -> list[dict]:
                 "contract": res["contract"],
                 "model": res.get("model"),
                 "active": active,
+                "config": res.get("config", {}),
                 "sources": sources,
             }
         )

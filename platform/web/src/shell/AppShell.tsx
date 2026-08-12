@@ -7,20 +7,16 @@ import {
   type ReactNode,
 } from "react";
 import {
-  Activity,
-  Camera,
   ChevronRight,
   CircleGauge,
   Cpu,
   Database,
-  Hand,
+  GitBranch,
   Moon,
   Network,
-  RadioTower,
-  SlidersHorizontal,
   Square,
   Sun,
-  Waypoints,
+  X,
 } from "lucide-react";
 import { Badge } from "../catalyst/badge";
 import { Button } from "../catalyst/button";
@@ -41,6 +37,7 @@ import { SidebarLayout } from "../catalyst/sidebar-layout";
 import DeviceTree from "../components/DeviceTree";
 import MotionPanel from "../components/MotionPanel";
 import ReplayDrawer from "../components/ReplayDrawer";
+import { TcpDragPanel } from "../components/TcpDragPanel";
 import StatusPanel from "../components/StatusPanel";
 import CamerasPage from "../pages/CamerasPage";
 import FramesPage from "../pages/FramesPage";
@@ -48,82 +45,40 @@ import IoPage from "../pages/IoPage";
 import OperatePage from "../pages/OperatePage";
 import OverviewPage from "../pages/OverviewPage";
 import TopicsPage from "../pages/TopicsPage";
-import { clearProtectiveStop, stop } from "../lib/actions";
+import { clearProtectiveStop, sendExecutePath, stop } from "../lib/actions";
 import { CELL_NAME } from "../lib/config";
 import { useRuntime } from "../runtime/context";
+import { SceneDetails } from "../scene/SceneDetails";
+import {
+  SceneHierarchy,
+  type SceneSelection,
+} from "../scene/SceneHierarchy";
 import type { ScenePreview } from "../scene/types";
-
-export type WorkspaceSection =
-  | "overview"
-  | "operate"
-  | "io"
-  | "cameras"
-  | "configuration"
-  | "topics";
+import {
+  useSceneStructure,
+  type SceneStructure,
+} from "../scene/useSceneStructure";
+import {
+  DEFAULT_VIEWER_VISIBILITY,
+  type TcpDragMode,
+  type ViewerVisibility,
+} from "../scene/viewerControls";
+import {
+  TOOL_META,
+  ToolRibbon,
+  type WorkspaceTool,
+} from "./ToolRibbon";
 
 type Theme = "light" | "dark";
 
-const SECTIONS: Array<{
-  id: WorkspaceSection;
-  label: string;
-  description: string;
-  icon: typeof Activity;
-}> = [
-  {
-    id: "overview",
-    label: "Overview",
-    description: "Cell status and engineering motion",
-    icon: Activity,
-  },
-  {
-    id: "operate",
-    label: "Operate",
-    description: "Joint and Cartesian jogging",
-    icon: Hand,
-  },
-  {
-    id: "io",
-    label: "IO",
-    description: "Digital and analog signals",
-    icon: SlidersHorizontal,
-  },
-  {
-    id: "cameras",
-    label: "Cameras",
-    description: "Images and acquisition",
-    icon: Camera,
-  },
-  {
-    id: "configuration",
-    label: "Configuration",
-    description: "Frames, TCPs, poses and device sources",
-    icon: Waypoints,
-  },
-  {
-    id: "topics",
-    label: "Topics",
-    description: "Raw Zenoh samples and metadata",
-    icon: RadioTower,
-  },
-];
-
-const LEFT_DEFAULT: Record<WorkspaceSection, number> = {
-  overview: 288,
-  operate: 288,
-  io: 288,
-  cameras: 288,
-  configuration: 520,
-  topics: 288,
-};
-
-const RIGHT_DEFAULT: Record<
-  Exclude<WorkspaceSection, "configuration" | "topics">,
-  number
-> = {
+const LEFT_DEFAULT = 300;
+const RIGHT_DEFAULT: Record<WorkspaceTool, number> = {
   overview: 360,
   operate: 560,
   io: 540,
   cameras: 620,
+  configuration: 620,
+  topics: 720,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -234,18 +189,13 @@ function ResizablePane({
 }
 
 function AppSidebar({
-  section,
-  onSection,
   theme,
   onToggleTheme,
 }: {
-  section: WorkspaceSection;
-  onSection: (section: WorkspaceSection) => void;
   theme: Theme;
   onToggleTheme: () => void;
 }) {
   const runtime = useRuntime();
-
   return (
     <Sidebar>
       <SidebarHeader>
@@ -255,28 +205,7 @@ function AppSidebar({
           className="h-8 w-auto self-start dark:invert"
         />
       </SidebarHeader>
-
       <SidebarBody>
-        <SidebarSection>
-          {SECTIONS.map((item) => {
-            const Icon = item.icon;
-            return (
-              <SidebarItem
-                key={item.id}
-                current={section === item.id}
-                href={`#${item.id}`}
-                onClick={(event: ReactMouseEvent<HTMLAnchorElement>) => {
-                  event.preventDefault();
-                  onSection(item.id);
-                }}
-              >
-                <Icon data-slot="icon" />
-                <SidebarLabel>{item.label}</SidebarLabel>
-              </SidebarItem>
-            );
-          })}
-        </SidebarSection>
-
         <SidebarSection>
           <SidebarHeading>Cells</SidebarHeading>
           <SidebarItem
@@ -291,13 +220,14 @@ function AppSidebar({
             <SidebarLabel>{CELL_NAME}</SidebarLabel>
             <span
               className={`ml-auto size-2 rounded-full ${
-                runtime.driverAlive ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
+                runtime.driverAlive
+                  ? "bg-emerald-500"
+                  : "bg-zinc-300 dark:bg-zinc-600"
               }`}
               title={runtime.driverAlive ? "Driver alive" : "Driver down"}
             />
           </SidebarItem>
         </SidebarSection>
-
         <SidebarSection>
           <SidebarHeading>Recordings</SidebarHeading>
           {runtime.replaySessions.length === 0 ? (
@@ -324,10 +254,8 @@ function AppSidebar({
             ))
           )}
         </SidebarSection>
-
         <SidebarSpacer />
       </SidebarBody>
-
       <SidebarFooter>
         <SidebarSection>
           <div className="space-y-2 px-2 pb-2 text-xs text-zinc-500 dark:text-zinc-400">
@@ -360,29 +288,39 @@ function AppSidebar({
   );
 }
 
-function WorkspaceHeader({ section }: { section: WorkspaceSection }) {
+function WorkspaceHeader({
+  tool,
+  onOpenScene,
+}: {
+  tool: WorkspaceTool;
+  onOpenScene: () => void;
+}) {
   const runtime = useRuntime();
-  const item = SECTIONS.find((entry) => entry.id === section)!;
   const owner = runtime.controlOwner?.owner ?? null;
   const resourceName =
     runtime.realm.kind === "cell"
       ? CELL_NAME
       : runtime.realm.replaySession ?? "Select recording";
+  const toolLabel = TOOL_META.find((item) => item.id === tool)?.label ?? tool;
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-950/5 px-4 dark:border-white/10">
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-zinc-950/5 px-3 dark:border-white/10">
+      <Button plain className="xl:hidden" onClick={onOpenScene} title="Open scene structure">
+        <GitBranch data-slot="icon" />
+      </Button>
       <div className="flex min-w-0 items-center gap-1.5 text-sm/6 text-zinc-500 dark:text-zinc-400">
-        <span>{runtime.realm.kind === "cell" ? "Cells" : "Recordings"}</span>
-        <ChevronRight className="size-4 shrink-0" />
+        <span className="max-sm:hidden">
+          {runtime.realm.kind === "cell" ? "Cells" : "Recordings"}
+        </span>
+        <ChevronRight className="size-4 shrink-0 max-sm:hidden" />
         <span className="truncate font-medium text-zinc-950 dark:text-white">
           {resourceName}
         </span>
       </div>
-      <Badge color="zinc" className="max-sm:hidden">
-        {item.label}
+      <Badge color="zinc" className="max-md:hidden">
+        {toolLabel}
       </Badge>
-
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex min-w-0 items-center gap-2">
         <Badge
           color={
             runtime.safetyActive
@@ -400,9 +338,31 @@ function WorkspaceHeader({ section }: { section: WorkspaceSection }) {
                 ? "NO STATUS"
                 : "SAFE"}
         </Badge>
-        <span className="hidden font-mono text-xs tabular-nums text-zinc-500 xl:inline dark:text-zinc-400">
+        <span className="hidden font-mono text-xs tabular-nums text-zinc-500 2xl:inline dark:text-zinc-400">
           speed {runtime.status === null ? "—" : `${Math.round(runtime.status.speed_scale * 100)}%`}
         </span>
+        <Input
+          value={runtime.url}
+          spellCheck={false}
+          aria-label="Zenoh WebSocket URL"
+          className="hidden w-44 xl:block"
+          onChange={(event) => runtime.setUrl(event.target.value)}
+        />
+        <Button
+          outline
+          disabled={runtime.connecting}
+          onClick={() => void runtime.connect()}
+          title={runtime.wsConnected ? "Reconnect to bridge" : "Connect to bridge"}
+        >
+          <Network data-slot="icon" />
+          <span className="hidden 2xl:inline">
+            {runtime.connecting
+              ? "Connecting…"
+              : runtime.wsConnected
+                ? "Reconnect"
+                : "Connect"}
+          </span>
+        </Button>
         <Button
           outline
           disabled={!runtime.commandsEnabled}
@@ -438,153 +398,26 @@ function WorkspaceHeader({ section }: { section: WorkspaceSection }) {
           }}
         >
           <Square data-slot="icon" />
-          STOP
+          <span className="max-sm:hidden">STOP</span>
         </Button>
       </div>
     </header>
   );
 }
 
-function SectionIntro({ section }: { section: WorkspaceSection }) {
-  const item = SECTIONS.find((entry) => entry.id === section)!;
-  const Icon = item.icon;
-  return (
-    <div className="border-b border-zinc-950/5 px-4 py-3 dark:border-white/10">
-      <div className="flex items-center gap-2">
-        <Icon className="size-4 text-zinc-500 dark:text-zinc-400" />
-        <h2 className="text-sm/6 font-semibold text-zinc-950 dark:text-white">
-          {item.label}
-        </h2>
-      </div>
-      <p className="mt-0.5 text-xs/5 text-zinc-500 dark:text-zinc-400">
-        {item.description}
-      </p>
-    </div>
-  );
-}
-
-function ConnectionPanel() {
-  const runtime = useRuntime();
-  return (
-    <section className="space-y-2">
-      <h3 className="text-xs/6 font-medium text-zinc-500 dark:text-zinc-400">
-        Connection
-      </h3>
-      <Input
-        value={runtime.url}
-        spellCheck={false}
-        aria-label="Zenoh WebSocket URL"
-        onChange={(event) => runtime.setUrl(event.target.value)}
-      />
-      <Button
-        color="blue"
-        className="w-full"
-        disabled={runtime.connecting}
-        onClick={() => void runtime.connect()}
-      >
-        <Network data-slot="icon" />
-        {runtime.connecting
-          ? "Connecting…"
-          : runtime.wsConnected
-            ? "Reconnect"
-            : "Connect"}
-      </Button>
-      {runtime.connectError !== null && (
-        <p className="text-xs/5 text-red-600 dark:text-red-400">
-          {runtime.connectError}
-        </p>
-      )}
-    </section>
-  );
-}
-
-function LeftRail({
-  section,
+function RightToolPane({
+  tool,
+  structure,
+  preview,
   onPreview,
   onConfigurationMutated,
 }: {
-  section: WorkspaceSection;
+  tool: WorkspaceTool;
+  structure: SceneStructure;
+  preview: ScenePreview;
   onPreview: (preview: ScenePreview) => void;
   onConfigurationMutated: () => void;
 }) {
-  const runtime = useRuntime();
-
-  return (
-    <aside className="flex h-full min-h-0 flex-col">
-      <SectionIntro section={section} />
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {section === "configuration" ? (
-          <>
-            <div className="space-y-5 border-b border-zinc-950/5 p-4 dark:border-white/10">
-              <ConnectionPanel />
-              {runtime.prefix !== null && runtime.realm.kind === "cell" && (
-                <section className="space-y-2">
-                  <h3 className="text-xs/6 font-medium text-zinc-500 dark:text-zinc-400">
-                    Device sources
-                  </h3>
-                  <DeviceTree
-                    session={runtime.session}
-                    realm={runtime.prefix}
-                    commandsEnabled={runtime.commandsEnabled}
-                  />
-                </section>
-              )}
-            </div>
-            <FramesPage
-              session={runtime.session}
-              jointsRef={runtime.jointsRef}
-              flangeRef={runtime.flangeRef}
-              panelOnly
-              onPreviewChange={onPreview}
-              onConfigurationMutated={onConfigurationMutated}
-            />
-          </>
-        ) : (
-          <div className="space-y-5 p-4">
-            <ConnectionPanel />
-            {runtime.prefix === null ? (
-              <p className="rounded-lg bg-zinc-950/2.5 p-3 text-sm/6 text-zinc-500 dark:bg-white/5 dark:text-zinc-400">
-                Select a recording from the main navigation.
-              </p>
-            ) : runtime.realm.kind === "cell" &&
-              (section === "overview" || section === "cameras") ? (
-              <section className="space-y-2">
-                <h3 className="text-xs/6 font-medium text-zinc-500 dark:text-zinc-400">
-                  Device sources
-                </h3>
-                <DeviceTree
-                  session={runtime.session}
-                  realm={runtime.prefix}
-                  commandsEnabled={runtime.commandsEnabled}
-                />
-              </section>
-            ) : section === "operate" ? (
-              <div className="space-y-2 text-sm/6 text-zinc-600 dark:text-zinc-300">
-                <p>Jog the active TCP in joint or Cartesian coordinates.</p>
-                <p className="rounded-lg bg-amber-500/10 p-3 text-xs/5 text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-300">
-                  Continuous jog stops on pointer release. The driver watchdog remains authoritative.
-                </p>
-              </div>
-            ) : section === "io" ? (
-              <div className="grid grid-cols-2 gap-2 text-center text-xs/5 text-zinc-500 dark:text-zinc-400">
-                <div className="rounded-lg bg-zinc-950/2.5 p-3 ring-1 ring-zinc-950/5 dark:bg-white/5 dark:ring-white/10">
-                  <strong className="block text-sm text-zinc-950 dark:text-white">16</strong>
-                  digital inputs
-                </div>
-                <div className="rounded-lg bg-zinc-950/2.5 p-3 ring-1 ring-zinc-950/5 dark:bg-white/5 dark:ring-white/10">
-                  <strong className="block text-sm text-zinc-950 dark:text-white">16</strong>
-                  digital outputs
-                </div>
-              </div>
-            ) : null}
-          </div>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function RightRail({ section }: { section: WorkspaceSection }) {
   const runtime = useRuntime();
   if (runtime.prefix === null) {
     return (
@@ -595,182 +428,347 @@ function RightRail({ section }: { section: WorkspaceSection }) {
   }
   const common = { session: runtime.session, realm: runtime.prefix };
 
+  if (tool === "overview") {
+    return (
+      <div className="h-full space-y-2 overflow-y-auto p-2">
+        <StatusPanel
+          status={runtime.status}
+          driverAlive={runtime.driverAlive}
+          jointsCountRef={runtime.jointsCountRef}
+          flangeRef={runtime.flangeRef}
+          onClearProtectiveStop={() => {
+            if (runtime.session === null || runtime.prefix === null) {
+              return Promise.reject(new Error("not connected"));
+            }
+            return clearProtectiveStop(runtime.session, runtime.prefix);
+          }}
+        />
+        <MotionPanel
+          {...common}
+          enabled={runtime.commandsEnabled}
+          commandsEnabled={runtime.commandsEnabled}
+          clientId={runtime.clientId}
+          holdsControl={runtime.holdsControl}
+          jointsRef={runtime.jointsRef}
+          activeTcp={runtime.status?.active_tcp ?? null}
+        />
+      </div>
+    );
+  }
+  if (tool === "operate") {
+    return (
+      <OperatePage
+        {...common}
+        clientId={runtime.clientId}
+        holdsControl={runtime.holdsControl}
+        ownerUser={runtime.controlOwner?.owner?.user ?? null}
+        onAcquire={runtime.acquire}
+        status={runtime.status}
+        jointsRef={runtime.jointsRef}
+        driverAlive={runtime.driverAlive}
+        commandsEnabled={runtime.commandsEnabled}
+      />
+    );
+  }
+  if (tool === "io") {
+    return (
+      <IoPage
+        {...common}
+        io={runtime.io}
+        wsConnected={runtime.wsConnected}
+        commandsEnabled={runtime.commandsEnabled}
+      />
+    );
+  }
+  if (tool === "cameras") {
+    return (
+      <CamerasPage
+        {...common}
+        wsConnected={runtime.wsConnected}
+        commandsEnabled={runtime.commandsEnabled}
+      />
+    );
+  }
+  if (tool === "topics") {
+    return <TopicsPage session={runtime.session} wsConnected={runtime.wsConnected} compact />;
+  }
   return (
-    <aside className="h-full min-h-0 overflow-hidden bg-white dark:bg-zinc-900">
-      {section === "overview" && (
-        <div className="h-full space-y-2 overflow-y-auto p-2">
-          <StatusPanel
-            status={runtime.status}
-            driverAlive={runtime.driverAlive}
-            jointsCountRef={runtime.jointsCountRef}
-            flangeRef={runtime.flangeRef}
-            onClearProtectiveStop={() => {
-              if (runtime.session === null || runtime.prefix === null) {
-                return Promise.reject(new Error("not connected"));
-              }
-              return clearProtectiveStop(runtime.session, runtime.prefix);
-            }}
-          />
-          <MotionPanel
-            {...common}
-            enabled={runtime.commandsEnabled}
+    <div className="flex h-full min-h-0 flex-col">
+      {runtime.realm.kind === "cell" && (
+        <div className="shrink-0 border-b border-zinc-950/5 p-3 dark:border-white/10">
+          <h2 className="mb-2 text-sm/6 font-semibold text-zinc-950 dark:text-white">
+            Device sources
+          </h2>
+          <DeviceTree
+            session={runtime.session}
+            realm={runtime.prefix}
             commandsEnabled={runtime.commandsEnabled}
-            clientId={runtime.clientId}
-            holdsControl={runtime.holdsControl}
-            jointsRef={runtime.jointsRef}
-            activeTcp={runtime.status?.active_tcp ?? null}
+            devices={structure.devices}
           />
         </div>
       )}
-      {section === "operate" && (
-        <OperatePage
-          {...common}
-          clientId={runtime.clientId}
-          holdsControl={runtime.holdsControl}
-          ownerUser={runtime.controlOwner?.owner?.user ?? null}
-          onAcquire={runtime.acquire}
-          status={runtime.status}
+      <div className="min-h-0 flex-1">
+        <FramesPage
+          key={`${structure.frames.length}:${structure.tcps.length}:${structure.poses.length}:${structure.objects.length}`}
+          session={runtime.session}
           jointsRef={runtime.jointsRef}
-          driverAlive={runtime.driverAlive}
-          commandsEnabled={runtime.commandsEnabled}
+          flangeRef={runtime.flangeRef}
+          panelOnly
+          structure={structure}
+          onPreviewChange={onPreview}
+          onConfigurationMutated={onConfigurationMutated}
         />
+      </div>
+      {preview !== null && (
+        <div className="shrink-0 border-t border-zinc-950/5 px-3 py-2 text-xs/5 text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+          Previewing <span className="font-medium text-zinc-950 dark:text-white">{preview.name}</span> in the workspace
+        </div>
       )}
-      {section === "io" && (
-        <IoPage
-          {...common}
-          io={runtime.io}
-          wsConnected={runtime.wsConnected}
-          commandsEnabled={runtime.commandsEnabled}
-        />
-      )}
-      {section === "cameras" && (
-        <CamerasPage
-          {...common}
-          wsConnected={runtime.wsConnected}
-          commandsEnabled={runtime.commandsEnabled}
-        />
-      )}
-    </aside>
+    </div>
   );
 }
 
-function Workspace({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
+function Workspace({
+  theme,
+  onToggleTheme,
+}: {
+  theme: Theme;
+  onToggleTheme: () => void;
+}) {
   const runtime = useRuntime();
-  const [section, setSection] = useState<WorkspaceSection>("overview");
+  const [tool, setTool] = useState<WorkspaceTool>("overview");
   const [preview, setPreview] = useState<ScenePreview>(null);
+  const [selection, setSelection] = useState<SceneSelection | null>(null);
   const [configurationRevision, setConfigurationRevision] = useState(0);
-  const maxLeft = Math.max(280, Math.min(560, window.innerWidth - 40));
+  const [sceneOpen, setSceneOpen] = useState(false);
+  const [visibility, setVisibility] = useState<ViewerVisibility>(() => {
+    const stored = localStorage.getItem("wf.viewer.visibility");
+    if (stored === null) return DEFAULT_VIEWER_VISIBILITY;
+    try {
+      return {
+        ...DEFAULT_VIEWER_VISIBILITY,
+        ...(JSON.parse(stored) as Partial<ViewerVisibility>),
+      };
+    } catch {
+      return DEFAULT_VIEWER_VISIBILITY;
+    }
+  });
+  const [dragMode, setDragMode] = useState<TcpDragMode>("off");
+  const [dragPending, setDragPending] = useState(false);
+  const [dragError, setDragError] = useState<string | null>(null);
+  const structure = useSceneStructure(
+    runtime.session,
+    runtime.prefix,
+    configurationRevision,
+  );
+  const dragAllowed =
+    runtime.commandsEnabled && runtime.driverAlive && runtime.holdsControl;
+  const effectiveDragMode = dragAllowed ? dragMode : "off";
+  const maxLeft = Math.max(280, Math.min(520, window.innerWidth - 80));
   const [leftWidth, setLeftWidth] = useRememberedWidth(
-    `wf.shell.left-width.${section}`,
-    LEFT_DEFAULT[section],
-    240,
+    "wf.shell.scene-width",
+    LEFT_DEFAULT,
+    260,
     maxLeft,
   );
-  const rightSection =
-    section === "configuration" || section === "topics" ? null : section;
-  const maxRight = Math.max(360, Math.min(680, window.innerWidth - 540));
-  const rightDefault = rightSection === null ? 360 : RIGHT_DEFAULT[rightSection];
+  const navigationWidth = window.innerWidth >= 1024 ? 256 : 0;
+  const dockedSceneWidth = window.innerWidth >= 1280 ? leftWidth : 0;
+  const maxRight = Math.max(
+    340,
+    Math.min(
+      760,
+      window.innerWidth - navigationWidth - dockedSceneWidth - 400,
+    ),
+  );
   const [rightWidth, setRightWidth] = useRememberedWidth(
-    `wf.shell.right-width.${section}`,
-    rightDefault,
-    320,
+    `wf.shell.right-width.${tool}`,
+    RIGHT_DEFAULT[tool],
+    340,
     maxRight,
   );
+  useEffect(() => {
+    localStorage.setItem("wf.viewer.visibility", JSON.stringify(visibility));
+  }, [visibility]);
 
-  const chooseSection = (next: WorkspaceSection) => {
-    setSection(next);
+
+  const commitDraggedTcp = useCallback(
+    async (
+      xyz: [number, number, number],
+      quat: [number, number, number, number],
+    ) => {
+      if (
+        runtime.session === null ||
+        runtime.prefix === null ||
+        dragPending ||
+        !dragAllowed
+      ) {
+        return;
+      }
+      setDragPending(true);
+      setDragError(null);
+      try {
+        const handle = await sendExecutePath(
+          runtime.session,
+          runtime.prefix,
+          [
+            {
+              type: "movej",
+              target: {
+                pose: { frame: "arm/r1/base", xyz, quat },
+              },
+              speed: null,
+              accel: null,
+              blend_radius: 0,
+            },
+          ],
+          { clientId: runtime.clientId },
+        );
+        const result = await handle.result;
+        if (result.state !== "succeeded") {
+          setDragError(
+            result.error === null
+              ? result.state
+              : `${result.state}: ${result.error}`,
+          );
+        }
+      } catch (reason) {
+        setDragError(
+          reason instanceof Error ? reason.message : String(reason),
+        );
+      } finally {
+        setDragPending(false);
+      }
+    },
+    [
+      dragAllowed,
+      dragPending,
+      runtime.clientId,
+      runtime.prefix,
+      runtime.session,
+    ],
+  );
+
+  const chooseTool = (next: WorkspaceTool) => {
+    setTool(next);
+    setSelection(null);
+    setDragMode("off");
     if (next !== "configuration") setPreview(null);
   };
+  const mutateConfiguration = () => {
+    setConfigurationRevision((revision) => revision + 1);
+  };
+  const selectSceneItem = (next: SceneSelection) => {
+    setDragMode("off");
+    setSelection(next);
+    setSceneOpen(false);
+  };
+
+  const hierarchy = (
+    <SceneHierarchy
+      structure={structure}
+      selected={selection}
+      onSelect={selectSceneItem}
+    />
+  );
 
   return (
     <SidebarLayout
-      sidebar={
-        <AppSidebar
-          section={section}
-          onSection={chooseSection}
-          theme={theme}
-          onToggleTheme={onToggleTheme}
-        />
-      }
-      navbar={
-        <Navbar>
-          <NavbarLabel>
-            {SECTIONS.find((item) => item.id === section)?.label}
-          </NavbarLabel>
-        </Navbar>
-      }
+      sidebar={<AppSidebar theme={theme} onToggleTheme={onToggleTheme} />}
+      navbar={<Navbar><NavbarLabel>{CELL_NAME}</NavbarLabel></Navbar>}
     >
       <div
         data-realm={runtime.realm.kind}
         className={`flex h-full min-h-0 flex-col ${runtime.safetyActive ? "safety-active" : ""}`}
       >
-        <WorkspaceHeader section={section} />
-        {section === "topics" ? (
-          <main className="min-h-0 flex-1">
-            <TopicsPage
-              session={runtime.session}
-              wsConnected={runtime.wsConnected}
-            />
-          </main>
-        ) : (
-          <div className="workspace flex min-h-0 flex-1">
-            <ResizablePane
-              side="left"
-              width={leftWidth}
-              onWidth={setLeftWidth}
-              onReset={() => setLeftWidth(LEFT_DEFAULT[section])}
-              className={
-                section === "configuration" ? "flex" : "hidden lg:flex"
-              }
-            >
-              <LeftRail
-                section={section}
-                onPreview={setPreview}
-                onConfigurationMutated={() =>
-                  setConfigurationRevision((revision) => revision + 1)
-                }
-              />
-            </ResizablePane>
+        <WorkspaceHeader tool={tool} onOpenScene={() => setSceneOpen(true)} />
+        <div className="workspace flex min-h-0 flex-1">
+          <ResizablePane
+            side="left"
+            width={leftWidth}
+            onWidth={setLeftWidth}
+            onReset={() => setLeftWidth(LEFT_DEFAULT)}
+            className="hidden xl:flex"
+          >
+            {hierarchy}
+          </ResizablePane>
 
-            <main className="relative min-w-0 flex-1 bg-zinc-100 dark:bg-zinc-950">
-              {runtime.prefix === null ? (
-                <div className="flex h-full items-center justify-center text-sm/6 text-zinc-500 dark:text-zinc-400">
-                  Select a recording from the main navigation.
-                </div>
+          <main className="relative min-w-0 flex-1 bg-zinc-100 dark:bg-zinc-950">
+            <ToolRibbon
+              active={tool}
+              dragActive={effectiveDragMode !== "off"}
+              dragAllowed={dragAllowed}
+              dragPending={dragPending}
+              onSelect={chooseTool}
+              onToggleDrag={() => {
+                setSelection(null);
+                setDragError(null);
+                setDragMode((current) =>
+                  current === "off" ? "translate" : "off",
+                );
+              }}
+            />
+            {runtime.prefix === null ? (
+              <div className="flex h-full items-center justify-center text-sm/6 text-zinc-500 dark:text-zinc-400">
+                Select a recording from the main navigation.
+              </div>
+            ) : (
+              <OverviewPage
+                key={runtime.prefix}
+                session={runtime.session}
+                realm={runtime.prefix}
+                jointsRef={runtime.jointsRef}
+                jointsCountRef={runtime.jointsCountRef}
+                flangeRef={runtime.flangeRef}
+                status={runtime.status}
+                driverAlive={runtime.driverAlive}
+                commandsEnabled={runtime.commandsEnabled}
+                clientId={runtime.clientId}
+                holdsControl={runtime.holdsControl}
+                workspace
+                preview={preview}
+                configurationRevision={configurationRevision}
+                visibility={visibility}
+                onVisibilityChange={setVisibility}
+                dragMode={effectiveDragMode}
+                dragPending={dragPending}
+                onDragCommit={(xyz, quat) => void commitDraggedTcp(xyz, quat)}
+              />
+            )}
+          </main>
+
+          <ResizablePane
+            side="right"
+            width={rightWidth}
+            onWidth={setRightWidth}
+            onReset={() => setRightWidth(RIGHT_DEFAULT[tool])}
+          >
+            <aside className="h-full min-h-0 overflow-hidden bg-white dark:bg-zinc-900">
+              {selection !== null ? (
+                <SceneDetails selection={selection} onClose={() => setSelection(null)} />
+              ) : effectiveDragMode !== "off" ? (
+                <TcpDragPanel
+                  mode={effectiveDragMode}
+                  allowed={dragAllowed}
+                  pending={dragPending}
+                  error={dragError}
+                  activeTcp={runtime.status?.active_tcp ?? null}
+                  onMode={setDragMode}
+                  onClose={() => setDragMode("off")}
+                />
               ) : (
-                <OverviewPage
-                  key={runtime.prefix}
-                  session={runtime.session}
-                  realm={runtime.prefix}
-                  jointsRef={runtime.jointsRef}
-                  jointsCountRef={runtime.jointsCountRef}
-                  flangeRef={runtime.flangeRef}
-                  status={runtime.status}
-                  driverAlive={runtime.driverAlive}
-                  commandsEnabled={runtime.commandsEnabled}
-                  clientId={runtime.clientId}
-                  holdsControl={runtime.holdsControl}
-                  workspace
+                <RightToolPane
+                  tool={tool}
+                  structure={structure}
                   preview={preview}
-                  configurationRevision={configurationRevision}
+                  onPreview={setPreview}
+                  onConfigurationMutated={mutateConfiguration}
                 />
               )}
-            </main>
+            </aside>
+          </ResizablePane>
+        </div>
 
-          {rightSection !== null && (
-            <ResizablePane
-              side="right"
-              width={rightWidth}
-              onWidth={setRightWidth}
-              onReset={() => setRightWidth(RIGHT_DEFAULT[rightSection])}
-            >
-              <RightRail section={rightSection} />
-            </ResizablePane>
-          )}
-          </div>
-        )}
-
-        {section !== "topics" && runtime.realm.kind === "replay" && (
+        {runtime.realm.kind === "replay" && (
           <ReplayDrawer
             key={runtime.realm.replaySession ?? ""}
             session={runtime.session}
@@ -780,6 +778,28 @@ function Workspace({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () =
               runtime.setRealm({ kind: "replay", replaySession: sid })
             }
           />
+        )}
+
+        {sceneOpen && (
+          <div className="fixed inset-0 z-50 xl:hidden">
+            <button
+              type="button"
+              aria-label="Close scene structure"
+              className="absolute inset-0 bg-black/30"
+              onClick={() => setSceneOpen(false)}
+            />
+            <div className="absolute inset-y-2 left-2 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-zinc-950/10 dark:bg-zinc-900 dark:ring-white/10">
+              <Button
+                plain
+                className="absolute top-2 right-2 z-10"
+                onClick={() => setSceneOpen(false)}
+                title="Close scene structure"
+              >
+                <X data-slot="icon" />
+              </Button>
+              {hierarchy}
+            </div>
+          </div>
         )}
       </div>
     </SidebarLayout>

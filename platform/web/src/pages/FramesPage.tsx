@@ -56,6 +56,7 @@ import type {
   TcpDef,
 } from "../lib/messages";
 import type { ScenePreview } from "../scene/types";
+import type { SceneStructure } from "../scene/useSceneStructure";
 
 const RAD_TO_DEG = 180 / Math.PI;
 const ROOT = "world";
@@ -83,6 +84,7 @@ interface FramesPageProps {
   jointsRef: RefObject<JointState | null>;
   flangeRef: RefObject<FlangeState | null>;
   panelOnly?: boolean;
+  structure?: Pick<SceneStructure, "frames" | "tcps" | "poses" | "objects">;
   onPreviewChange?: (preview: ScenePreview) => void;
   onConfigurationMutated?: () => void;
 }
@@ -92,13 +94,22 @@ export default function FramesPage({
   jointsRef,
   flangeRef,
   panelOnly = false,
+  structure,
   onPreviewChange,
   onConfigurationMutated,
 }: FramesPageProps) {
-  const [frames, setFrames] = useState<NamedFrame[]>([]);
-  const [tcps, setTcps] = useState<NamedTcp[]>([]);
-  const [poses, setPoses] = useState<NamedPose[]>([]);
-  const [scene, setScene] = useState<{ name: string; obj: SceneObject }[]>([]);
+  const [frames, setFrames] = useState<NamedFrame[]>(
+    () => structure?.frames ?? [],
+  );
+  const [tcps, setTcps] = useState<NamedTcp[]>(
+    () => structure?.tcps ?? [],
+  );
+  const [poses, setPoses] = useState<NamedPose[]>(
+    () => structure?.poses ?? [],
+  );
+  const [scene, setScene] = useState<{ name: string; obj: SceneObject }[]>(
+    () => structure?.objects ?? [],
+  );
 
   const [showFrames, setShowFrames] = useState(true);
   const [showScene, setShowScene] = useState(true);
@@ -150,11 +161,10 @@ export default function FramesPage({
   }, []);
 
   useEffect(() => {
-    if (session === null) return;
-    void (async () => {
-      await refresh(session);
-    })();
-  }, [session, refresh]);
+    if (session === null || structure !== undefined) return;
+    const timer = window.setTimeout(() => void refresh(session), 0);
+    return () => window.clearTimeout(timer);
+  }, [session, refresh, structure]);
 
   const onMutated = useCallback(
     (s: Session) => {

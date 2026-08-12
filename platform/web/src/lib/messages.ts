@@ -363,6 +363,7 @@ export interface DeviceEntry {
   contract: string;
   model: string | null;
   active: string | null; // active mode, or null/off
+  config?: Record<string, unknown>;
   sources: DeviceSource[];
 }
 

@@ -37,10 +37,12 @@ export default function DeviceTree({
   session,
   realm,
   commandsEnabled,
+  devices: suppliedDevices,
 }: {
   session: Session | null;
   realm: string;
   commandsEnabled: boolean;
+  devices?: DeviceEntry[];
 }) {
   const [deviceSample, setDeviceSample] = useState<{
     session: Session | null;
@@ -53,9 +55,10 @@ export default function DeviceTree({
     map: Record<string, boolean>;
   }>({ session: null, realm: "", map: {} });
   const devices =
-    deviceSample.session === session && deviceSample.realm === realm
+    suppliedDevices ??
+    (deviceSample.session === session && deviceSample.realm === realm
       ? deviceSample.devices
-      : [];
+      : []);
   const aliveMap =
     aliveSample.session === session && aliveSample.realm === realm
       ? aliveSample.map
@@ -65,7 +68,7 @@ export default function DeviceTree({
 
   // Subscribe + initial query the devices inventory.
   useEffect(() => {
-    if (session === null) return;
+    if (session === null || suppliedDevices !== undefined) return;
     let disposed = false;
     const unsubs: Unsubscribe[] = [];
     void (async () => {
@@ -95,7 +98,7 @@ export default function DeviceTree({
       disposed = true;
       for (const u of unsubs) u();
     };
-  }, [session, realm]);
+  }, [session, realm, suppliedDevices]);
 
   // Watch each device's own liveliness token (re-subscribe when the set changes).
   const ids = devices.map((d) => d.id).join(",");

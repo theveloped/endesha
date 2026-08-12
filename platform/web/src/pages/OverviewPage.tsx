@@ -3,7 +3,6 @@
 // right. The twin overlays the static frame triads and the active-TCP tip
 // marker (config is realm-less; fetched page-local like CamerasPage).
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -12,11 +11,11 @@ import {
 } from "react";
 import type { Session } from "@eclipse-zenoh/zenoh-ts";
 import { decode } from "cbor-x";
-import { Button } from "@/components/ui/button";
 import DeviceTree from "../components/DeviceTree";
 import MotionPanel from "../components/MotionPanel";
 import StatusPanel from "../components/StatusPanel";
 import Viewport from "../components/Viewport";
+import { ViewportLegend } from "../components/ViewportLegend";
 import {
   FrameTriads,
   FlangeToolMeshes,
@@ -26,7 +25,7 @@ import {
   TcpDragControls,
   TcpTipMarker,
 } from "../components/SceneOverlays";
-import { clearProtectiveStop, sendExecutePath } from "../lib/actions";
+import { clearProtectiveStop } from "../lib/actions";
 import { queryAll, subscribeRaw } from "../lib/bus";
 import {
   camImage,
@@ -49,6 +48,10 @@ import type {
   TcpDef,
 } from "../lib/messages";
 import type { ScenePreview } from "../scene/types";
+import type {
+  TcpDragMode,
+  ViewerVisibility,
+} from "../scene/viewerControls";
 
 const TCP_FLANGE = "flange";
 
@@ -66,6 +69,14 @@ interface OverviewPageProps {
   workspace?: boolean;
   preview?: ScenePreview;
   configurationRevision?: number;
+  visibility: ViewerVisibility;
+  onVisibilityChange: (visibility: ViewerVisibility) => void;
+  dragMode: TcpDragMode;
+  dragPending: boolean;
+  onDragCommit: (
+    xyz: [number, number, number],
+    quat: [number, number, number, number],
+  ) => void;
 }
 
 export default function OverviewPage({
@@ -82,19 +93,15 @@ export default function OverviewPage({
   workspace = false,
   preview = null,
   configurationRevision = 0,
+  visibility,
+  onVisibilityChange,
+  dragMode,
+  dragPending,
+  onDragCommit,
 }: OverviewPageProps) {
   const [frames, setFrames] = useState<{ name: string; def: FrameDef }[]>([]);
   const [tcps, setTcps] = useState<{ name: string; def: TcpDef }[]>([]);
-  const [showFrames, setShowFrames] = useState(true);
-  const [showTcp, setShowTcp] = useState(true);
-  const [showScene, setShowScene] = useState(true);
   const [scene, setScene] = useState<{ name: string; obj: SceneObject }[]>([]);
-  const [dragMode, setDragMode] = useState<"off" | "translate" | "rotate">(
-    "off",
-  );
-  const [dragPending, setDragPending] = useState(false);
-  const [dragError, setDragError] = useState<string | null>(null);
-  const [showFrustum, setShowFrustum] = useState(true);
   const [intrinsics, setIntrinsics] = useState<Intrinsics | null>(null);
   // Latest per-frame world<-optical camera pose, fed from the image header's
   // attachment (a ref so 15 Hz frames never re-render the page).
@@ -176,44 +183,6 @@ export default function OverviewPage({
   // When disallowed the gizmo is forced off in render.
   const dragAllowed = commandsEnabled && driverAlive && holdsControl;
 
-  const handleDragCommit = useCallback(
-    async (
-      xyz: [number, number, number],
-      quat: [number, number, number, number],
-    ) => {
-      if (session === null || dragPending) return;
-      setDragPending(true);
-      setDragError(null);
-      try {
-        const handle = await sendExecutePath(
-          session,
-          realm,
-          [
-            {
-              type: "movej",
-              target: { pose: { frame: "arm/r1/base", xyz, quat } },
-              speed: null,
-              accel: null,
-              blend_radius: 0,
-            },
-          ],
-          { clientId },
-        );
-        const result = await handle.result;
-        if (result.state !== "succeeded")
-          setDragError(
-            result.error === null
-              ? result.state
-              : `${result.state}: ${result.error}`,
-          );
-      } catch (e) {
-        setDragError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setDragPending(false);
-      }
-    },
-    [session, realm, dragPending, clientId],
-  );
 
   return (
     <div
@@ -235,88 +204,29 @@ export default function OverviewPage({
             />
           )
         }
-        controls={
-          <>
-            <Button
-              variant={showFrames ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowFrames((v) => !v)}
-            >
-              Frames
-            </Button>
-            <Button
-              variant={showTcp ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowTcp((v) => !v)}
-            >
-              TCP
-            </Button>
-            <Button
-              variant={showFrustum ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowFrustum((v) => !v)}
-            >
-              Camera
-            </Button>
-            <Button
-              variant={showScene ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowScene((v) => !v)}
-            >
-              Scene
-            </Button>
-            <Button
-              variant={dragMode !== "off" ? "default" : "outline"}
-              size="sm"
-              disabled={!dragAllowed}
-              onClick={() =>
-                setDragMode((m) => (m === "off" ? "translate" : "off"))
-              }
-            >
-              Drag TCP
-            </Button>
-            {dragMode !== "off" && (
-              <>
-                <Button
-                  variant={dragMode === "translate" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setDragMode("translate")}
-                >
-                  Move
-                </Button>
-                <Button
-                  variant={dragMode === "rotate" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setDragMode("rotate")}
-                >
-                  Rotate
-                </Button>
-              </>
-            )}
-            {dragError !== null && (
-              <span className="self-center rounded bg-background/90 px-1.5 py-0.5 text-xs text-destructive">
-                {dragError}
-              </span>
-            )}
-          </>
+        legend={
+          <ViewportLegend
+            visibility={visibility}
+            onChange={onVisibilityChange}
+          />
         }
       >
-        {showFrames && frames.length > 0 && <FrameTriads frames={frames} />}
-        <SceneMeshes objects={scene} frames={frames} visible={showScene} />
+        {visibility.frames && frames.length > 0 && <FrameTriads frames={frames} />}
+        <SceneMeshes objects={scene} frames={frames} visible={visibility.scene} />
         <FlangeToolMeshes
           objects={scene}
           flangeRef={flangeRef}
           baseMatrix={baseMatrix}
-          visible={showScene}
+          visible={visibility.scene}
         />
-        {showFrustum && intrinsics !== null && (
+        {visibility.camera && intrinsics !== null && (
           <FrustumOverlay
             intrinsics={intrinsics}
             poseRef={cameraPoseRef}
             baseMatrix={baseMatrix}
           />
         )}
-        {showTcp && activeTcpDef !== null && activeTcp !== null && (
+        {visibility.tcp && activeTcpDef !== null && activeTcp !== null && (
           <TcpTipMarker
             flangeRef={flangeRef}
             tcpDef={activeTcpDef}
@@ -341,7 +251,7 @@ export default function OverviewPage({
             tcpDef={activeTcpDef}
             mode={dragMode === "rotate" ? "rotate" : "translate"}
             pending={dragPending}
-            onCommit={handleDragCommit}
+            onCommit={onDragCommit}
             baseMatrix={baseMatrix}
           />
         )}
