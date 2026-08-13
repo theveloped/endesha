@@ -29,11 +29,13 @@ import { clearProtectiveStop } from "../lib/actions";
 import { queryAll, subscribeRaw } from "../lib/bus";
 import {
   camImage,
+  CID,
   configFramesGlob,
   configIntrinsics,
   configIntrinsicsGlob,
   configSceneGlob,
   configTcpsGlob,
+  RID,
 } from "../lib/config";
 import { BASE_FRAME, frameWorldMatrix } from "../lib/framemath";
 import type {
@@ -52,6 +54,11 @@ import type {
   TcpDragMode,
   ViewerVisibility,
 } from "../scene/viewerControls";
+import {
+  isSceneItemHidden,
+  sceneGroupVisibilityId,
+  sceneItemVisibilityId,
+} from "../scene/visibility";
 
 const TCP_FLANGE = "flange";
 
@@ -71,6 +78,7 @@ interface OverviewPageProps {
   configurationRevision?: number;
   visibility: ViewerVisibility;
   onVisibilityChange: (visibility: ViewerVisibility) => void;
+  hiddenSceneItems: ReadonlySet<string>;
   dragMode: TcpDragMode;
   dragPending: boolean;
   onDragCommit: (
@@ -95,6 +103,7 @@ export default function OverviewPage({
   configurationRevision = 0,
   visibility,
   onVisibilityChange,
+  hiddenSceneItems,
   dragMode,
   dragPending,
   onDragCommit,
@@ -177,6 +186,80 @@ export default function OverviewPage({
     const map = new Map(frames.map((fr) => [fr.name, fr.def]));
     return frameWorldMatrix(map, BASE_FRAME);
   }, [frames]);
+  const filteredScene = useMemo(() => {
+    const worldHidden = hiddenSceneItems.has("world");
+    const deviceGroupHidden = hiddenSceneItems.has(
+      sceneGroupVisibilityId("devices"),
+    );
+    const frameByName = new Map(frames.map((frame) => [frame.name, frame.def]));
+    const frameHiddenCache = new Map<string, boolean>();
+    const frameTreeHidden = (name: string, visiting = new Set<string>()): boolean => {
+      const cached = frameHiddenCache.get(name);
+      if (cached !== undefined) return cached;
+      if (worldHidden) return true;
+      const arm = /^arm\/([^/]+)\//.exec(name)?.[1];
+      if (
+        arm !== undefined &&
+        (deviceGroupHidden ||
+          hiddenSceneItems.has(sceneItemVisibilityId("device", arm)))
+      ) {
+        frameHiddenCache.set(name, true);
+        return true;
+      }
+      if (hiddenSceneItems.has(sceneItemVisibilityId("frame", name))) {
+        frameHiddenCache.set(name, true);
+        return true;
+      }
+      if (visiting.has(name)) return false;
+      const parent = frameByName.get(name)?.parent;
+      if (parent === undefined || parent === "world") {
+        frameHiddenCache.set(name, false);
+        return false;
+      }
+      const nextVisiting = new Set(visiting);
+      nextVisiting.add(name);
+      const hidden = frameTreeHidden(parent, nextVisiting);
+      frameHiddenCache.set(name, hidden);
+      return hidden;
+    };
+    const framesVisible =
+      !hiddenSceneItems.has(sceneGroupVisibilityId("frames"));
+    const objectsVisible =
+      !hiddenSceneItems.has(sceneGroupVisibilityId("objects"));
+    return {
+      worldHidden,
+      robotVisible:
+        !worldHidden &&
+        !deviceGroupHidden &&
+        !hiddenSceneItems.has(sceneItemVisibilityId("device", RID)),
+      cameraVisible:
+        !worldHidden &&
+        !deviceGroupHidden &&
+        !hiddenSceneItems.has(sceneItemVisibilityId("device", CID)),
+      frames: framesVisible
+        ? frames.filter((frame) => !frameTreeHidden(frame.name))
+        : [],
+      objects: objectsVisible
+        ? scene.filter(
+            (object) =>
+              !hiddenSceneItems.has(
+                sceneItemVisibilityId("object", object.name),
+              ) && !frameTreeHidden(object.obj.frame),
+          )
+        : [],
+    };
+  }, [frames, hiddenSceneItems, scene]);
+
+  const tcpVisible =
+    filteredScene.robotVisible &&
+    !isSceneItemHidden(hiddenSceneItems, "tcp", activeTcp ?? "");
+  const previewVisible =
+    preview === null ||
+    (preview.kind === "pose"
+      ? filteredScene.robotVisible &&
+        !isSceneItemHidden(hiddenSceneItems, "pose", preview.name)
+      : filteredScene.robotVisible &&
+        !isSceneItemHidden(hiddenSceneItems, "tcp", preview.name));
 
   // Jogging is only allowed live, with the driver alive AND this browser
   // holding the control lease (the driver gates execute_path on the lease).
@@ -195,6 +278,7 @@ export default function OverviewPage({
       <Viewport
         jointsRef={jointsRef}
         baseMatrix={baseMatrix}
+        robotVisible={filteredScene.robotVisible}
         topRight={
           workspace ? undefined : (
             <DeviceTree
@@ -211,22 +295,28 @@ export default function OverviewPage({
           />
         }
       >
-        {visibility.frames && frames.length > 0 && <FrameTriads frames={frames} />}
-        <SceneMeshes objects={scene} frames={frames} visible={visibility.scene} />
+        {visibility.frames && filteredScene.frames.length > 0 && (
+          <FrameTriads frames={filteredScene.frames} />
+        )}
+        <SceneMeshes
+          objects={filteredScene.objects}
+          frames={frames}
+          visible={visibility.scene}
+        />
         <FlangeToolMeshes
-          objects={scene}
+          objects={filteredScene.objects}
           flangeRef={flangeRef}
           baseMatrix={baseMatrix}
           visible={visibility.scene}
         />
-        {visibility.camera && intrinsics !== null && (
+        {visibility.camera && filteredScene.cameraVisible && intrinsics !== null && (
           <FrustumOverlay
             intrinsics={intrinsics}
             poseRef={cameraPoseRef}
             baseMatrix={baseMatrix}
           />
         )}
-        {visibility.tcp && activeTcpDef !== null && activeTcp !== null && (
+        {visibility.tcp && tcpVisible && activeTcpDef !== null && activeTcp !== null && (
           <TcpTipMarker
             flangeRef={flangeRef}
             tcpDef={activeTcpDef}
@@ -234,10 +324,10 @@ export default function OverviewPage({
             baseMatrix={baseMatrix}
           />
         )}
-        {preview?.kind === "pose" && (
+        {previewVisible && preview?.kind === "pose" && (
           <PoseGhost q={preview.q} baseMatrix={baseMatrix} />
         )}
-        {preview?.kind === "tcp" && (
+        {previewVisible && preview?.kind === "tcp" && (
           <TcpTipMarker
             flangeRef={flangeRef}
             tcpDef={preview.def}

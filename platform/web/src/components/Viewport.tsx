@@ -165,6 +165,7 @@ export default function Viewport({
   legend,
   topRight,
   baseMatrix = IDENTITY,
+  robotVisible = true,
   robotSelected = false,
   onRobotSelect,
 }: {
@@ -178,6 +179,8 @@ export default function Viewport({
   /** Robot base pose (Z-up world matrix). The robot + grid render in world;
    *  the robot nests inside this so world (grid) stays the canvas origin. */
   baseMatrix?: THREE.Matrix4;
+  /** Whether the robot device and its URDF meshes render. */
+  robotVisible?: boolean;
   robotSelected?: boolean;
   onRobotSelect?: () => void;
 }) {
@@ -192,7 +195,7 @@ export default function Viewport({
 
   return (
     <div className="relative h-full min-h-0">
-      {!robotLoaded && (
+      {robotVisible && !robotLoaded && (
         <div className="absolute inset-0 z-10 flex items-center justify-center text-sm text-muted-foreground">
           loading robot…
         </div>
@@ -217,16 +220,18 @@ export default function Viewport({
         <ambientLight intensity={0.6} />
         <directionalLight position={[3, 6, 3]} intensity={1.2} />
         <gridHelper args={[6, 24, 0x666666, 0x333333]} />
-        <group rotation={ZUP_TO_YUP}>
-          <group matrix={baseMatrix} matrixAutoUpdate={false}>
-            <Robot
-              jointsRef={jointsRef}
-              onLoaded={() => setRobotLoaded(true)}
-              selected={robotSelected}
-              onSelect={onRobotSelect}
-            />
+        {robotVisible && (
+          <group rotation={ZUP_TO_YUP}>
+            <group matrix={baseMatrix} matrixAutoUpdate={false}>
+              <Robot
+                jointsRef={jointsRef}
+                onLoaded={() => setRobotLoaded(true)}
+                selected={robotSelected}
+                onSelect={onRobotSelect}
+              />
+            </group>
           </group>
-        </group>
+        )}
         {children}
         <OrbitControls makeDefault target={target} />
         <ViewTriad />

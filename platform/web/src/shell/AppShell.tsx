@@ -48,12 +48,17 @@ import TopicsPage from "../pages/TopicsPage";
 import { clearProtectiveStop, sendExecutePath, stop } from "../lib/actions";
 import { CELL_NAME } from "../lib/config";
 import { useRuntime } from "../runtime/context";
+import { SceneCreatePanel } from "../scene/SceneCreatePanel";
 import { SceneDetails } from "../scene/SceneDetails";
-import {
-  SceneHierarchy,
-  type SceneSelection,
-} from "../scene/SceneHierarchy";
-import type { ScenePreview } from "../scene/types";
+import { SceneGroupTable } from "../scene/SceneGroupTable";
+import { SceneHierarchy } from "../scene/SceneHierarchy";
+import type {
+  SceneCreateKind,
+  SceneCreateRequest,
+  SceneGroupKind,
+  ScenePreview,
+  SceneSelection,
+} from "../scene/types";
 import {
   useSceneStructure,
   type SceneStructure,
@@ -539,6 +544,8 @@ function Workspace({
   const [tool, setTool] = useState<WorkspaceTool>("overview");
   const [preview, setPreview] = useState<ScenePreview>(null);
   const [selection, setSelection] = useState<SceneSelection | null>(null);
+  const [createRequest, setCreateRequest] =
+    useState<SceneCreateRequest | null>(null);
   const [configurationRevision, setConfigurationRevision] = useState(0);
   const [sceneOpen, setSceneOpen] = useState(false);
   const [visibility, setVisibility] = useState<ViewerVisibility>(() => {
@@ -551,6 +558,18 @@ function Workspace({
       };
     } catch {
       return DEFAULT_VIEWER_VISIBILITY;
+    }
+  });
+  const [hiddenSceneItems, setHiddenSceneItems] = useState<Set<string>>(() => {
+    const stored = localStorage.getItem("wf.viewer.hidden-scene-items");
+    if (stored === null) return new Set();
+    try {
+      const values = JSON.parse(stored) as unknown;
+      return Array.isArray(values)
+        ? new Set(values.filter((value): value is string => typeof value === "string"))
+        : new Set();
+    } catch {
+      return new Set();
     }
   });
   const [dragMode, setDragMode] = useState<TcpDragMode>("off");
@@ -589,6 +608,21 @@ function Workspace({
   useEffect(() => {
     localStorage.setItem("wf.viewer.visibility", JSON.stringify(visibility));
   }, [visibility]);
+  useEffect(() => {
+    localStorage.setItem(
+      "wf.viewer.hidden-scene-items",
+      JSON.stringify([...hiddenSceneItems]),
+    );
+  }, [hiddenSceneItems]);
+
+  const toggleSceneVisibility = (id: string) => {
+    setHiddenSceneItems((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
 
   const commitDraggedTcp = useCallback(
@@ -651,14 +685,29 @@ function Workspace({
   const chooseTool = (next: WorkspaceTool) => {
     setTool(next);
     setSelection(null);
+    setCreateRequest(null);
     setDragMode("off");
     if (next !== "configuration") setPreview(null);
   };
   const mutateConfiguration = () => {
     setConfigurationRevision((revision) => revision + 1);
   };
+  const groupForCreateKind = (kind: SceneCreateKind): SceneGroupKind =>
+    kind === "frame"
+      ? "frames"
+      : kind === "tcp"
+        ? "tcps"
+        : kind === "pose"
+          ? "poses"
+          : "objects";
+  const openCreate = (request: SceneCreateRequest) => {
+    setDragMode("off");
+    setCreateRequest(request);
+    setSceneOpen(false);
+  };
   const selectSceneItem = (next: SceneSelection) => {
     setDragMode("off");
+    setCreateRequest(null);
     setSelection(next);
     setSceneOpen(false);
   };
@@ -667,7 +716,10 @@ function Workspace({
     <SceneHierarchy
       structure={structure}
       selected={selection}
+      hidden={hiddenSceneItems}
       onSelect={selectSceneItem}
+      onCreate={openCreate}
+      onToggleVisibility={toggleSceneVisibility}
     />
   );
 
@@ -701,6 +753,7 @@ function Workspace({
               onSelect={chooseTool}
               onToggleDrag={() => {
                 setSelection(null);
+                setCreateRequest(null);
                 setDragError(null);
                 setDragMode((current) =>
                   current === "off" ? "translate" : "off",
@@ -729,6 +782,7 @@ function Workspace({
                 configurationRevision={configurationRevision}
                 visibility={visibility}
                 onVisibilityChange={setVisibility}
+                hiddenSceneItems={hiddenSceneItems}
                 dragMode={effectiveDragMode}
                 dragPending={dragPending}
                 onDragCommit={(xyz, quat) => void commitDraggedTcp(xyz, quat)}
@@ -743,8 +797,39 @@ function Workspace({
             onReset={() => setRightWidth(RIGHT_DEFAULT[tool])}
           >
             <aside className="h-full min-h-0 overflow-hidden bg-white dark:bg-zinc-900">
-              {selection !== null ? (
-                <SceneDetails selection={selection} onClose={() => setSelection(null)} />
+              {createRequest !== null ? (
+                <SceneCreatePanel
+                  key={`${createRequest.parent?.kind ?? "group"}:${createRequest.parent?.name ?? "root"}:${createRequest.kinds.join(",")}`}
+                  request={createRequest}
+                  structure={structure}
+                  session={runtime.session}
+                  jointsRef={runtime.jointsRef}
+                  onSaved={(kind) => {
+                    mutateConfiguration();
+                    setCreateRequest(null);
+                    setSelection({ kind: "group", name: groupForCreateKind(kind) });
+                  }}
+                  onClose={() => setCreateRequest(null)}
+                />
+              ) : selection?.kind === "group" ? (
+                <SceneGroupTable
+                  group={selection.name}
+                  structure={structure}
+                  onSelect={selectSceneItem}
+                  onCreate={(kind) =>
+                    openCreate({
+                      kinds: [kind],
+                      initialKind: kind,
+                      parent: null,
+                    })
+                  }
+                  onClose={() => setSelection(null)}
+                />
+              ) : selection !== null ? (
+                <SceneDetails
+                  selection={selection}
+                  onClose={() => setSelection(null)}
+                />
               ) : effectiveDragMode !== "off" ? (
                 <TcpDragPanel
                   mode={effectiveDragMode}

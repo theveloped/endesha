@@ -1,7 +1,7 @@
 import { Box, Cpu, Focus, Frame, GitBranch, Waypoints, X } from "lucide-react";
 import { Badge } from "../catalyst/badge";
 import { quatToRpyDeg } from "../lib/geometry";
-import type { SceneSelection } from "./SceneHierarchy";
+import type { SceneItemSelection } from "./types";
 
 const ICONS = {
   world: GitBranch,
@@ -29,7 +29,7 @@ export function SceneDetails({
   selection,
   onClose,
 }: {
-  selection: SceneSelection | null;
+  selection: SceneItemSelection | null;
   onClose?: () => void;
 }) {
   if (selection === null) {
