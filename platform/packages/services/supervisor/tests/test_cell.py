@@ -49,7 +49,9 @@ _SOURCES_CELL = textwrap.dedent(
           replay: {kind: replay_arm, params: {recording: foo.mcap}}
       cam0:
         contract: camera2d
-        config: {mount_arm: r1}
+        config:
+          mount_arm: r1
+          render: {width: 1280, height: 800, fx: 900.0, fy: 900.0}
         sources:
           live: {kind: genicam, params: {serial: null}}
           sim: {kind: headless_camera, launch: external, params: {}}
@@ -210,7 +212,17 @@ def test_realize_overlay_selects_mode_and_merges_config(tmp_path):
     # external launch carried through (headless camera served outside supervisor).
     assert realized["resources"]["cam0"]["kind"] == "headless_camera"
     assert realized["resources"]["cam0"]["launch"] == "external"
-    assert realized["resources"]["cam0"]["params"] == {"mount_arm": "r1"}
+    assert realized["resources"]["cam0"]["params"] == {
+        "mount_arm": "r1",
+        "render": {"width": 1280, "height": 800, "fx": 900.0, "fy": 900.0},
+    }
+
+
+def test_realize_camera_sources_share_device_optics(tmp_path):
+    cell = load_cell(_write(tmp_path, _SOURCES_CELL))
+    sim = realize_cell(cell, {"r1": "sim", "cam0": "sim"})
+    browser = realize_cell(cell, {"r1": "sim", "cam0": "browser_sim"})
+    assert sim["resources"]["cam0"]["params"]["render"] == browser["resources"]["cam0"]["params"]["render"]
 
 
 def test_realize_off_omits_resource(tmp_path):
@@ -268,7 +280,10 @@ def test_devices_inventory(tmp_path):
     assert by_id["r1"]["config"] == {"lease_ttl_s": 30.0}
     assert {s["mode"] for s in by_id["r1"]["sources"]} == {"live", "sim", "replay"}
     assert by_id["cam0"]["active"] == "live"
-    assert by_id["cam0"]["config"] == {"mount_arm": "r1"}
+    assert by_id["cam0"]["config"] == {
+        "mount_arm": "r1",
+        "render": {"width": 1280, "height": 800, "fx": 900.0, "fy": 900.0},
+    }
     cam_sim = next(s for s in by_id["cam0"]["sources"] if s["mode"] == "sim")
     assert cam_sim["launch"] == "external"  # headless camera
 

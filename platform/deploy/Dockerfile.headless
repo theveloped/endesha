@@ -47,17 +47,11 @@ RUN npm run build
 # Long-running entrypoint: start the static preview server, wait for it, then
 # launch the contract-serving page in headless Chromium and keep it open. WS /
 # realm / cid come from env so host vs in-container bridge URLs need no code
-# branch. The page reads the render block (resolution, intrinsics, mount) from
-# its query params, defaulting to the cell.sim.yaml cam0 values.
+# branch. The page obtains the camera optics and mount from the supervisor's
+# shared logical-device config.
 ENV WS_URL=ws/bridge:10000 \
     REALM=cell \
-    CID=cam0 \
-    W=800 \
-    H=800 \
-    FX=900.0 \
-    FY=900.0 \
-    MOUNT_XYZ=0,0,0.05 \
-    MOUNT_RPY_DEG=0,0,0
+    CID=cam0
 RUN printf '%s\n' \
   '#!/bin/sh' \
   'set -e' \
@@ -69,7 +63,7 @@ RUN printf '%s\n' \
   '  sleep 1' \
   'done' \
   'echo "serving camera2d contract: realm=${REALM} cid=${CID}"' \
-  'exec node scripts/serve-camera.mjs "http://localhost:4173/headless.html?ws=${WS_URL}&realm=${REALM}&cid=${CID}&w=${W}&h=${H}&fx=${FX}&fy=${FY}&mount_xyz=${MOUNT_XYZ}&mount_rpy_deg=${MOUNT_RPY_DEG}"' \
+  'exec node scripts/serve-camera.mjs "http://localhost:4173/headless.html?ws=${WS_URL}&realm=${REALM}&cid=${CID}"' \
   > /entrypoint.sh && chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -9,12 +9,10 @@
 // Renderer parity with the retired Python Renderer (render.py):
 //   - pose: computed HERE from the arm state/flange + the flange->optical mount
 //     (the page is the producer now; nothing else publishes the pose),
-//   - intrinsics + mount + resolution: from query params (the headless service
-//     passes the cell render block), defaulting to cell.sim.yaml (800x800,
-//     fx/fy 900, mount_xyz [0,0,0.05]),
+//   - intrinsics + mount + resolution: from the supervisor's shared cam0 device
+//     config, with query parameters retained only as legacy fallbacks,
 //   - lighting: full ambient + one directional sun (render.py _SUN_POSE),
-//   - background: gray 90, scene composition: config/scene/** meshes, with the
-//     flange tool and the robot arm OMITTED (an eye-in-hand lens sees neither).
+//   - background: gray 90; scene composition is shared with the browser producer.
 //
 // Mounted by headless-main.tsx under headless.html; never in the twin's router.
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -49,18 +47,27 @@ import type {
 
 const STREAM_RENDER_SCALE = 0.25;
 
-function clampNum(raw: string | null, fallback: number, lo: number, hi: number): number {
-  if (raw === null) return fallback;
+function clampNum(raw: unknown, fallback: number, lo: number, hi: number): number {
+  if (raw === null || raw === undefined) return fallback;
   const value = Number(raw);
   return Number.isFinite(value) ? Math.min(hi, Math.max(lo, value)) : fallback;
 }
 
-function vecParam(raw: string | null, fallback: number[]): number[] {
-  if (raw === null) return fallback;
-  const parts = raw.split(",").map(Number);
+function vecParam(raw: unknown, fallback: number[]): number[] {
+  const parts = Array.isArray(raw)
+    ? raw.map(Number)
+    : typeof raw === "string"
+      ? raw.split(",").map(Number)
+      : [];
   return parts.length === fallback.length && parts.every(Number.isFinite)
     ? parts
     : fallback;
+}
+
+function recordValue(raw: unknown): Record<string, unknown> {
+  return raw !== null && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {};
 }
 
 function delay(ms: number): Promise<void> {
@@ -83,22 +90,40 @@ export default function CameraHalPage() {
   // when switched to live/replay/off it backs off so the supervisor-spawned
   // provider (genicam / replay_camera) or nothing owns the contract.
   const [isSimActive, setIsSimActive] = useState(false);
+  const [deviceConfig, setDeviceConfig] = useState<Record<string, unknown> | null>(null);
 
   const params = new URLSearchParams(window.location.search);
   const wsUrl = params.get("ws") ?? DEFAULT_WS_URL;
   const realm = params.get("realm") ?? "cell";
   const cid = params.get("cid") ?? "cam0";
 
-  // Render block (cell.sim.yaml cam0 defaults), overridable via query params so
-  // the headless service can pass the live cell values.
-  const w = Math.round(clampNum(params.get("w"), 800, 1, 8192));
-  const h = Math.round(clampNum(params.get("h"), 800, 1, 8192));
-  const fx = clampNum(params.get("fx"), 900, 1, 1e5);
-  const fy = clampNum(params.get("fy"), 900, 1, 1e5);
-  const mountXyz = vecParam(params.get("mount_xyz"), [0, 0, 0.05]);
-  const mountRpyDeg = vecParam(params.get("mount_rpy_deg"), [0, 0, 0]);
-  const exposureUs = clampNum(params.get("exposure_us"), 10000, 1, 1e9);
-  const gainDb = clampNum(params.get("gain_db"), 0, -100, 100);
+  // The logical device config is authoritative for optics shared by the
+  // headless and in-tab simulated providers. Query params are legacy fallbacks
+  // for standalone use before a supervisor inventory is available.
+  const renderConfig = recordValue(deviceConfig?.render);
+  const w = Math.round(
+    clampNum(renderConfig.width, clampNum(params.get("w"), 1280, 1, 8192), 1, 8192),
+  );
+  const h = Math.round(
+    clampNum(renderConfig.height, clampNum(params.get("h"), 800, 1, 8192), 1, 8192),
+  );
+  const fx = clampNum(renderConfig.fx, clampNum(params.get("fx"), 900, 1, 1e5), 1, 1e5);
+  const fy = clampNum(renderConfig.fy, clampNum(params.get("fy"), 900, 1, 1e5), 1, 1e5);
+  const mountXyz = vecParam(
+    deviceConfig?.mount_xyz ?? renderConfig.mount_xyz ?? params.get("mount_xyz"),
+    [0, 0, 0.05],
+  );
+  const mountRpyDeg = vecParam(
+    deviceConfig?.mount_rpy_deg ?? renderConfig.mount_rpy_deg ?? params.get("mount_rpy_deg"),
+    [0, 0, 0],
+  );
+  const exposureUs = clampNum(
+    deviceConfig?.exposure_us ?? params.get("exposure_us"),
+    10000,
+    1,
+    1e9,
+  );
+  const gainDb = clampNum(deviceConfig?.gain_db ?? params.get("gain_db"), 0, -100, 100);
 
   const intrinsics: Intrinsics = { fx, fy, cx: (w - 1) / 2, cy: (h - 1) / 2, w, h };
 
@@ -197,6 +222,7 @@ export default function CameraHalPage() {
     const unsubs: Unsubscribe[] = [];
     const apply = (msg: unknown) => {
       const dev = (msg as DevicesList).devices?.find((d) => d.id === cid);
+      setDeviceConfig(dev?.config ?? null);
       setIsSimActive(dev?.active === "sim");
     };
     void (async () => {

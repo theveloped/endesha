@@ -93,12 +93,6 @@ services:
       WS_URL: ws/bridge:10000
       REALM: cell
       CID: cam0
-      W: "1280"
-      H: "800"
-      FX: "900.0"
-      FY: "900.0"
-      MOUNT_XYZ: "0.08685228895,0.06511,0.029"
-      MOUNT_RPY_DEG: "90.0,0.0,180.0"
 
   # The twin frontend (Vite dev server) with hot-reload. Bind-mounts the host
   # web/ source (live HMR) + packages/ (the URDF/GLB assets sync-assets copies);
