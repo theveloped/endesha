@@ -1,5 +1,6 @@
 import { createContext, useContext, type RefObject } from "react";
 import type { Session } from "@eclipse-zenoh/zenoh-ts";
+import type { BrowserProducerState } from "../lib/camera2d/producer";
 import type { Realm } from "../lib/config";
 import type {
   ArmStatus,
@@ -34,6 +35,7 @@ export interface RuntimeState {
   jointsRef: RefObject<JointState | null>;
   jointsCountRef: RefObject<number>;
   flangeRef: RefObject<FlangeState | null>;
+  cameraProducer: BrowserProducerState;
 }
 
 export const RuntimeContext = createContext<RuntimeState | null>(null);

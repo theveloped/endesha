@@ -80,6 +80,21 @@ resources:
             mount_xyz: [0.08685228895, 0.06511, 0.029]
             mount_rpy_deg: [90.0, 0.0, 180.0]
           grab_defaults: { encoding: jpeg, quality: 90, scale: 1.0 }
+      browser_sim:
+        kind: browser_camera
+        params:
+          producer_lease_ttl_s: 10.0
+          producer_max_payload_bytes: 8388608
+          render:
+            width: 1280
+            height: 800
+            fx: 900.0
+            fy: 900.0
+            background_gray: 90
+            mount_xyz: [0.08685228895, 0.06511, 0.029]
+            mount_rpy_deg: [90.0, 0.0, 180.0]
+          stream_defaults: { rate_hz: 15.0, scale: 0.25, encoding: jpeg, quality: 75 }
+          grab_defaults: { encoding: jpeg, quality: 90, scale: 1.0 }
       replay:
         kind: replay_camera
         params:

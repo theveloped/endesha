@@ -18,9 +18,9 @@ import yaml
 from .procs import LAUNCH_EXTERNAL, LAUNCH_MODULE
 
 _CONTRACTS = ("arm", "camera2d")
-# Selectable provider modes. ``off`` is a selection (no provider), never a
-# declared source, so it is not in this tuple.
-_MODES = ("live", "sim", "replay")
+# Selectable provider source names. ``off`` is a selection (no provider), never
+# a declared source. The camera exposes two independent simulated providers.
+_MODES = ("live", "sim", "browser_sim", "replay")
 _LAUNCHES = (LAUNCH_MODULE, LAUNCH_EXTERNAL)
 # Synthetic mode under which a legacy single-``hal`` resource is normalized.
 _LEGACY_MODE = "default"

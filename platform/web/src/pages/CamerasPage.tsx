@@ -27,6 +27,7 @@ import {
 import { query, subscribeLatest, subscribeRaw, watchAlive, type Unsubscribe } from "../lib/bus";
 import { camAlive, camCmd, camImage, camStatus } from "../lib/config";
 import { asBigInt, type Ack, type CameraStatus, type FrameHeader, type GrabReply } from "../lib/messages";
+import type { BrowserProducerState } from "../lib/camera2d/producer";
 
 const KV_CLASS =
   "grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-sm tabular-nums";
@@ -46,6 +47,7 @@ interface CamerasPageProps {
   realm: string;
   wsConnected: boolean;
   commandsEnabled: boolean;
+  producer: BrowserProducerState;
 }
 
 export default function CamerasPage({
@@ -53,6 +55,7 @@ export default function CamerasPage({
   realm,
   wsConnected,
   commandsEnabled,
+  producer,
 }: CamerasPageProps) {
   const [frame, setFrame] = useState<Frame | null>(null);
   const [status, setStatus] = useState<CameraStatus | null>(null);
@@ -261,6 +264,60 @@ export default function CamerasPage({
               {status?.error ?? "none"}
             </dd>
           </dl>
+
+          <h3 className="pt-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Browser producer
+          </h3>
+          <dl className={KV_CLASS}>
+            <dt className="text-muted-foreground">mode</dt>
+            <dd>{producer.mode}</dd>
+            <dt className="text-muted-foreground">lease</dt>
+            <dd>
+              {producer.ownsLease
+                ? `owned · epoch ${producer.owner?.epoch}`
+                : producer.owner === null
+                  ? "available"
+                  : `held by ${producer.owner.user}`}
+            </dd>
+            <dt className="text-muted-foreground">render rate</dt>
+            <dd>{producer.achievedRateHz.toFixed(1)} Hz</dd>
+          </dl>
+          <div className="flex gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="cmd flex-1"
+              disabled={producer.mode !== "stopped"}
+              onClick={producer.start}
+            >
+              Start producer
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="cmd flex-1"
+              disabled={producer.mode === "stopped"}
+              onClick={
+                producer.mode === "pip"
+                  ? producer.dock
+                  : () => void producer.popOut()
+              }
+            >
+              {producer.mode === "pip" ? "Back to tab" : "Always on top"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="cmd flex-1"
+              disabled={producer.mode === "stopped"}
+              onClick={producer.stop}
+            >
+              Stop producer
+            </Button>
+          </div>
+          {producer.error !== null && (
+            <p className="text-sm text-destructive">{producer.error}</p>
+          )}
 
           <h3 className="pt-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             Stream

@@ -9,32 +9,34 @@
 #   docker build -f deploy/Dockerfile.sim -t wf-sim .
 FROM ghcr.io/prefix-dev/pixi:0.50.2-jammy
 
-# build-essential/cmake compile source-only pypi deps (ruckig); git +
-# ca-certificates + curl bootstrap a CURRENT Rust toolchain (jammy's apt cargo
-# 1.75 is too old: rejects eclipse-zenoh's v4 Cargo.lock and edition2024).
-# libglib2.0-0/libxrender1/libxext6/libsm6/libgl1-mesa-glx are kept as common
-# shared-lib deps for the cv2/scientific stack (not pyrender-specific).
+# Native libraries required at runtime by OpenCV and the scientific stack.
+# Zenoh and Ruckig are installed from published Linux wheels; this image does
+# not carry C++, CMake, Cargo, Rust, or Git build toolchains.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libglib2.0-0 libxrender1 libxext6 libsm6 libgl1-mesa-glx \
-        build-essential cmake git ca-certificates curl \
+        ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-# Current stable Rust (cargo >= 1.85) via rustup, on PATH for the sdist builds.
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --profile minimal --default-toolchain stable
-ENV PATH=/root/.cargo/bin:$PATH
 ENV WF_REALM=sim
-# Build zenoh's git dependency via the system git (libgit2 hit SSL cert issues).
-ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-
 WORKDIR /platform
 
 # Resolve+install the pixi env (cached unless the lock changes). --locked:
 # never re-resolve in the image; the host-generated lock is authoritative.
 COPY pixi.toml pixi.lock ./
 COPY packages ./packages
-RUN pixi install --locked
-
+# Conda's CDN occasionally closes TLS connections mid-download. Limit Pixi's
+# default 50 concurrent downloads and retry transient failures. BuildKit caches
+# preserve fetched binary packages across failed attempts and later builds.
+RUN --mount=type=cache,id=wf-rattler-linux,target=/root/.cache/rattler \
+    --mount=type=cache,id=wf-uv-linux,target=/root/.cache/uv \
+    pixi config set --global concurrency.downloads 5 \
+    && for attempt in 1 2 3 4; do \
+        echo "Starting pixi install attempt ${attempt}/4"; \
+        timeout 900 pixi install --locked --no-progress -v && exit 0; \
+        echo "pixi install failed or timed out (attempt ${attempt}/4); retrying in $((attempt * 10))s" >&2; \
+        sleep $((attempt * 10)); \
+    done; \
+    exit 1
 # Capture the env activation (PATH, LD_LIBRARY_PATH, conda activation vars) into
 # a script the entrypoint sources, then exec the env python directly rather than
 # via `pixi run` (which re-syncs the env to the lock on every invocation).

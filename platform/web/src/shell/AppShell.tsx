@@ -491,6 +491,7 @@ function RightToolPane({
         {...common}
         wsConnected={runtime.wsConnected}
         commandsEnabled={runtime.commandsEnabled}
+        producer={runtime.cameraProducer}
       />
     );
   }

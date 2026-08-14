@@ -1,6 +1,6 @@
-# The sim image only consumes the Pixi manifests, Python workspace, deploy
-# configuration/runtime files, and helper scripts. Keep host environments and
-# unrelated frontend sources out of the Windows-to-Linux BuildKit context.
+# The sim image consumes Pixi manifests, Python workspace sources, deploy
+# configuration, and helper scripts. Keep OneDrive-hosted recordings, tests,
+# local environments, and generated output out of the BuildKit context.
 **
 !pixi.toml
 !pixi.lock
@@ -11,8 +11,22 @@
 !scripts/
 !scripts/**
 
+# Package tests are run on the host and are not installed into the image.
+packages/**/tests/
+packages/**/conformance/
+
+# Only the small checked-in demo is needed by the replay source. Local captures
+# account for most of the repository build context and change frequently.
+deploy/recordings/*
+!deploy/recordings/demo.mcap
 # Host-only or generated files inside the allowed trees.
 packages/hal/aubo_i10/vendor/
+# Compose bind-mounts the complete packages tree over /platform/packages.
+# Exclude bulky mesh/GLB assets from the image build; the editable installs need
+# package metadata and Python sources, while runtime receives the real assets
+# through the bind mount.
+packages/core/src/wf/core/assets/
+packages/hal/aubo_i10/src/wf/hal/aubo_i10/assets/
 deploy/bridge/
 deploy/logs/
 deploy/out/
@@ -20,3 +34,7 @@ deploy/out/
 **/.pytest_cache/
 **/.ruff_cache/
 **/*.pyc
+**/.mypy_cache/
+**/.coverage
+**/coverage.xml
+**/*.log

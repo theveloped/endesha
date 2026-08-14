@@ -53,6 +53,7 @@ _SOURCES_CELL = textwrap.dedent(
         sources:
           live: {kind: genicam, params: {serial: null}}
           sim: {kind: headless_camera, launch: external, params: {}}
+          browser_sim: {kind: browser_camera, params: {}}
     """
 )
 
@@ -105,6 +106,7 @@ def test_load_cell_accepts_sources_schema(tmp_path):
     assert r1["model"] == "aubo_i10"
     assert r1["config"] == {"lease_ttl_s": 30.0}
     assert set(r1["sources"]) == {"live", "sim", "replay"}
+    assert set(cell["resources"]["cam0"]["sources"]) == {"live", "sim", "browser_sim"}
     assert r1["sources"]["live"] == {
         "kind": "aubo_i10",
         "params": {"ip": "1.2.3.4"},
@@ -243,6 +245,7 @@ def test_provider_modules_cover_module_launched_kinds():
         ("arm", "replay_arm"): "wf.hal.replay.arm",
         ("camera2d", "genicam"): "wf.hal.genicam",
         ("camera2d", "replay_camera"): "wf.hal.replay.camera",
+        ("camera2d", "browser_camera"): "wf.hal.browser_camera",
     }
 
 

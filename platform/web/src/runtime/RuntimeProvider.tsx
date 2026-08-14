@@ -6,14 +6,17 @@ import {
   type PropsWithChildren,
 } from "react";
 import type { Session } from "@eclipse-zenoh/zenoh-ts";
+import { BrowserCameraProducer } from "../components/BrowserCameraProducer";
 import { acquireControl, releaseControl } from "../lib/actions";
 import {
   connect,
+  query,
   subscribeLatest,
   watchAlive,
   watchReplaySessions,
   type Unsubscribe,
 } from "../lib/bus";
+import { useBrowserCameraProducer } from "../lib/camera2d/producer";
 import {
   DEFAULT_WS_URL,
   alive,
@@ -24,6 +27,7 @@ import {
   stateJoints,
   stateStatus,
   type Realm,
+  supervisorDevices,
 } from "../lib/config";
 import type {
   ArmStatus,
@@ -31,6 +35,7 @@ import type {
   FlangeState,
   IoState,
   JointState,
+  DevicesList,
 } from "../lib/messages";
 import { RuntimeContext } from "./context";
 
@@ -70,6 +75,7 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
     prefix: null,
     value: null,
   });
+  const [devices, setDevices] = useState<DevicesList | null>(null);
   const [clientId] = useState(() => crypto.randomUUID());
   const [user] = useState(() => localStorage.getItem("wf.user") ?? "operator");
   const jointsRef = useRef<JointState | null>(null);
@@ -194,6 +200,40 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
     return () => clearInterval(timer);
   }, [session]);
 
+  useEffect(() => {
+    if (session === null || prefix === null || realm.kind !== "cell") {
+      setDevices(null);
+      return;
+    }
+    let disposed = false;
+    let unsubscribe: Unsubscribe | null = null;
+    void (async () => {
+      const next = await subscribeLatest(session, supervisorDevices(prefix), (message) => {
+        setDevices(message as DevicesList);
+      }, 4);
+      if (disposed) {
+        next();
+        return;
+      }
+      unsubscribe = next;
+      const current = await query(session, supervisorDevices(prefix), {});
+      if (!disposed && current !== null) setDevices(current as DevicesList);
+    })();
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, [prefix, realm.kind, session]);
+
+  const browserCameraActive =
+    realm.kind === "cell" &&
+    devices?.devices.find((device) => device.id === "cam0")?.active === "browser_sim";
+  const cameraProducer = useBrowserCameraProducer(
+    session,
+    prefix,
+    browserCameraActive,
+  );
+
   const wsConnected = session !== null && !wsClosed;
   const driverAlive = wsConnected && !stale && aliveToken;
   const commandsEnabled = realm.kind !== "replay" && driverAlive;
@@ -247,8 +287,10 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
         jointsRef,
         jointsCountRef,
         flangeRef,
+        cameraProducer,
       }}
     >
+      <BrowserCameraProducer session={session} realm={prefix} producer={cameraProducer} />
       {children}
     </RuntimeContext.Provider>
   );

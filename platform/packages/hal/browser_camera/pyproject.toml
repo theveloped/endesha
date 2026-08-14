@@ -1,13 +1,13 @@
 [project]
-name = "wf-world-model"
+name = "wf-hal-browser-camera"
 version = "0.1.0"
-description = "WF platform L1: shared kinematics, IK, goal validation, trajectory (design §5.10)"
+description = "WF platform L2 browser-produced simulated camera HAL"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "wf-core",
-    "wf-contracts-arm",
-    "numpy",
-    "ruckig==0.19.4",
+    "wf-contracts-camera2d",
+    "wf-hal-camera2d-core",
+    "pyyaml",
 ]
 
 [build-system]

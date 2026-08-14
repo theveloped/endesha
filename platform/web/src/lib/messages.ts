@@ -373,6 +373,42 @@ export interface DevicesList {
   devices: DeviceEntry[];
 }
 
+export interface ProducerGrant {
+  client_id: string;
+  user: string;
+  authority_id: string;
+  epoch: number;
+  granted_at: WireTimestamp;
+  expires_at: WireTimestamp;
+}
+
+export interface ProducerOwnerState {
+  t: WireTimestamp;
+  owner: ProducerGrant | null;
+}
+
+export interface ProducerAck {
+  ok: boolean;
+  owner: ProducerGrant | null;
+  error: string | null;
+}
+
+export interface ProducerDemand {
+  t: WireTimestamp;
+  stream: {
+    rate_hz: number;
+    scale: number;
+    roi: number[] | null;
+    encoding: string;
+    quality: number;
+  } | null;
+  intrinsics: { w: number; h: number; fx: number; fy: number };
+  mount_xyz: number[];
+  mount_rpy_deg: number[];
+  exposure_us: number;
+  gain_db: number;
+}
+
 /** supervisor/cmd/set_source reply: `{ok, device_id?, source?, error?}`. */
 export interface SetSourceReply {
   ok: boolean;

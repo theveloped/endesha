@@ -16,7 +16,7 @@ x-code-mount: &code ../packages:/platform/packages:ro
 
 services:
   zenoh-router:
-    image: eclipse/zenoh:1.8.0
+    image: eclipse/zenoh:1.9.0
     ports:
       - "7447:7447"
     volumes:
@@ -83,6 +83,7 @@ services:
   # source is `launch: external` in cell.yaml so the supervisor does NOT spawn a
   # Python camera HAL. Long-running service (not a one-shot).
   camera2d-headless:
+    profiles: ["headless-camera"]
     build:
       context: ..
       dockerfile: deploy/Dockerfile.headless

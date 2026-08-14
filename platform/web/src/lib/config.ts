@@ -188,6 +188,26 @@ export function camCmd(realm: string, action: string, cid = CID): string {
   return `${camPrefix(realm, cid)}/cmd/${action}`;
 }
 
+export function camProducerCmd(realm: string, action: "acquire" | "release", cid = CID): string {
+  return `${camPrefix(realm, cid)}/producer/cmd/${action}`;
+}
+
+export function camProducerOwner(realm: string, cid = CID): string {
+  return `${camPrefix(realm, cid)}/producer/state/owner`;
+}
+
+export function camProducerDemand(realm: string, cid = CID): string {
+  return `${camPrefix(realm, cid)}/producer/state/demand`;
+}
+
+export function camProducerIngress(realm: string, cid = CID): string {
+  return `${camPrefix(realm, cid)}/producer/ingress`;
+}
+
+export function camProducerRender(realm: string, clientId: string, cid = CID): string {
+  return `${camPrefix(realm, cid)}/producer/clients/${clientId}/render`;
+}
+
 // Supervisor process and device-inventory key space.
 
 export function supervisorAlive(realm: string, node = "main"): string {

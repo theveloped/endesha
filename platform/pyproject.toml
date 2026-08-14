@@ -18,6 +18,7 @@ testpaths = [
     "packages/hal/camera2d_core/tests",
     "packages/hal/replay/tests",
     "packages/hal/genicam/tests",
+    "packages/hal/browser_camera/tests",
     "packages/services/recording/tests",
     "packages/services/config/tests",
     "packages/services/supervisor/tests",

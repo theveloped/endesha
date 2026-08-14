@@ -11,6 +11,9 @@ from wf.contracts.camera2d.messages import (
     FrameHeader,
     FrameSpec,
     GrabReply,
+    ProducerAck,
+    ProducerFrame,
+    ProducerGrant,
     StreamParams,
 )
 from wf.core.codec import decode, encode
@@ -43,6 +46,15 @@ HEADER_POSED = FrameHeader(
     },
 )
 
+GRANT = ProducerGrant(
+    client_id="browser-1",
+    user="operator",
+    authority_id="backend-1",
+    epoch=3,
+    granted_at=100,
+    expires_at=200,
+)
+
 
 @pytest.mark.parametrize(
     "msg",
@@ -57,6 +69,19 @@ HEADER_POSED = FrameHeader(
         ConfigureCmd(),
         GrabReply(ok=True, header=HEADER, data=b"\xff\xd8spam"),
         GrabReply(ok=False, error="camera is streaming - stop the stream first"),
+        GRANT,
+        ProducerAck(ok=True, owner=GRANT),
+        ProducerFrame(
+            client_id="browser-1",
+            authority_id="backend-1",
+            epoch=3,
+            captured_at=150,
+            w=320,
+            h=200,
+            encoding=ENCODING_JPEG,
+            exposure_us=10000.0,
+            gain_db=0.0,
+        ),
         CameraStatus(
             t=1,
             connected=True,

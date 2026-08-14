@@ -14,33 +14,19 @@ libc = { family = "glibc", version = "2.28" }
 python = "3.12.*"
 pinocchio = ">=3.2"
 coal = ">=3.0"
-# Build backend + tools for ruckig's no-isolation sdist build (see ruckig note
-# below). These are CONDA deps on purpose: the conda phase installs before the
-# pypi build phase, so scikit-build-core/nanobind are present when uv builds
-# ruckig (a pypi backend would race and fail with ModuleNotFoundError). cmake is
-# pinned <4 — ruckig's CMakeLists predates the cmake-4 minimum-version bump.
-cmake = ">=3.15,<4"
-ninja = "*"
-scikit-build-core = "<0.10"
-nanobind = "*"
 
 [pypi-dependencies]
-eclipse-zenoh = "~=1.8.0"
+eclipse-zenoh = "~=1.9.0"
 cbor2 = "*"
 uuid6 = "*"
 numpy = "*"
 pyyaml = "*"
 opencv-python = "*"
 trimesh = "*"
-pyrender = "*"
-PyOpenGL = "*"
 mcap = ">=1.1,<2"
-# ruckig ships no wheels, so its sdist builds via scikit-build-core. 0.17.3 (the
-# latest release) still uses the pre-0.10 `cmake.targets` key that
-# scikit-build-core>=0.10 rejects, so a build-isolated install (which pulls the
-# latest backend) fails. Built WITHOUT isolation (see [pypi-options]) against the
-# pinned scikit-build-core<0.10 + nanobind provided as conda deps above.
-ruckig = "*"
+# 0.19.4 restores published CPython 3.12 wheels. Pin it so a future source-only
+# release cannot silently reintroduce native compilation in Linux images.
+ruckig = "==0.19.4"
 wf-core = { path = "packages/core", editable = true }
 wf-world-model = { path = "packages/world_model", editable = true }
 wf-contracts-arm = { path = "packages/contracts/arm", editable = true }
@@ -50,11 +36,20 @@ wf-hal-aubo-i10 = { path = "packages/hal/aubo_i10", editable = true }
 wf-hal-arm-sim = { path = "packages/hal/arm_sim", editable = true }
 wf-hal-camera2d-core = { path = "packages/hal/camera2d_core", editable = true }
 wf-hal-replay = { path = "packages/hal/replay", editable = true }
+wf-hal-browser-camera = { path = "packages/hal/browser_camera", editable = true }
 wf-tools = { path = "packages/tools", editable = true }
 wf-services-recording = { path = "packages/services/recording", editable = true }
 wf-services-config = { path = "packages/services/config", editable = true }
 wf-contracts-supervisor = { path = "packages/contracts/supervisor", editable = true }
 wf-services-supervisor = { path = "packages/services/supervisor", editable = true }
+
+[target.osx-64.dependencies]
+# Ruckig 0.19.4 has no Intel macOS wheel. Keep its source-build toolchain scoped
+# to that legacy target rather than installing compilers in every environment.
+cmake = ">=3.15,<4"
+ninja = "*"
+scikit-build-core = ">=0.10"
+nanobind = "*"
 
 # GenICam camera HAL: vendor harvesters/genicam SDK ships no macOS cp312 wheels,
 # so the camera driver is Windows/Linux only. The collision engine and every
@@ -68,9 +63,8 @@ harvesters = "~=1.4"
 wf-hal-genicam = { path = "packages/hal/genicam", editable = true }
 
 [pypi-options]
-# Build ruckig without isolation so it uses the pinned scikit-build-core<0.10
-# (and nanobind) from the env rather than pulling the incompatible latest
-# backend. See the ruckig note in [pypi-dependencies].
+# Only Intel macOS builds Ruckig from source; other supported targets consume
+# its published wheel.
 no-build-isolation = ["ruckig"]
 
 [environments]

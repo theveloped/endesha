@@ -13,7 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@eclipse-zenoh/zenoh-ts": "1.8.0",
+    "@eclipse-zenoh/zenoh-ts": "1.9.0",
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@headlessui/react": "^2.2.10",
