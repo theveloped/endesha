@@ -44,6 +44,30 @@ export interface IoState {
   ao: number[];
 }
 
+// ── dio contract (wf/contracts/dio/messages.py) ─────────────────────────────
+
+export type ChannelKind = "di" | "do" | "ai" | "ao";
+
+export interface ChannelValue {
+  kind: ChannelKind;
+  value: boolean | number;
+  forced: boolean;
+}
+
+export interface ChannelsState {
+  t: WireTimestamp;
+  channels: Record<string, ChannelValue>;
+}
+
+/** One entry of a dio device's cell ``config.channels`` mapping. */
+export interface ChannelDecl {
+  kind: ChannelKind;
+  unit?: string;
+  scale?: number;
+  offset?: number;
+  [address: string]: unknown;
+}
+
 export interface ArmStatus {
   t: WireTimestamp;
   mode: string;

@@ -95,3 +95,25 @@ resources:
         kind: replay_camera
         params:
           recording: deploy/recordings/demo.mcap
+
+  io0:
+    # The arm's onboard IO bank exposed as a first-class dio device (RFC §2).
+    # Programs and the UI use channel NAMES only; addresses live here.
+    contract: dio
+    model: aubo_onboard
+    config:
+      channels:
+        part_present: { kind: di, bank: standard, pin: 0 }
+        door_closed:  { kind: di, bank: standard, pin: 1 }
+        start_button: { kind: di, bank: standard, pin: 2 }
+        clamp:        { kind: do, bank: standard, pin: 0 }
+        conveyor_run: { kind: do, bank: standard, pin: 1 }
+        gripper:      { kind: do, bank: tool,     pin: 0 }
+        pressure:     { kind: ai, index: 0, unit: bar, scale: 1.0 }
+    sources:
+      live:
+        kind: arm_dio                 # facade over r1's io slice (live or sim arm)
+        params: { arm: r1 }
+      sim:
+        kind: sim_dio                 # nothing wired: inputs via force / script
+        params: {}

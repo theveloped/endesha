@@ -365,11 +365,12 @@ No XML. Rename in docs/UI, keep keys:
 
 ## 8. Delivery order
 
-0. Cell-level lease: `wf.contracts.control` keys + authority in the supervisor;
+0. **DONE** (`23bfe03`) Cell-level lease: `wf.contracts.control` keys + authority in the supervisor;
    `ArmCore` becomes a checker; arm keys removed; UI/wfctl/tests moved. Small,
    self-contained, and everything after depends on it.
-1. `dio` contract + `dio_core` + `arm_dio` + `sim_dio` (+ force) + conformance
-   tests + `_CONTRACTS`. Web IO channel table.
+1. **DONE** `dio` contract + `dio_core` + `arm_dio` + `sim_dio` (+ force + script) +
+   conformance tests + `_CONTRACTS` + `io0` in `cell.yaml`/overlays + `wfctl dio-*`.
+   Web IO channel table.
 2. `wf.program` facade (from `leaves.py`) + `Program` base + runner with PackML
    unit + keys + one demo program under `deploy/programs/`, validated in `sim`.
 3. Web Programs tool + `/hmi`; router + AppShell split land here because the

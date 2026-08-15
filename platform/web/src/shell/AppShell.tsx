@@ -479,9 +479,11 @@ function RightToolPane({
     return (
       <IoPage
         {...common}
-        io={runtime.io}
+        devices={structure.devices}
         wsConnected={runtime.wsConnected}
         commandsEnabled={runtime.commandsEnabled}
+        clientId={runtime.clientId}
+        holdsControl={runtime.holdsControl}
       />
     );
   }

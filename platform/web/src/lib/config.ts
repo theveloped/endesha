@@ -82,6 +82,23 @@ export function cmdJog(realm: string, rid = RID): string {
   return `${prefix(realm, rid)}/cmd/jog`;
 }
 
+// dio contract (wf/contracts/dio/keys.py): named channels per dio device.
+export function dioStateChannels(realm: string, rid: string): string {
+  return `${realm}/dio/${rid}/state/channels`;
+}
+
+export function dioCmdSet(realm: string, rid: string): string {
+  return `${realm}/dio/${rid}/cmd/set`;
+}
+
+export function dioCmdForce(realm: string, rid: string): string {
+  return `${realm}/dio/${rid}/cmd/force`;
+}
+
+export function dioAlive(realm: string, rid: string): string {
+  return `${realm}/dio/${rid}/alive`;
+}
+
 // Cell-level control lease (wf/contracts/control/keys.py): ONE holder for every
 // device in the cell, granted by the supervisor-hosted authority. No rid.
 export function controlCmdAcquire(realm: string): string {

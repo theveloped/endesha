@@ -2,3 +2,4 @@
 active_sources:
   r1: live
   cam0: live
+  io0: live

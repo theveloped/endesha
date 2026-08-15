@@ -31,10 +31,14 @@ wf-core = { path = "packages/core", editable = true }
 wf-world-model = { path = "packages/world_model", editable = true }
 wf-contracts-control = { path = "packages/contracts/control", editable = true }
 wf-contracts-arm = { path = "packages/contracts/arm", editable = true }
+wf-contracts-dio = { path = "packages/contracts/dio", editable = true }
 wf-contracts-camera2d = { path = "packages/contracts/camera2d", editable = true }
 wf-hal-arm-core = { path = "packages/hal/arm_core", editable = true }
 wf-hal-aubo-i10 = { path = "packages/hal/aubo_i10", editable = true }
 wf-hal-arm-sim = { path = "packages/hal/arm_sim", editable = true }
+wf-hal-dio-core = { path = "packages/hal/dio_core", editable = true }
+wf-hal-arm-dio = { path = "packages/hal/arm_dio", editable = true }
+wf-hal-sim-dio = { path = "packages/hal/sim_dio", editable = true }
 wf-hal-camera2d-core = { path = "packages/hal/camera2d_core", editable = true }
 wf-hal-replay = { path = "packages/hal/replay", editable = true }
 wf-hal-browser-camera = { path = "packages/hal/browser_camera", editable = true }

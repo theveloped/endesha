@@ -258,6 +258,8 @@ def test_provider_modules_cover_module_launched_kinds():
         ("camera2d", "genicam"): "wf.hal.genicam",
         ("camera2d", "replay_camera"): "wf.hal.replay.camera",
         ("camera2d", "browser_camera"): "wf.hal.browser_camera",
+        ("dio", "arm_dio"): "wf.hal.arm_dio",
+        ("dio", "sim_dio"): "wf.hal.sim_dio",
     }
 
 
@@ -367,3 +369,60 @@ def test_set_source_rejects_unknown_device_and_mode(tmp_path):
     assert svc._set_source_reply("rX", "sim")["ok"] is False
     assert svc._set_source_reply("r1", "bogus")["ok"] is False
     os.unlink(svc.cell_path)
+
+
+# ── dio devices ──────────────────────────────────────────────────────────────
+
+_DIO_CELL = textwrap.dedent(
+    """
+    cell_type: t@0.1
+    resources:
+      io0:
+        contract: dio
+        config:
+          channels:
+            part_present: {kind: di, bank: standard, pin: 3}
+            clamp: {kind: do, bank: standard, pin: 0}
+        sources:
+          live: {kind: arm_dio, params: {arm: r1}}
+          sim: {kind: sim_dio, params: {}}
+    """
+)
+
+
+def test_dio_resource_loads_and_realizes(tmp_path):
+    cell = load_cell(_write(tmp_path, _DIO_CELL))
+    io0 = cell["resources"]["io0"]
+    assert io0["contract"] == "dio"
+    assert list(io0["config"]["channels"]) == ["part_present", "clamp"]
+    realized = realize_cell(cell, {"io0": "sim"})
+    assert realized["resources"]["io0"]["kind"] == "sim_dio"
+    assert realized["resources"]["io0"]["params"]["channels"]["clamp"] == {
+        "kind": "do", "bank": "standard", "pin": 0,
+    }
+    assert provider_module("dio", "sim_dio") == "wf.hal.sim_dio"
+
+
+@pytest.mark.parametrize(
+    "channels, reason",
+    [
+        ("{}", "must declare at least one channel"),
+        ("{Bad: {kind: di}}", "must match"),
+        ("{x: {kind: relay}}", "kind must be one of"),
+    ],
+)
+def test_dio_resource_rejects_bad_channels(tmp_path, channels, reason):
+    cell = textwrap.dedent(
+        f"""
+        cell_type: t@0.1
+        resources:
+          io0:
+            contract: dio
+            config:
+              channels: {channels}
+            sources:
+              sim: {{kind: sim_dio, params: {{}}}}
+        """
+    )
+    with pytest.raises(ValueError, match=reason):
+        load_cell(_write(tmp_path, cell))

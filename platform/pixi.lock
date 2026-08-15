@@ -130,15 +130,19 @@ environments:
       - pypi: ./packages/contracts/arm
       - pypi: ./packages/contracts/camera2d
       - pypi: ./packages/contracts/control
+      - pypi: ./packages/contracts/dio
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
+      - pypi: ./packages/hal/arm_dio
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/browser_camera
       - pypi: ./packages/hal/camera2d_core
+      - pypi: ./packages/hal/dio_core
       - pypi: ./packages/hal/genicam
       - pypi: ./packages/hal/replay
+      - pypi: ./packages/hal/sim_dio
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
       - pypi: ./packages/services/supervisor
@@ -267,14 +271,18 @@ environments:
       - pypi: ./packages/contracts/arm
       - pypi: ./packages/contracts/camera2d
       - pypi: ./packages/contracts/control
+      - pypi: ./packages/contracts/dio
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
+      - pypi: ./packages/hal/arm_dio
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/browser_camera
       - pypi: ./packages/hal/camera2d_core
+      - pypi: ./packages/hal/dio_core
       - pypi: ./packages/hal/replay
+      - pypi: ./packages/hal/sim_dio
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
       - pypi: ./packages/services/supervisor
@@ -381,14 +389,18 @@ environments:
       - pypi: ./packages/contracts/arm
       - pypi: ./packages/contracts/camera2d
       - pypi: ./packages/contracts/control
+      - pypi: ./packages/contracts/dio
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
+      - pypi: ./packages/hal/arm_dio
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/browser_camera
       - pypi: ./packages/hal/camera2d_core
+      - pypi: ./packages/hal/dio_core
       - pypi: ./packages/hal/replay
+      - pypi: ./packages/hal/sim_dio
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
       - pypi: ./packages/services/supervisor
@@ -488,15 +500,19 @@ environments:
       - pypi: ./packages/contracts/arm
       - pypi: ./packages/contracts/camera2d
       - pypi: ./packages/contracts/control
+      - pypi: ./packages/contracts/dio
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
+      - pypi: ./packages/hal/arm_dio
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/browser_camera
       - pypi: ./packages/hal/camera2d_core
+      - pypi: ./packages/hal/dio_core
       - pypi: ./packages/hal/genicam
       - pypi: ./packages/hal/replay
+      - pypi: ./packages/hal/sim_dio
       - pypi: ./packages/services/config
       - pypi: ./packages/services/recording
       - pypi: ./packages/services/supervisor
@@ -5477,6 +5493,14 @@ packages:
   - wf-core
   requires_python: '>=3.12,<3.13'
   editable: true
+- pypi: ./packages/contracts/dio
+  name: wf-contracts-dio
+  version: 0.1.0
+  sha256: 905a534e5cb609c8b7b98b7599139d56f2d6521aa9882671cdd1774c23dbc2d5
+  requires_dist:
+  - wf-core
+  requires_python: '>=3.12,<3.13'
+  editable: true
 - pypi: ./packages/contracts/supervisor
   name: wf-contracts-supervisor
   version: 0.1.0
@@ -5506,6 +5530,17 @@ packages:
   - wf-contracts-arm
   - wf-contracts-control
   - numpy
+  requires_python: '>=3.12,<3.13'
+  editable: true
+- pypi: ./packages/hal/arm_dio
+  name: wf-hal-arm-dio
+  version: 0.1.0
+  sha256: 45190d2f37ef3104293e6423ed14756455e1277e55ce73677b6300edb20d96d4
+  requires_dist:
+  - wf-core
+  - wf-contracts-arm
+  - wf-contracts-dio
+  - wf-hal-dio-core
   requires_python: '>=3.12,<3.13'
   editable: true
 - pypi: ./packages/hal/arm_sim
@@ -5557,6 +5592,16 @@ packages:
   - opencv-python
   requires_python: '>=3.12,<3.13'
   editable: true
+- pypi: ./packages/hal/dio_core
+  name: wf-hal-dio-core
+  version: 0.1.0
+  sha256: 7724529f54fd5940960da983e1782e59c141abf28edfc0335bb9dde30f9d8264
+  requires_dist:
+  - wf-core
+  - wf-contracts-dio
+  - wf-contracts-control
+  requires_python: '>=3.12,<3.13'
+  editable: true
 - pypi: ./packages/hal/genicam
   name: wf-hal-genicam
   version: 0.1.0
@@ -5585,6 +5630,16 @@ packages:
   - pyyaml
   requires_python: '>=3.12,<3.13'
   editable: true
+- pypi: ./packages/hal/sim_dio
+  name: wf-hal-sim-dio
+  version: 0.1.0
+  sha256: 567ffb398fd3dcf881841c95629c4abacf962a5acf89ae6b7860883223e1b185
+  requires_dist:
+  - wf-core
+  - wf-contracts-dio
+  - wf-hal-dio-core
+  requires_python: '>=3.12,<3.13'
+  editable: true
 - pypi: ./packages/services/config
   name: wf-services-config
   version: 0.1.0
@@ -5606,22 +5661,24 @@ packages:
 - pypi: ./packages/services/supervisor
   name: wf-services-supervisor
   version: 0.1.0
-  sha256: 76f9514bcadc11799ae1b419e71d7d47e33b0599433b3b46b8f6adaa0e40e69a
+  sha256: 7c4c15cd1b1000d0beab2087a7974692200168808539fca0f4226b5b12feb05b
   requires_dist:
   - wf-core
   - wf-contracts-supervisor
   - wf-contracts-control
+  - wf-contracts-dio
   - pyyaml
   requires_python: '>=3.12,<3.13'
   editable: true
 - pypi: ./packages/tools
   name: wf-tools
   version: 0.1.0
-  sha256: 3ecc72f43eb548923fdfaf4a3c13d65a254f8eb0167eb21d0656dbd8d140bc07
+  sha256: f248ad5841b8f0f998ce104956905284c0215d77ff218f54e32412948c7ac59a
   requires_dist:
   - wf-core
   - wf-contracts-arm
   - wf-contracts-control
+  - wf-contracts-dio
   - wf-contracts-camera2d
   - wf-services-recording
   - wf-services-config

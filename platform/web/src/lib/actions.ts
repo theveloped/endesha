@@ -9,6 +9,8 @@ import { decodeSample } from "./codec";
 import {
   actionPrefix,
   controlCmdAcquire,
+  dioCmdForce,
+  dioCmdSet,
   cmdClearProtectiveStop,
   controlCmdRelease,
   cmdSetDo,
@@ -154,6 +156,41 @@ export async function setTcp(
 ): Promise<Ack> {
   const reply = await query(session, cmdSetTcp(realm), { name });
   if (reply === null) throw new Error("no reply from cmd/set_tcp");
+  return reply as Ack;
+}
+
+export async function dioSet(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  channel: string,
+  value: boolean | number,
+): Promise<Ack> {
+  const reply = await query(session, dioCmdSet(realm, rid), {
+    client_id: clientId,
+    channel,
+    value,
+  });
+  if (reply === null) throw new Error("no reply from dio cmd/set");
+  return reply as Ack;
+}
+
+/** ``value: null`` clears the force. */
+export async function dioForce(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  channel: string,
+  value: boolean | number | null,
+): Promise<Ack> {
+  const reply = await query(session, dioCmdForce(realm, rid), {
+    client_id: clientId,
+    channel,
+    value,
+  });
+  if (reply === null) throw new Error("no reply from dio cmd/force");
   return reply as Ack;
 }
 

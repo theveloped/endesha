@@ -30,6 +30,9 @@ from wf.contracts.arm.messages import (
 )
 from wf.contracts.camera2d import keys as cam_keys
 from wf.contracts.control import keys as control_keys
+from wf.contracts.dio import keys as dio_keys
+from wf.contracts.dio.messages import ForceChannel, SetChannel
+from wf.contracts.dio.messages import Ack as DioAck
 from wf.contracts.control.messages import AcquireControl, ControlAck
 from wf.contracts.camera2d.messages import Ack as CamAck
 from wf.contracts.camera2d.messages import GrabReply
@@ -302,6 +305,75 @@ def cmd_clear_pstop(session, args) -> int:
 
 
 _CART_AXES = {"x": 0, "y": 1, "z": 2, "rx": 3, "ry": 4, "rz": 5}
+
+
+def _parse_channel_value(text: str):
+    """``on``/``off``/``true``/``false``/``1``/``0`` -> bool; else float."""
+    low = text.strip().lower()
+    if low in ("on", "true", "1"):
+        return True
+    if low in ("off", "false", "0"):
+        return False
+    return float(text)
+
+
+def cmd_dio_state(session, args) -> int:
+    reply = _query(session, dio_keys.state_channels(args.realm, args.dio), {})
+    if reply is None:
+        print("no reply from dio state/channels (device down?)", file=sys.stderr)
+        return 1
+    for name, cv in sorted(reply.get("channels", {}).items()):
+        flag = "  FORCED" if cv.get("forced") else ""
+        print(f"{name:20s} {cv['kind']:3s} {cv['value']!s:>8}{flag}")
+    return 0
+
+
+def cmd_dio_set(session, args) -> int:
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    try:
+        req = SetChannel(client_id=cid, channel=args.channel, value=_parse_channel_value(args.value))
+        reply = _query(session, dio_keys.cmd_set(args.realm, args.dio), req.to_wire())
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+    if reply is None:
+        print("no reply from dio cmd/set", file=sys.stderr)
+        return 1
+    ack = DioAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_dio_force(session, args) -> int:
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    if not args.clear and args.value is None:
+        print("dio-force needs a value or --clear", file=sys.stderr)
+        return 2
+    try:
+        value = None if args.clear else _parse_channel_value(args.value)
+        req = ForceChannel(client_id=cid, channel=args.channel, value=value)
+        reply = _query(session, dio_keys.cmd_force(args.realm, args.dio), req.to_wire())
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+    if reply is None:
+        print("no reply from dio cmd/force", file=sys.stderr)
+        return 1
+    ack = DioAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
 
 
 def cmd_acquire_control(session, args) -> int:
@@ -772,6 +844,25 @@ def main(argv=None) -> int:
     p = sub.add_parser("release-control", help="release the cell control lease")
     p.add_argument("--client-id", required=True, help="the holding client id")
     p.set_defaults(fn=cmd_release_control)
+
+    p = sub.add_parser("dio-state", help="print a dio device's named channels")
+    p.add_argument("--dio", default="io0", help="dio resource id (default io0)")
+    p.set_defaults(fn=cmd_dio_state)
+
+    p = sub.add_parser("dio-set", help="set a dio OUTPUT channel (auto-acquires the lease)")
+    p.add_argument("channel")
+    p.add_argument("value", help="on|off|true|false|1|0 or a number")
+    p.add_argument("--dio", default="io0", help="dio resource id (default io0)")
+    p.add_argument("--client-id", default=None, help="reuse an external lease")
+    p.set_defaults(fn=cmd_dio_set)
+
+    p = sub.add_parser("dio-force", help="force ANY dio channel's reported value (auto-acquires the lease)")
+    p.add_argument("channel")
+    p.add_argument("value", nargs="?", default=None, help="on|off|true|false|1|0 or a number")
+    p.add_argument("--clear", action="store_true", help="clear the force instead")
+    p.add_argument("--dio", default="io0", help="dio resource id (default io0)")
+    p.add_argument("--client-id", default=None, help="reuse an external lease")
+    p.set_defaults(fn=cmd_dio_force)
 
     p = sub.add_parser("jog", help="hold-to-jog stream (auto-acquires the lease)")
     group = p.add_mutually_exclusive_group(required=True)

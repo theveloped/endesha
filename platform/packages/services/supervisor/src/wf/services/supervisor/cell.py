@@ -15,9 +15,11 @@ from pathlib import Path
 
 import yaml
 
+from wf.contracts.dio.messages import parse_channels
+
 from .procs import LAUNCH_EXTERNAL, LAUNCH_MODULE
 
-_CONTRACTS = ("arm", "camera2d")
+_CONTRACTS = ("arm", "camera2d", "dio")
 # Selectable provider source names. ``off`` is a selection (no provider), never
 # a declared source. The camera exposes two independent simulated providers.
 _MODES = ("live", "sim", "browser_sim", "replay")
@@ -95,6 +97,17 @@ def load_cell(path: str | Path) -> dict:
             config = decl.get("config") or {}
             if not isinstance(config, dict):
                 raise ValueError(f"bad_cell:resource {rid}.config must be a mapping")
+            if contract == "dio":
+                # Named channels are the program-facing surface of a dio device;
+                # validate the schema at load so a typo fails the cell, not a run.
+                try:
+                    channels = parse_channels(config.get("channels"))
+                except ValueError as exc:
+                    raise ValueError(f"bad_cell:resource {rid}.{exc}") from exc
+                if not channels:
+                    raise ValueError(
+                        f"bad_cell:resource {rid}.config.channels must declare at least one channel"
+                    )
             sources_in = decl["sources"]
             if not isinstance(sources_in, dict) or not sources_in:
                 raise ValueError(
