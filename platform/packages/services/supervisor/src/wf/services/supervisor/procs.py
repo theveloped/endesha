@@ -31,7 +31,6 @@ PROVIDER_MODULES: dict[tuple[str, str], str] = {
     ("camera2d", "genicam"): "wf.hal.genicam",
     ("camera2d", "replay_camera"): "wf.hal.replay.camera",
     ("camera2d", "browser_camera"): "wf.hal.browser_camera",
-    ("dio", "arm_dio"): "wf.hal.arm_dio",
     ("dio", "sim_dio"): "wf.hal.sim_dio",
 }
 

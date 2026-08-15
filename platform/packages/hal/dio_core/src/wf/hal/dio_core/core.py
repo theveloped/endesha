@@ -29,6 +29,7 @@ from wf.contracts.dio.messages import (
     ChannelValue,
     ForceChannel,
     SetChannel,
+    auto_channel_name,
     parse_channels,
 )
 from wf.core.codec import decode, encode
@@ -58,15 +59,45 @@ def load_dio_resource(cell_yaml_path: str, resource_id: str) -> dict:
     return dict(resources[resource_id].get("params") or {})
 
 
+def _address_key(address: dict) -> tuple:
+    return tuple(sorted((str(k), str(v)) for k, v in address.items()))
+
+
 class DioCore:
-    def __init__(self, session, realm: str, rid: str, params: dict, backend: DioBackend):
+    """``lease`` may be a shared :class:`LeaseWatcher` (a host process serving
+    several contracts keeps one watcher); when None the core owns one. The
+    core declares its own ``dio/{rid}/alive`` liveliness token so a provided
+    device (hosted inside another provider's process) is discoverable too."""
+
+    def __init__(
+        self,
+        session,
+        realm: str,
+        rid: str,
+        params: dict,
+        backend: DioBackend,
+        *,
+        lease: LeaseWatcher | None = None,
+    ):
         self.session = session
         self.realm = realm
         self.rid = rid
         self.params = params
         self.backend = backend
-        self.channels: dict[str, ChannelDef] = parse_channels(params.get("channels"))
         self._poll_s = 1.0 / float(params.get("poll_hz", _DEFAULT_POLL_HZ))
+        # Named channels first (cell.yaml order), then one auto channel per
+        # physical point nobody named — the raw pin view.
+        self.channels: dict[str, ChannelDef] = parse_channels(params.get("channels"))
+        named_points = {
+            (ch.kind, _address_key(ch.address)) for ch in self.channels.values()
+        }
+        for kind, address in backend.points():
+            if (kind, _address_key(address)) in named_points:
+                continue
+            name = auto_channel_name(kind, address)
+            if name in self.channels:
+                continue  # an operator picked the auto name for a different pin
+            self.channels[name] = ChannelDef(name=name, kind=kind, address=dict(address), auto=True)
 
         self._lock = threading.Lock()
         # Engineering-unit values as last read from / written to the backend.
@@ -75,9 +106,11 @@ class DioCore:
         }
         self._forced: dict[str, bool | float] = {}
 
-        self._lease = LeaseWatcher(session, realm)
+        self._owns_lease = lease is None
+        self._lease = lease if lease is not None else LeaseWatcher(session, realm)
         self._pub = session.declare_publisher(keys.state_channels(realm, rid))
         self._queryables: list = []
+        self._alive_token = None
         self._stop = threading.Event()
         self._kick = threading.Event()
         self._thread: threading.Thread | None = None
@@ -92,7 +125,11 @@ class DioCore:
                 keys.state_channels(self.realm, self.rid), self._on_state_query
             ),
         ]
-        self._lease.start()
+        if self._owns_lease:
+            self._lease.start()
+        self._alive_token = self.session.liveliness().declare_token(
+            keys.alive(self.realm, self.rid)
+        )
         self.backend.start(self)
         self._poll_once()
         self.publish()
@@ -121,13 +158,20 @@ class DioCore:
             self.backend.shutdown()
         except Exception:
             _log.exception("backend shutdown failed")
-        self._lease.close()
+        if self._owns_lease:
+            self._lease.close()
         for q in self._queryables:
             try:
                 q.undeclare()
             except Exception:
                 pass
         self._queryables = []
+        if self._alive_token is not None:
+            try:
+                self._alive_token.undeclare()
+            except Exception:
+                pass
+            self._alive_token = None
         _log.info("dio core stopped")
 
     def notify(self) -> None:
@@ -154,6 +198,8 @@ class DioCore:
                         kind=ch.kind,
                         value=self._reported_locked(name),
                         forced=name in self._forced,
+                        address=ch.address,
+                        auto=ch.auto,
                     )
                     for name, ch in self.channels.items()
                 },

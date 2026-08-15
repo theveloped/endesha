@@ -5,6 +5,12 @@ configuration and selectable provider sources. A runtime overlay selects one
 live, simulated, replay, or off source per resource. ``realize_cell`` collapses
 both documents into the concrete provider inventory consumed by the supervisor.
 
+A resource may additionally ``provide`` devices of another contract that are
+served by the SAME provider process (one HAL, several contracts) — e.g. an
+arm providing its onboard IO bank as a ``dio`` device. A provided device is a
+first-class device in the inventory but has no sources of its own: it follows
+its host's source mode and cannot be switched independently.
+
 Legacy single-``hal`` resources remain accepted and are normalized into one
 synthetic ``default`` source.
 """
@@ -141,7 +147,16 @@ def load_cell(path: str | Path) -> dict:
             "model": model,
             "config": config,
             "sources": sources,
+            "provides": _parse_provides(rid, decl.get("provides")),
         }
+
+    # Provided device ids share the resource namespace.
+    seen: set[str] = set(resources)
+    for rid, res in resources.items():
+        for pid in res["provides"]:
+            if pid in seen:
+                raise ValueError(f"bad_cell:resource {rid} provides duplicate device id {pid!r}")
+            seen.add(pid)
 
     master_node = raw.get("master_node")
     if master_node is not None and (
@@ -155,6 +170,40 @@ def load_cell(path: str | Path) -> dict:
         "control": _parse_control(raw.get("control")),
         "resources": resources,
     }
+
+
+# Contracts a resource may provide in-process. Only dio for now (arm IO bank).
+_PROVIDABLE = ("dio",)
+
+
+def _parse_provides(rid: str, raw: object) -> dict[str, dict]:
+    """``provides: {device_id: {contract: dio, channels: {...}, layout?: {...}}}``."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"bad_cell:resource {rid}.provides must be a mapping")
+    out: dict[str, dict] = {}
+    for pid, spec in raw.items():
+        if not isinstance(pid, str) or not pid:
+            raise ValueError(f"bad_cell:resource {rid}.provides id must be a non-empty string")
+        if not isinstance(spec, dict):
+            raise ValueError(f"bad_cell:resource {rid}.provides.{pid} must be a mapping")
+        contract = spec.get("contract")
+        if contract not in _PROVIDABLE:
+            raise ValueError(
+                f"bad_cell:resource {rid}.provides.{pid}.contract must be one of {_PROVIDABLE}"
+            )
+        try:
+            parse_channels(spec.get("channels"))
+        except ValueError as exc:
+            raise ValueError(f"bad_cell:resource {rid}.provides.{pid}.{exc}") from exc
+        model = spec.get("model")
+        if model is not None and (not isinstance(model, str) or not model):
+            raise ValueError(f"bad_cell:resource {rid}.provides.{pid}.model must be a string")
+        entry = {k: v for k, v in spec.items() if k != "model"}
+        entry["model"] = model
+        out[pid] = entry
+    return out
 
 
 def _parse_control(decl: object) -> dict:
@@ -229,12 +278,19 @@ def realize_cell(cell: dict, active_sources: dict[str, str] | None = None) -> di
         elif mode not in sources:
             raise ValueError(f"bad_runtime:no_source:{rid}:{mode}")
         chosen = sources[mode]
+        params = {**res["config"], **chosen["params"]}
+        if res.get("provides"):
+            # The provider process hosts these; hand the specs down as params.
+            params["provides"] = {
+                pid: {k: v for k, v in spec.items() if k != "model"}
+                for pid, spec in res["provides"].items()
+            }
         realized[rid] = {
             "contract": res["contract"],
             "kind": chosen["kind"],
             "launch": chosen["launch"],
             "node": res["node"],
-            "params": {**res["config"], **chosen["params"]},
+            "params": params,
         }
     return {
         "cell_type": cell["cell_type"],
@@ -274,4 +330,17 @@ def devices_inventory(cell: dict, active_sources: dict[str, str]) -> list[dict]:
                 "sources": sources,
             }
         )
+        # Provided devices: first-class in the tree, source follows the host.
+        for pid, spec in (res.get("provides") or {}).items():
+            devices.append(
+                {
+                    "id": pid,
+                    "contract": spec["contract"],
+                    "model": spec.get("model"),
+                    "active": active,
+                    "config": {k: v for k, v in spec.items() if k not in ("contract", "model")},
+                    "sources": [],
+                    "provided_by": rid,
+                }
+            )
     return devices

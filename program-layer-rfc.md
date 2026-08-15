@@ -53,20 +53,30 @@ resources:
     contract: arm
     ...
 
-  io0:                    # NEW: the arm's onboard IO exposed as a dio device
+    # One HAL, two contracts (review decision): the arm's provider process ALSO
+    # serves its onboard IO bank as a first-class dio device. It follows r1's
+    # source (live/sim/replay) and cannot be switched independently.
+    provides:
+      io0:
+        contract: dio
+        model: aubo_onboard
+        layout: { di: 16, do: 16, tool_do: 4 }   # physical points -> raw pins
+        channels:           # named channels; programs ONLY use these names
+          part_present:  { kind: di, bank: standard, pin: 3 }
+          clamp:         { kind: do, bank: standard, pin: 0 }
+          gripper:       { kind: do, bank: tool,     pin: 0 }
+
+  io1:                    # an IO device that is NOT part of the arm
     contract: dio
-    model: aubo_onboard
     config:
-      channels:           # named channels; programs ONLY use these names
-        part_present:  { kind: di, bank: standard, pin: 3 }
-        door_closed:   { kind: di, bank: standard, pin: 4 }
-        clamp:         { kind: do, bank: standard, pin: 0 }
-        gripper:       { kind: do, bank: tool,     pin: 0 }
-        pressure:      { kind: ai, index: 0, unit: bar, scale: 0.1 }
+      channels: { valve: { kind: do, pin: 0 } }
     sources:
-      live: { kind: arm_dio, params: { arm: r1 } }   # facade over r1's io slice
-      sim:  { kind: sim_dio, params: {} }             # standalone, all inputs forceable
+      sim: { kind: sim_dio, params: { layout: { di: 8, do: 8 } } }
 ```
+
+- Every physical point the provider knows but nobody named shows up as an
+  ``auto`` channel (``di3``, ``tool_do0``, ``ai1``) so the raw bank stays
+  visible; ``state/channels`` carries each channel's ``address`` and ``auto``.
 
 - `channels` is contract-agnostic in shape (`name -> {kind, address…}`) so
   `serial`/`opcua` reuse it (`kind: node`, `kind: register`, …).
@@ -106,8 +116,10 @@ Payload of `state/channels`:
 - `wf.hal.dio_core` — `DioCore` serves the contract (channel table, force
   overlay, publish-on-change, keepalive) + `DioBackend` ABC
   (`read() -> {name: value}`, `write(name, value)`). Mirrors `arm_core`.
-- `wf.hal.arm_dio` — backend that subscribes `arm/{rid}/state/io` and calls
-  `arm/{rid}/cmd/set_do`. Pure bus client; works over live *or* sim arm.
+- `wf.hal.arm_core.io_device.ArmIoBackend` — in-process backend hosted by
+  `ArmCore` for each `provides.<rid>` (fed by `publish_io`, writes via
+  `ArmBackend.set_do`); one process serves the arm AND its IO for aubo, sim
+  and replay alike. (An earlier bus-hop `arm_dio` facade was dropped in review.)
 - `wf.hal.sim_dio` — backend with in-memory values; optional `script:` param
   (`[{at_s: 2.0, set: {part_present: true}}, …]`) for repeatable scenarios.
 - `replay` — `state/channels` is recorded like any topic; a `replay_dio`
@@ -368,9 +380,9 @@ No XML. Rename in docs/UI, keep keys:
 0. **DONE** (`23bfe03`) Cell-level lease: `wf.contracts.control` keys + authority in the supervisor;
    `ArmCore` becomes a checker; arm keys removed; UI/wfctl/tests moved. Small,
    self-contained, and everything after depends on it.
-1. **DONE** `dio` contract + `dio_core` + `arm_dio` + `sim_dio` (+ force + script) +
-   conformance tests + `_CONTRACTS` + `io0` in `cell.yaml`/overlays + `wfctl dio-*`.
-   Web IO channel table.
+1. **DONE** `dio` contract + `dio_core` + arm-hosted `provides.io0` + `sim_dio`
+   (+ force + script + layout/raw pins) + conformance tests + `_CONTRACTS` +
+   `wfctl dio-*`. Web IO channel table with unmapped pins.
 2. `wf.program` facade (from `leaves.py`) + `Program` base + runner with PackML
    unit + keys + one demo program under `deploy/programs/`, validated in `sim`.
 3. Web Programs tool + `/hmi`; router + AppShell split land here because the

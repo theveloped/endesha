@@ -11,6 +11,12 @@ Outputs remember what was written; inputs are driven by the operator via
           - { at_s: 3.5, set: { part_present: false, pressure: 4.2 } }
 
 Script values are RAW (pre scale/offset) and apply to inputs *and* outputs.
+
+An optional ``layout`` declares the simulated physical points so unmapped pins
+show up as auto channels exactly like on real hardware::
+
+    params:
+      layout: { di: 16, do: 16, ai: 2, ao: 2 }   # counts per kind
 """
 
 from __future__ import annotations
@@ -56,11 +62,29 @@ def parse_script(raw: object) -> tuple[list[tuple[float, dict]], bool]:
     return steps, loop
 
 
+def parse_layout(raw: object) -> list[tuple[str, dict]]:
+    """``{kind: count}`` -> physical points ``[(kind, {pin|index: i}), …]``."""
+    if raw is None:
+        return []
+    if not isinstance(raw, dict):
+        raise ValueError("bad_layout:layout must be a mapping")
+    points: list[tuple[str, dict]] = []
+    for kind, count in raw.items():
+        if kind not in ("di", "do", "ai", "ao"):
+            raise ValueError(f"bad_layout:kind {kind!r} must be one of di/do/ai/ao")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError(f"bad_layout:{kind} count must be a non-negative int")
+        field = "pin" if kind in ("di", "do") else "index"
+        points.extend((kind, {field: i}) for i in range(count))
+    return points
+
+
 class SimDioBackend(DioBackend):
     def __init__(self, params: dict):
         self._values: dict[str, bool | float] = {}
         self._lock = threading.Lock()
         self._steps, self._loop = parse_script(params.get("script"))
+        self._points = parse_layout(params.get("layout"))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.core = None
@@ -83,6 +107,9 @@ class SimDioBackend(DioBackend):
             self._thread = None
 
     # ── DioBackend ───────────────────────────────────────────────────────
+
+    def points(self) -> list[tuple[str, dict]]:
+        return list(self._points)
 
     def read(self) -> dict:
         with self._lock:

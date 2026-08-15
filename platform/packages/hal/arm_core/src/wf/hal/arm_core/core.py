@@ -42,6 +42,7 @@ from wf.core.frames import (
 )
 from wf.contracts.control.watcher import LeaseWatcher
 from wf.core.frametree import FrameUnknown
+from wf.hal.dio_core import DioCore
 from wf.core.log import get_logger
 from wf.core.time import now_ns
 from wf.world_model.cartesian import (
@@ -69,6 +70,7 @@ from wf.world_model.validate import (
 )
 
 from .backend import ArmBackend
+from .io_device import ArmIoBackend
 
 _log = get_logger("wf.hal.arm_core")
 
@@ -142,6 +144,25 @@ class ArmCore:
         # ── cell-level control lease (checked, never granted here) ────────
         self._lease = LeaseWatcher(session, realm)
 
+        # ── provided dio devices (the arm's IO bank as first-class devices) ─
+        # One HAL per robot, several contracts: each ``provides.<rid>`` entry
+        # of contract ``dio`` becomes a DioCore hosted in THIS process over an
+        # in-process ArmIoBackend fed by publish_io (see io_device.py).
+        self._io_devices: list[tuple[DioCore, ArmIoBackend]] = []
+        for io_rid, spec in (params.get("provides") or {}).items():
+            if not isinstance(spec, dict) or spec.get("contract") != "dio":
+                raise ValueError(f"bad_cell:provides.{io_rid} must be a dio device")
+            io_backend = ArmIoBackend(self, spec.get("layout"))
+            io_core = DioCore(
+                session,
+                realm,
+                io_rid,
+                {"channels": spec.get("channels") or {}, "poll_hz": spec.get("poll_hz", 20.0)},
+                io_backend,
+                lease=self._lease,
+            )
+            self._io_devices.append((io_core, io_backend))
+
         # ── hold-to-jog (state guarded by _jog_lock) ─────────────────────
         self._jog_vmax = params.get("jog_vmax", 0.5)
         self._jog_watchdog_s = params.get("jog_watchdog_s", 0.25)
@@ -171,6 +192,8 @@ class ArmCore:
             ),
         ]
         self._lease.start()
+        for io_core, _backend in self._io_devices:
+            io_core.start()
         self._jog_sub = self.session.declare_subscriber(
             keys.cmd_jog(self.realm, self.rid), self._on_jog
         )
@@ -178,7 +201,12 @@ class ArmCore:
             "execute_path", self._accept_execute_path, self._execute_path
         )
         self.backend.start(self)
-        _log.info("arm core up: realm=%s rid=%s", self.realm, self.rid)
+        _log.info(
+            "arm core up: realm=%s rid=%s provides=%s",
+            self.realm,
+            self.rid,
+            [c.rid for c, _b in self._io_devices] or "-",
+        )
 
     def run_forever(self) -> None:
         try:
@@ -196,6 +224,8 @@ class ArmCore:
         except Exception:
             _log.exception("backend shutdown failed")
         self.action_server.close()
+        for io_core, _backend in self._io_devices:
+            io_core.shutdown()
         self._lease.close()
         for sub in (*self._queryables, self._jog_sub, self._frames_sub, self._scene_sub):
             if sub is not None:
@@ -260,6 +290,8 @@ class ArmCore:
                 IoState(t=t or now_ns(), di=di, do_=do_, ai=ai, ao=ao).to_wire()
             )
         )
+        for _core, io_backend in self._io_devices:
+            io_backend.on_io(di, do_, ai, ao)
 
     def publish_status(
         self,

@@ -18,7 +18,6 @@ testpaths = [
     "packages/hal/aubo_i10/tests",
     "packages/hal/arm_sim/tests",
     "packages/hal/dio_core/tests",
-    "packages/hal/arm_dio/tests",
     "packages/hal/sim_dio/tests",
     "packages/hal/camera2d_core/tests",
     "packages/hal/replay/tests",

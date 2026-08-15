@@ -40,6 +40,9 @@ class ChannelDef:
     unit: str | None = None
     scale: float = 1.0
     offset: float = 0.0
+    # True for a channel the provider synthesized for a physical point nobody
+    # named in cell.yaml (raw pin view); False for an operator-named channel.
+    auto: bool = False
 
     @property
     def is_input(self) -> bool:
@@ -72,7 +75,26 @@ class ChannelDef:
             d["scale"] = self.scale
         if self.offset != 0.0:
             d["offset"] = self.offset
+        if self.auto:
+            d["auto"] = True
         return d
+
+
+def auto_channel_name(kind: str, address: dict) -> str:
+    """Deterministic name for an unmapped physical point: ``di3``, ``do7``,
+    ``tool_do0``, ``ai1`` — a valid channel name derived from kind + address."""
+    if kind not in KINDS:
+        raise ValueError(f"bad_kind:{kind}")
+    bank = address.get("bank")
+    prefix = f"{bank}_" if isinstance(bank, str) and bank not in ("", "standard") else ""
+    if "pin" in address:
+        return f"{prefix}{kind}{int(address['pin'])}"
+    if "index" in address:
+        return f"{prefix}{kind}{int(address['index'])}"
+    # Fallback: kind + a stable slug of the address values.
+    slug = "_".join(str(v) for _, v in sorted(address.items()))
+    slug = re.sub(r"[^a-z0-9_]", "_", slug.lower())
+    return f"{kind}_{slug}" if slug else kind
 
 
 def parse_channels(raw: object) -> dict[str, ChannelDef]:
@@ -127,18 +149,33 @@ def parse_channels(raw: object) -> dict[str, ChannelDef]:
 
 @dataclass
 class ChannelValue:
-    """Reported value of one channel. ``forced`` marks an operator override."""
+    """Reported value of one channel. ``forced`` marks an operator override;
+    ``address`` is the provider address (bank/pin/index…) so a UI can show raw
+    pins; ``auto`` marks a synthesized unmapped-point channel."""
 
     kind: str
     value: bool | float
     forced: bool = False
+    address: dict = field(default_factory=dict)
+    auto: bool = False
 
     def to_wire(self) -> dict:
-        return {"kind": self.kind, "value": self.value, "forced": bool(self.forced)}
+        d = {"kind": self.kind, "value": self.value, "forced": bool(self.forced)}
+        if self.address:
+            d["address"] = dict(self.address)
+        if self.auto:
+            d["auto"] = True
+        return d
 
     @classmethod
     def from_wire(cls, d: dict) -> "ChannelValue":
-        return cls(kind=d["kind"], value=d["value"], forced=bool(d.get("forced", False)))
+        return cls(
+            kind=d["kind"],
+            value=d["value"],
+            forced=bool(d.get("forced", False)),
+            address=dict(d.get("address") or {}),
+            auto=bool(d.get("auto", False)),
+        )
 
 
 @dataclass

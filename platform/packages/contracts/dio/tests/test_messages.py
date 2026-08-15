@@ -12,6 +12,7 @@ from wf.contracts.dio.messages import (
     ChannelValue,
     ForceChannel,
     SetChannel,
+    auto_channel_name,
     parse_channels,
 )
 
@@ -21,6 +22,7 @@ from wf.contracts.dio.messages import (
     [
         ChannelValue(kind="di", value=True, forced=False),
         ChannelValue(kind="ai", value=4.2, forced=True),
+        ChannelValue(kind="do", value=False, address={"bank": "tool", "pin": 2}, auto=True),
         ChannelsState(t=1, channels={"a": ChannelValue("do", False), "p": ChannelValue("ai", 1.5, True)}),
         SetChannel(client_id="c1", channel="clamp", value=True),
         SetChannel(client_id="c1", channel="valve", value=0.5),
@@ -95,3 +97,17 @@ def test_coerce():
 
 def test_channel_def_wire_omits_defaults():
     assert ChannelDef("a", "di", {"pin": 1}).to_wire() == {"name": "a", "kind": "di", "address": {"pin": 1}}
+
+
+@pytest.mark.parametrize(
+    "kind, address, expected",
+    [
+        ("di", {"bank": "standard", "pin": 3}, "di3"),
+        ("do", {"pin": 7}, "do7"),
+        ("do", {"bank": "tool", "pin": 0}, "tool_do0"),
+        ("ai", {"index": 1}, "ai1"),
+        ("di", {"node": "ns=2;i=5"}, "di_ns_2_i_5"),
+    ],
+)
+def test_auto_channel_name(kind, address, expected):
+    assert auto_channel_name(kind, address) == expected

@@ -229,6 +229,9 @@ class SupervisorService:
     def _set_source_reply(self, device_id, source) -> dict:
         """Cold-switch a device and restart its selected provider."""
         if not isinstance(device_id, str) or device_id not in self.cell["resources"]:
+            for host, res in self.cell["resources"].items():
+                if device_id in (res.get("provides") or {}):
+                    return {"ok": False, "error": f"provided_by:{host}"}
             return {"ok": False, "error": f"unknown_device:{device_id}"}
         sources = self.cell["resources"].get(device_id, {}).get("sources", {})
         if source != "off" and source not in sources:

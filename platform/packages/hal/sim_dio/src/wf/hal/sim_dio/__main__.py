@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from wf.core.session import declare_alive, open_session
+from wf.core.session import open_session
 from wf.hal.dio_core import DioCore, load_dio_resource
 
 from .backend import SimDioBackend
@@ -26,13 +26,11 @@ def main(argv=None) -> int:
 
     params = load_dio_resource(args.cell, args.resource)
     session = open_session(args.zenoh_config)
-    token = declare_alive(session, args.realm, "dio", args.resource)
     core = DioCore(session, args.realm, args.resource, params, SimDioBackend(params))
     try:
         core.start()
         core.run_forever()
     finally:
-        del token
         session.close()
     return 0
 

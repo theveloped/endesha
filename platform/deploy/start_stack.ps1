@@ -1,16 +1,18 @@
-# Starts the cell (supervisor + recorder + remote-api bridge + web) detached; logs in deploy/logs/.
-# Always starts — the default overlay is a fully simulated cell (sim arm + replayed camera) that
-# needs NO hardware and NO containers. Hotplug real hardware by switching a device to `live` in the
-# UI device tree when it's attached, and back to sim/replay/off when you remove it.
-#   .\deploy\start_stack.ps1                                   # default: sim arm + replay camera
-#   .\deploy\start_stack.ps1 -Runtime deploy/runtime/dev.yaml  # start everything live (real hardware)
-# This is the HOST hardware stack. Bring up ONLY the router first (the rest of
-# compose is the all-sim stack and would collide):
-#   docker compose -f deploy/compose.yaml up -d zenoh-router
-# For the full all-simulated cell + frontend in Docker instead, just run:
-#   docker compose -f deploy/compose.yaml up
-# Stop everything: .\deploy\stop_stack.ps1
-param([string]$Runtime = "deploy/runtime/default.yaml")
+# Starts the host application services detached; logs in deploy/logs/.
+# The recommended development workflow keeps the standard Zenoh router and
+# remote-api bridge in Docker, then passes -BridgeInDocker so this script starts
+# only the supervisor/providers/config, recorder, and Vite.
+#   docker compose -f deploy/compose.yaml up -d --no-build zenoh-router bridge
+#   .\deploy\start_stack.ps1 -Runtime deploy/runtime/sim.yaml -BridgeInDocker
+#
+# Without -BridgeInDocker the script starts deploy/bridge/zenoh-bridge-remote-api.exe
+# locally and expects a router on tcp/127.0.0.1:7447.
+# Stop host processes: .\deploy\stop_stack.ps1
+# Stop Docker infrastructure: docker compose -f deploy/compose.yaml stop bridge zenoh-router
+param(
+    [string]$Runtime = "deploy/runtime/default.yaml",
+    [switch]$BridgeInDocker
+)
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 New-Item -ItemType Directory -Force -Path (Join-Path $root "deploy\logs") | Out-Null
@@ -22,7 +24,7 @@ if (-not (Test-Path (Join-Path $root "deploy\recordings\demo.mcap"))) {
     Start-Process -Wait -WindowStyle Hidden -WorkingDirectory $root cmd -ArgumentList '/c', 'pixi run python scripts/make_demo_recording.py'
 }
 
-Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'wf.services.supervisor|wf.hal.aubo_i10|wf.hal.arm_sim|wf.hal.genicam|wf.hal.replay|wf.services.recording|wf.services.config|zenoh-bridge-remote-api' } |
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'wf\.services\.supervisor|wf\.hal\.|wf\.services\.recording|wf\.services\.config|zenoh-bridge-remote-api' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 $zcfg = "deploy/zenoh/driver-router.dev.json5"
@@ -32,6 +34,9 @@ $zcfg = "deploy/zenoh/driver-router.dev.json5"
 # start is logged and left down; switch it back to sim/replay from the tree.
 Start-Process -WindowStyle Hidden cmd -WorkingDirectory $root -ArgumentList '/c', "pixi run python -m wf.services.supervisor --cell deploy/cell.yaml --runtime $Runtime --realm cell --with-config --zenoh-config $zcfg > deploy\logs\supervisor.log 2>&1"
 Start-Process -WindowStyle Hidden cmd -WorkingDirectory $root -ArgumentList '/c', "pixi run python -m wf.services.recording.recorder --realm cell --out-dir deploy\recordings --zenoh-config $zcfg > deploy\logs\recorder.log 2>&1"
-Start-Process -WindowStyle Hidden cmd -WorkingDirectory $root -ArgumentList '/c', 'deploy\bridge\zenoh-bridge-remote-api.exe -m peer -e tcp/127.0.0.1:7447 --no-multicast-scouting --ws-port 127.0.0.1:10000 > deploy\logs\bridge.log 2>&1'
+if (-not $BridgeInDocker) {
+    Start-Process -WindowStyle Hidden cmd -WorkingDirectory $root -ArgumentList '/c', 'deploy\bridge\zenoh-bridge-remote-api.exe -m peer -e tcp/127.0.0.1:7447 --no-multicast-scouting --ws-port 127.0.0.1:10000 > deploy\logs\bridge.log 2>&1'
+}
 Start-Process -WindowStyle Hidden cmd -WorkingDirectory (Join-Path $root "web") -ArgumentList '/c', 'npm run dev > ..\deploy\logs\vite.log 2>&1'
-Write-Host "stack starting (namespace 'cell', overlay $Runtime): supervisor (providers + config + device tree) + recorder (idle until 'wfctl record start') + bridge (ws://127.0.0.1:10000) + ui (http://localhost:5173); logs in deploy\logs\. Switch a device's source live in the UI device tree; hardware-free: -Runtime deploy/runtime/replay-debug.yaml."
+$bridgeMode = if ($BridgeInDocker) { "Docker bridge" } else { "local bridge" }
+Write-Host "stack starting (namespace 'cell', overlay $Runtime): supervisor (providers + config + device tree) + recorder (idle until 'wfctl record start') + $bridgeMode (ws://127.0.0.1:10000) + Vite (http://localhost:5173); logs in deploy\logs\."

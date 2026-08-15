@@ -52,6 +52,10 @@ export interface ChannelValue {
   kind: ChannelKind;
   value: boolean | number;
   forced: boolean;
+  /** Provider address (bank/pin/index…) — the raw pin behind the name. */
+  address?: Record<string, unknown>;
+  /** True for a synthesized channel of an unmapped physical point (raw pin). */
+  auto?: boolean;
 }
 
 export interface ChannelsState {
@@ -389,6 +393,9 @@ export interface DeviceEntry {
   active: string | null; // active mode, or null/off
   config?: Record<string, unknown>;
   sources: DeviceSource[];
+  /** Set when another resource's provider process serves this device (e.g. the
+   *  arm's IO bank as a dio device): follows the host's source, not switchable. */
+  provided_by?: string;
 }
 
 export interface DevicesList {

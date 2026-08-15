@@ -80,6 +80,7 @@ def test_load_cell_normalizes_legacy_hal(tmp_path):
         "sources": {
             "default": {"kind": "arm_sim", "params": {}, "launch": "module"},
         },
+        "provides": {},
     }
     # hal: external -> a synthetic source with launch external.
     assert cell["resources"]["cam0"]["sources"] == {
@@ -258,7 +259,6 @@ def test_provider_modules_cover_module_launched_kinds():
         ("camera2d", "genicam"): "wf.hal.genicam",
         ("camera2d", "replay_camera"): "wf.hal.replay.camera",
         ("camera2d", "browser_camera"): "wf.hal.browser_camera",
-        ("dio", "arm_dio"): "wf.hal.arm_dio",
         ("dio", "sim_dio"): "wf.hal.sim_dio",
     }
 
@@ -384,10 +384,77 @@ _DIO_CELL = textwrap.dedent(
             part_present: {kind: di, bank: standard, pin: 3}
             clamp: {kind: do, bank: standard, pin: 0}
         sources:
-          live: {kind: arm_dio, params: {arm: r1}}
           sim: {kind: sim_dio, params: {}}
     """
 )
+
+_PROVIDES_CELL = textwrap.dedent(
+    """
+    cell_type: t@0.1
+    resources:
+      r1:
+        contract: arm
+        config: {}
+        sources:
+          live: {kind: aubo_i10, params: {ip: 1.2.3.4}}
+          sim: {kind: arm_sim, params: {}}
+        provides:
+          io0:
+            contract: dio
+            model: aubo_onboard
+            channels:
+              part_present: {kind: di, bank: standard, pin: 3}
+            layout: {di: 16, do: 16, tool_do: 4}
+    """
+)
+
+
+def test_provided_device_realizes_into_host_params_and_inventory(tmp_path):
+    cell = load_cell(_write(tmp_path, _PROVIDES_CELL))
+    assert list(cell["resources"]["r1"]["provides"]) == ["io0"]
+    realized = realize_cell(cell, {"r1": "sim"})
+    assert list(realized["resources"]) == ["r1"], "provided devices spawn no process"
+    provides = realized["resources"]["r1"]["params"]["provides"]
+    assert provides["io0"]["contract"] == "dio"
+    assert provides["io0"]["channels"]["part_present"]["pin"] == 3
+    assert provides["io0"]["layout"]["tool_do"] == 4
+    by_id = {d["id"]: d for d in devices_inventory(cell, {"r1": "sim"})}
+    io0 = by_id["io0"]
+    assert io0["contract"] == "dio" and io0["provided_by"] == "r1"
+    assert io0["active"] == "sim" and io0["sources"] == []
+    assert io0["model"] == "aubo_onboard"
+    assert "part_present" in io0["config"]["channels"]
+
+
+def test_provided_device_cannot_be_switched(tmp_path):
+    cell = load_cell(_write(tmp_path, _PROVIDES_CELL))
+    svc = SupervisorService.__new__(SupervisorService)
+    svc.cell = cell
+    assert svc._set_source_reply("io0", "sim") == {"ok": False, "error": "provided_by:r1"}
+
+
+@pytest.mark.parametrize(
+    "provides, reason",
+    [
+        ("{io0: {contract: camera2d}}", "contract must be one of"),
+        ("{io0: {contract: dio, channels: {Bad: {kind: di}}}}", "must match"),
+        ("{r1: {contract: dio}}", "duplicate device id"),
+    ],
+)
+def test_provides_rejects(tmp_path, provides, reason):
+    cell = textwrap.dedent(
+        f"""
+        cell_type: t@0.1
+        resources:
+          r1:
+            contract: arm
+            sources:
+              sim: {{kind: arm_sim, params: {{}}}}
+            provides: {provides}
+        """
+    )
+    with pytest.raises(ValueError, match=reason):
+        load_cell(_write(tmp_path, cell))
 
 
 def test_dio_resource_loads_and_realizes(tmp_path):

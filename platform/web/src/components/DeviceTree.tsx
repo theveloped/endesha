@@ -17,11 +17,13 @@ import {
 import { cn } from "@/lib/utils";
 import { setDeviceSource } from "../lib/actions";
 import { query, subscribeLatest, watchAlive, type Unsubscribe } from "../lib/bus";
-import { alive, camAlive, supervisorDevices } from "../lib/config";
+import { alive, camAlive, dioAlive, supervisorDevices } from "../lib/config";
 import type { DeviceEntry, DevicesList } from "../lib/messages";
 
 function deviceAliveKey(realm: string, d: DeviceEntry): string {
-  return d.contract === "camera2d" ? camAlive(realm, d.id) : alive(realm, d.id);
+  if (d.contract === "camera2d") return camAlive(realm, d.id);
+  if (d.contract === "dio") return dioAlive(realm, d.id);
+  return alive(realm, d.id);
 }
 
 /** Declared modes + `off`, de-duplicated, in a stable order. */
@@ -170,18 +172,27 @@ export default function DeviceTree({
               />
               <span className="font-medium">{d.id}</span>
               <span className="text-muted-foreground">{d.contract}</span>
-              <select
-                className="ml-auto rounded border border-border bg-background px-1 py-0.5 text-xs disabled:opacity-50"
-                value={d.active ?? "off"}
-                disabled={!commandsEnabled || pending === d.id}
-                onChange={(e) => onPick(d, e.target.value)}
-              >
-                {modesFor(d).map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
+              {d.provided_by !== undefined ? (
+                <span
+                  className="ml-auto text-muted-foreground"
+                  title={`served by ${d.provided_by}'s provider process; follows its source`}
+                >
+                  {d.active ?? "off"} · via {d.provided_by}
+                </span>
+              ) : (
+                <select
+                  className="ml-auto rounded border border-border bg-background px-1 py-0.5 text-xs disabled:opacity-50"
+                  value={d.active ?? "off"}
+                  disabled={!commandsEnabled || pending === d.id}
+                  onChange={(e) => onPick(d, e.target.value)}
+                >
+                  {modesFor(d).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              )}
               {external && (
                 <span
                   title="served by an external process (e.g. the headless camera) — the supervisor does not start it"

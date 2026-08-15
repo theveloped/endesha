@@ -134,7 +134,6 @@ environments:
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
-      - pypi: ./packages/hal/arm_dio
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/browser_camera
@@ -275,7 +274,6 @@ environments:
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
-      - pypi: ./packages/hal/arm_dio
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/browser_camera
@@ -393,7 +391,6 @@ environments:
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
-      - pypi: ./packages/hal/arm_dio
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/browser_camera
@@ -504,7 +501,6 @@ environments:
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
-      - pypi: ./packages/hal/arm_dio
       - pypi: ./packages/hal/arm_sim
       - pypi: ./packages/hal/aubo_i10
       - pypi: ./packages/hal/browser_camera
@@ -5523,24 +5519,15 @@ packages:
 - pypi: ./packages/hal/arm_core
   name: wf-hal-arm-core
   version: 0.1.0
-  sha256: e9e7f315e250f77d3d868b8b03bb7ff302848e71fc6cc93ac7e1e25f2ae90e8b
+  sha256: 6b7d85a46dd7bb901b5867171b11724d46e2fe526ae2fc930288f8604e40336d
   requires_dist:
   - wf-core
   - wf-world-model
   - wf-contracts-arm
   - wf-contracts-control
-  - numpy
-  requires_python: '>=3.12,<3.13'
-  editable: true
-- pypi: ./packages/hal/arm_dio
-  name: wf-hal-arm-dio
-  version: 0.1.0
-  sha256: 45190d2f37ef3104293e6423ed14756455e1277e55ce73677b6300edb20d96d4
-  requires_dist:
-  - wf-core
-  - wf-contracts-arm
   - wf-contracts-dio
   - wf-hal-dio-core
+  - numpy
   requires_python: '>=3.12,<3.13'
   editable: true
 - pypi: ./packages/hal/arm_sim
