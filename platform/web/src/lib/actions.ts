@@ -8,9 +8,9 @@ import { query } from "./bus";
 import { decodeSample } from "./codec";
 import {
   actionPrefix,
-  cmdAcquireControl,
+  controlCmdAcquire,
   cmdClearProtectiveStop,
-  cmdReleaseControl,
+  controlCmdRelease,
   cmdSetDo,
   cmdSetTcp,
   cmdStop,
@@ -163,11 +163,11 @@ export async function acquireControl(
   clientId: string,
   user: string,
 ): Promise<ControlAck> {
-  const reply = await query(session, cmdAcquireControl(realm), {
+  const reply = await query(session, controlCmdAcquire(realm), {
     client_id: clientId,
     user,
   });
-  if (reply === null) throw new Error("no reply from cmd/acquire_control");
+  if (reply === null) throw new Error("no reply from control/cmd/acquire");
   return reply as ControlAck;
 }
 
@@ -175,12 +175,12 @@ export async function releaseControl(
   session: Session,
   realm: string,
   clientId: string,
-): Promise<Ack> {
-  const reply = await query(session, cmdReleaseControl(realm), {
+): Promise<ControlAck> {
+  const reply = await query(session, controlCmdRelease(realm), {
     client_id: clientId,
   });
-  if (reply === null) throw new Error("no reply from cmd/release_control");
-  return reply as Ack;
+  if (reply === null) throw new Error("no reply from control/cmd/release");
+  return reply as ControlAck;
 }
 
 export interface ConfigSetReply {

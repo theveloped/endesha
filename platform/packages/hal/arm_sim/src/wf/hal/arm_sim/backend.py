@@ -148,7 +148,6 @@ class SimArmBackend(ArmBackend):
                     speed_scale=1.0,
                     error=None,
                 )
-                core.publish_owner()
 
     # ── path execution ───────────────────────────────────────────────────
 

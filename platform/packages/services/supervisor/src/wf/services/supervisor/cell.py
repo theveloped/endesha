@@ -24,6 +24,8 @@ _MODES = ("live", "sim", "browser_sim", "replay")
 _LAUNCHES = (LAUNCH_MODULE, LAUNCH_EXTERNAL)
 # Synthetic mode under which a legacy single-``hal`` resource is normalized.
 _LEGACY_MODE = "default"
+# Cell-level control lease TTL when cell.yaml has no ``control:`` block.
+DEFAULT_LEASE_TTL_S = 30.0
 
 
 def _parse_source(rid: str, mode: str, sdecl: object) -> dict:
@@ -137,8 +139,21 @@ def load_cell(path: str | Path) -> dict:
     return {
         "cell_type": raw.get("cell_type"),
         "master_node": master_node,
+        "control": _parse_control(raw.get("control")),
         "resources": resources,
     }
+
+
+def _parse_control(decl: object) -> dict:
+    """Cell-level control lease settings (``control: {lease_ttl_s}``)."""
+    if decl is None:
+        return {"lease_ttl_s": DEFAULT_LEASE_TTL_S}
+    if not isinstance(decl, dict):
+        raise ValueError("bad_cell:control must be a mapping")
+    ttl = decl.get("lease_ttl_s", DEFAULT_LEASE_TTL_S)
+    if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or ttl <= 0:
+        raise ValueError("bad_cell:control.lease_ttl_s must be a positive number")
+    return {"lease_ttl_s": float(ttl)}
 
 
 def load_runtime(path: str | Path) -> dict:
@@ -211,6 +226,7 @@ def realize_cell(cell: dict, active_sources: dict[str, str] | None = None) -> di
     return {
         "cell_type": cell["cell_type"],
         "master_node": cell["master_node"],
+        "control": cell.get("control", {"lease_ttl_s": DEFAULT_LEASE_TTL_S}),
         "resources": realized,
     }
 

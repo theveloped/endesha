@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "wf-core",
     "wf-contracts-arm",
+    "wf-contracts-control",
     "wf-contracts-camera2d",
     "wf-services-recording",
     "wf-services-config",

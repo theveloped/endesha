@@ -1,14 +1,10 @@
 [project]
-name = "wf-hal-arm-core"
+name = "wf-contracts-control"
 version = "0.1.0"
-description = "WF platform L2: shared arm-contract core + backend seam"
+description = "WF platform L1: cell-level control lease (keys, messages, authority, watcher)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "wf-core",
-    "wf-world-model",
-    "wf-contracts-arm",
-    "wf-contracts-control",
-    "numpy",
 ]
 
 [build-system]

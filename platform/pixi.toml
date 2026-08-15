@@ -29,6 +29,7 @@ mcap = ">=1.1,<2"
 ruckig = "==0.19.4"
 wf-core = { path = "packages/core", editable = true }
 wf-world-model = { path = "packages/world_model", editable = true }
+wf-contracts-control = { path = "packages/contracts/control", editable = true }
 wf-contracts-arm = { path = "packages/contracts/arm", editable = true }
 wf-contracts-camera2d = { path = "packages/contracts/camera2d", editable = true }
 wf-hal-arm-core = { path = "packages/hal/arm_core", editable = true }

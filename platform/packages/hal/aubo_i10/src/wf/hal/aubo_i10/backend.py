@@ -209,7 +209,6 @@ class AuboBackend(ArmBackend):
                     )
                 except Exception as exc:
                     _log.warning("status poll failed: %r", exc)
-                core.publish_owner()
 
             tick += 1
             spent = time.monotonic() - t_start

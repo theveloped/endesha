@@ -22,15 +22,15 @@ from wf.core.cad_object import ObjectDef, instantiate
 from wf.contracts.arm import keys
 from wf.contracts.arm.messages import (
     Ack,
-    AcquireControl,
     ArmStatus,
-    ControlAck,
     ExecutePathGoal,
     JogCommand,
     SetDo,
     Waypoint,
 )
 from wf.contracts.camera2d import keys as cam_keys
+from wf.contracts.control import keys as control_keys
+from wf.contracts.control.messages import AcquireControl, ControlAck
 from wf.contracts.camera2d.messages import Ack as CamAck
 from wf.contracts.camera2d.messages import GrabReply
 from wf.core.action import ActionClient, ActionRejected
@@ -185,9 +185,10 @@ def _pose_args_to_quat(args) -> list[float]:
 
 
 def _acquire_lease(session, args, client_id: str, user: str = "wfctl") -> ControlAck:
+    # Cell-level lease (one holder for every device), served by the supervisor.
     reply = _query(
         session,
-        keys.cmd_acquire_control(args.realm, args.rid),
+        control_keys.cmd_acquire(args.realm),
         AcquireControl(client_id=client_id, user=user).to_wire(),
     )
     if reply is None:
@@ -198,7 +199,7 @@ def _acquire_lease(session, args, client_id: str, user: str = "wfctl") -> Contro
 def _release_lease(session, args, client_id: str) -> None:
     _query(
         session,
-        keys.cmd_release_control(args.realm, args.rid),
+        control_keys.cmd_release(args.realm),
         {"client_id": client_id},
     )
 
@@ -320,13 +321,13 @@ def cmd_acquire_control(session, args) -> int:
 def cmd_release_control(session, args) -> int:
     reply = _query(
         session,
-        keys.cmd_release_control(args.realm, args.rid),
+        control_keys.cmd_release(args.realm),
         {"client_id": args.client_id},
     )
     if reply is None:
-        print("no reply from cmd/release_control", file=sys.stderr)
+        print("no reply from control/cmd/release", file=sys.stderr)
         return 1
-    ack = Ack.from_wire(reply)
+    ack = ControlAck.from_wire(reply)
     print("released" if ack.ok else f"error: {ack.error}")
     return 0 if ack.ok else 1
 
@@ -763,12 +764,12 @@ def main(argv=None) -> int:
     p = sub.add_parser("clear-pstop", help="unlock a protective stop (re-arm)")
     p.set_defaults(fn=cmd_clear_pstop)
 
-    p = sub.add_parser("acquire-control", help="acquire the motion control lease")
+    p = sub.add_parser("acquire-control", help="acquire the cell control lease (all devices)")
     p.add_argument("--user", default="wfctl", help="operator label for the lease")
     p.add_argument("--client-id", default=None, help="reuse a client id (default: new uuid)")
     p.set_defaults(fn=cmd_acquire_control)
 
-    p = sub.add_parser("release-control", help="release the motion control lease")
+    p = sub.add_parser("release-control", help="release the cell control lease")
     p.add_argument("--client-id", required=True, help="the holding client id")
     p.set_defaults(fn=cmd_release_control)
 

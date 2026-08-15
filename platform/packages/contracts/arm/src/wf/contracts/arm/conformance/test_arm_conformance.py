@@ -18,10 +18,7 @@ import pytest
 from wf.contracts.arm import keys
 from wf.contracts.arm.messages import (
     Ack,
-    AcquireControl,
     ArmStatus,
-    ControlAck,
-    ControlOwnerState,
     ExecutePathGoal,
     FlangeState,
     IoState,
@@ -30,6 +27,8 @@ from wf.contracts.arm.messages import (
     SetDo,
     Waypoint,
 )
+from wf.contracts.control import keys as control_keys
+from wf.contracts.control.messages import AcquireControl, ControlAck, ControlOwnerState
 from wf.core.action import ActionClient, ActionRejected
 from wf.core.codec import decode, encode
 
@@ -52,20 +51,22 @@ def _latest_q(session, realm: str, rid: str) -> list[float]:
 
 
 def _acquire(session, realm, rid, client_id, user="conf") -> ControlAck:
+    # The lease is cell-level (``wf.contracts.control``); ``rid`` is unused but
+    # kept so the helpers read like the rest of the suite.
     replies = session.get(
-        keys.cmd_acquire_control(realm, rid),
+        control_keys.cmd_acquire(realm),
         payload=encode(AcquireControl(client_id=client_id, user=user).to_wire()),
         timeout=5.0,
     )
     for reply in replies:
         if reply.ok is not None:
             return ControlAck.from_wire(decode(reply.ok.payload))
-    pytest.fail("no reply from cmd/acquire_control")
+    pytest.fail("no reply from control/cmd/acquire")
 
 
 def _release(session, realm, rid, client_id) -> None:
     session.get(
-        keys.cmd_release_control(realm, rid),
+        control_keys.cmd_release(realm),
         payload=encode({"client_id": client_id}),
         timeout=5.0,
     )
@@ -83,12 +84,12 @@ def _lease(session, realm, rid, user="conf"):
 
 
 def _wait_owner(session, realm, rid, predicate, timeout_s: float = 3.0):
-    """Poll latest-wins ``state/control_owner`` until ``predicate(state)``."""
+    """Poll latest-wins ``control/state/owner`` until ``predicate(state)``."""
     deadline = time.monotonic() + timeout_s
     last = None
     while time.monotonic() < deadline:
         samples = collect_samples(
-            session, keys.state_control_owner(realm, rid),
+            session, control_keys.state_owner(realm),
             duration_s=0.6, min_count=1,
         )
         for raw in samples:

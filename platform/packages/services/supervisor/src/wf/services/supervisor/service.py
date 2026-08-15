@@ -2,8 +2,9 @@
 
 The supervisor realizes the canonical cell plus a runtime overlay, starts one
 provider per active resource, publishes the device inventory, and cold-switches
-providers between live, simulated, replay, and off sources. It deliberately
-contains no task, flow, graph, or vision-pipeline orchestration.
+providers between live, simulated, replay, and off sources. It also hosts the
+cell's single control-lease authority (``wf.contracts.control``). It
+deliberately contains no task, flow, graph, or vision-pipeline orchestration.
 
 Run: ``python -m wf.services.supervisor --cell deploy/cell.yaml
 --runtime deploy/runtime/sim.yaml``.
@@ -20,6 +21,7 @@ import threading
 import yaml
 import zenoh
 
+from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.supervisor import keys as sup_keys
 from wf.core.codec import decode, encode
 from wf.core.log import get_logger
@@ -73,8 +75,13 @@ class SupervisorService:
             congestion_control=zenoh.CongestionControl.DROP,
         )
         self._queryables: list = []
+        self._control = ControlAuthority(
+            session, realm, ttl_s=cell.get("control", {}).get("lease_ttl_s", 30.0)
+        )
 
     def start(self) -> None:
+        # Authority first: providers check the lease as soon as they come up.
+        self._control.start()
         self._spawn_always_on()
         self._queryables = [
             self.session.declare_queryable(
@@ -119,6 +126,7 @@ class SupervisorService:
         for queryable in self._queryables:
             queryable.undeclare()
         self._queryables = []
+        self._control.close()
         if self._alive_token is not None:
             del self._alive_token
             self._alive_token = None

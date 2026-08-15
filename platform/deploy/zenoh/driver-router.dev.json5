@@ -1,7 +1,13 @@
-// Router topology: the driver connects to the zenoh router (compose.yaml)
-// instead of listening itself. Clients also connect to tcp/<host>:7447.
+// Router topology: host-run services (supervisor, providers, config, recorder,
+// wfctl) connect to the Docker zenoh router and route everything through it.
+//
+// `client` mode on purpose: a `peer` would open its own listener and gossip a
+// host-side locator to the Docker bridge, which cannot reach it and — having
+// learned a "direct" route — never falls back to the router. The browser then
+// connects fine but sees no data. Client mode advertises no locator, so the
+// bridge and every other participant reach host processes via the router.
 {
-  mode: "peer",
+  mode: "client",
   scouting: { multicast: { enabled: false } },
   connect: {
     endpoints: ["tcp/127.0.0.1:7447"],

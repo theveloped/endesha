@@ -82,16 +82,22 @@ export function cmdJog(realm: string, rid = RID): string {
   return `${prefix(realm, rid)}/cmd/jog`;
 }
 
-export function cmdAcquireControl(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/cmd/acquire_control`;
+// Cell-level control lease (wf/contracts/control/keys.py): ONE holder for every
+// device in the cell, granted by the supervisor-hosted authority. No rid.
+export function controlCmdAcquire(realm: string): string {
+  return `${realm}/control/cmd/acquire`;
 }
 
-export function cmdReleaseControl(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/cmd/release_control`;
+export function controlCmdRelease(realm: string): string {
+  return `${realm}/control/cmd/release`;
 }
 
-export function stateControlOwner(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/state/control_owner`;
+export function controlStateOwner(realm: string): string {
+  return `${realm}/control/state/owner`;
+}
+
+export function controlAlive(realm: string): string {
+  return `${realm}/control/alive`;
 }
 
 export function actionPrefix(realm: string, rid = RID): string {

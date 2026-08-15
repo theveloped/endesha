@@ -129,6 +129,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/53/60/7be26e610767316c028a2cbedb9a3beabdbe33e2182c373f71a1c0b88f36/zstandard-0.25.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: ./packages/contracts/arm
       - pypi: ./packages/contracts/camera2d
+      - pypi: ./packages/contracts/control
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
@@ -265,6 +266,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/82/fc/f26eb6ef91ae723a03e16eddb198abcfce2bc5a42e224d44cc8b6765e57e/zstandard-0.25.0-cp312-cp312-macosx_10_13_x86_64.whl
       - pypi: ./packages/contracts/arm
       - pypi: ./packages/contracts/camera2d
+      - pypi: ./packages/contracts/control
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
@@ -378,6 +380,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/aa/1c/d920d64b22f8dd028a8b90e2d756e431a5d86194caa78e3819c7bf53b4b3/zstandard-0.25.0-cp312-cp312-macosx_11_0_arm64.whl
       - pypi: ./packages/contracts/arm
       - pypi: ./packages/contracts/camera2d
+      - pypi: ./packages/contracts/control
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
@@ -484,6 +487,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/79/3b/fa54d9015f945330510cb5d0b0501e8253c127cca7ebe8ba46a965df18c5/zstandard-0.25.0-cp312-cp312-win_amd64.whl
       - pypi: ./packages/contracts/arm
       - pypi: ./packages/contracts/camera2d
+      - pypi: ./packages/contracts/control
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
@@ -5465,6 +5469,14 @@ packages:
   - wf-core
   requires_python: '>=3.12,<3.13'
   editable: true
+- pypi: ./packages/contracts/control
+  name: wf-contracts-control
+  version: 0.1.0
+  sha256: 1eba34fdca6e40d927edb0c341a8afa5357d057b0deaec4cf48f87663fb7dc98
+  requires_dist:
+  - wf-core
+  requires_python: '>=3.12,<3.13'
+  editable: true
 - pypi: ./packages/contracts/supervisor
   name: wf-contracts-supervisor
   version: 0.1.0
@@ -5487,11 +5499,12 @@ packages:
 - pypi: ./packages/hal/arm_core
   name: wf-hal-arm-core
   version: 0.1.0
-  sha256: f53a007df0436da7d01cc3bd0214f80989861f58b65559b6eea9cec8128dc627
+  sha256: e9e7f315e250f77d3d868b8b03bb7ff302848e71fc6cc93ac7e1e25f2ae90e8b
   requires_dist:
   - wf-core
   - wf-world-model
   - wf-contracts-arm
+  - wf-contracts-control
   - numpy
   requires_python: '>=3.12,<3.13'
   editable: true
@@ -5593,20 +5606,22 @@ packages:
 - pypi: ./packages/services/supervisor
   name: wf-services-supervisor
   version: 0.1.0
-  sha256: 2cf7616122ddd9a78a8597ebfe3872fc4598036e957a1847f675b8855864e8d8
+  sha256: 76f9514bcadc11799ae1b419e71d7d47e33b0599433b3b46b8f6adaa0e40e69a
   requires_dist:
   - wf-core
   - wf-contracts-supervisor
+  - wf-contracts-control
   - pyyaml
   requires_python: '>=3.12,<3.13'
   editable: true
 - pypi: ./packages/tools
   name: wf-tools
   version: 0.1.0
-  sha256: 759e80ed34dcf1ce8e994c3fc0cfde99de00f6965070956e7ccd42ec4dfa329c
+  sha256: 3ecc72f43eb548923fdfaf4a3c13d65a254f8eb0167eb21d0656dbd8d140bc07
   requires_dist:
   - wf-core
   - wf-contracts-arm
+  - wf-contracts-control
   - wf-contracts-camera2d
   - wf-services-recording
   - wf-services-config

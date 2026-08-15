@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "wf-core",
     "wf-contracts-supervisor",
+    "wf-contracts-control",
     "pyyaml",
 ]
 

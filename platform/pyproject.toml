@@ -10,6 +10,7 @@ addopts = "--import-mode=importlib"
 testpaths = [
     "packages/core/tests",
     "packages/world_model/tests",
+    "packages/contracts/control/tests",
     "packages/contracts/arm/tests",
     "packages/contracts/camera2d/tests",
     "packages/hal/arm_core/tests",

@@ -21,7 +21,7 @@ import {
   DEFAULT_WS_URL,
   alive,
   realmPrefix,
-  stateControlOwner,
+  controlStateOwner,
   stateFlange,
   stateIo,
   stateJoints,
@@ -150,7 +150,7 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
         watchAlive(session, alive(prefix), (value) => {
           setAliveSample({ session, prefix, value });
         }),
-        subscribeLatest(session, stateControlOwner(prefix), (message) => {
+        subscribeLatest(session, controlStateOwner(prefix), (message) => {
           setOwnerSample({
             session,
             prefix,
