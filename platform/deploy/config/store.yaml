@@ -303,8 +303,8 @@ config/poses/home:
     - 1.5708
     - 0.0
 config/poses/inspect_a:
-  revision: 8
-  t: 1781730277414226525
+  revision: 13
+  t: 1786358157731604421
   value:
     q:
     - 0.0
@@ -314,8 +314,8 @@ config/poses/inspect_a:
     - 1.6384615384615384
     - 0.0
 config/poses/inspect_b:
-  revision: 8
-  t: 1781730277429987905
+  revision: 13
+  t: 1786358157749480512
   value:
     q:
     - 0.0
@@ -325,8 +325,8 @@ config/poses/inspect_b:
     - 1.6384615384615384
     - 0.0
 config/poses/inspect_c:
-  revision: 8
-  t: 1781730277448031343
+  revision: 13
+  t: 1786358157766519408
   value:
     q:
     - 0.0
@@ -335,6 +335,30 @@ config/poses/inspect_c:
     - -0.6981
     - 1.6384615384615384
     - 0.0
+config/poses/pick_approach:
+  revision: 1
+  t: 1783527663369226809
+  value:
+    meta: {}
+    q:
+    - -2.443178821011809e-15
+    - -0.5235987755982987
+    - 2.0943951023931953
+    - -0.6981317007977341
+    - 1.5707963267948968
+    - -1.6937782793898283e-15
+config/poses/pick_grasp:
+  revision: 1
+  t: 1783527685617059465
+  value:
+    meta: {}
+    q:
+    - -2.443178821011809e-15
+    - 0.6000441968356501
+    - 1.6727235551113653
+    - -0.6981317007977341
+    - 1.6385151017722763
+    - -1.6937782793898283e-15
 config/scene/cell/1590-9070-59/0:
   revision: 1
   t: 0
@@ -484,8 +508,8 @@ config/scene/cell/NZX:
       - -0.7159851075300001
       - 1.4000000000000001
 config/scene/datamatrix_part:
-  revision: 20
-  t: 1781730277469025733
+  revision: 25
+  t: 1786358157783896731
   value:
     frame: world
     geometry:
