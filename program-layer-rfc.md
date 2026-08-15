@@ -391,8 +391,12 @@ No XML. Rename in docs/UI, keep keys:
    runner with `--programs DIR`. Validated by an in-process e2e suite and on
    the sim stack. Deviation from §3.2: the catalog name attribute is
    `program_name` (python-statemachine reserves `name`).
-3. Web Programs tool + `/hmi`; router + AppShell split land here because the
-   Programs tool needs them.
+3. **DONE** Web: hash router (`#/cell/<tool>`, `#/replay/<sid>/<tool>`,
+   `#/hmi`; no dependency), `AppShell` split into `AppSidebar` /
+   `WorkspaceHeader` / `Panes` / `RightToolPane` (route table) / `layout`
+   (resize-aware, cached pane widths), Programs tool (`ProgramsPage`: catalog,
+   load with bindings + params, PackML command bar, unit/program state, events,
+   transition log), operator page (`HmiPage`), no-arm centre pane.
 4. Nominal/calibrated frames; CameraInfo reshaping; `disabled_pairs`.
 5. Program-scoped assets in the store + Frames page group.
 6. (later) `serial` / `opcua` / `http` contracts, cell-level lease, SRDF export.

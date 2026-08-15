@@ -11,6 +11,10 @@ import {
   controlCmdAcquire,
   dioCmdForce,
   dioCmdSet,
+  programCmd,
+  programCmdEvent,
+  programsCmdLoad,
+  type UnitCommand,
   cmdClearProtectiveStop,
   controlCmdRelease,
   cmdSetDo,
@@ -191,6 +195,40 @@ export async function dioForce(
     value,
   });
   if (reply === null) throw new Error("no reply from dio cmd/force");
+  return reply as Ack;
+}
+
+export async function programLoad(
+  session: Session,
+  realm: string,
+  name: string,
+  bindings: Record<string, string>,
+  params: Record<string, unknown>,
+): Promise<Ack> {
+  const reply = await query(session, programsCmdLoad(realm), { name, bindings, params });
+  if (reply === null) throw new Error("no reply from programs/cmd/load");
+  return reply as Ack;
+}
+
+export async function programCommand(
+  session: Session,
+  realm: string,
+  command: UnitCommand,
+  reason?: string,
+): Promise<Ack> {
+  const reply = await query(session, programCmd(realm, command), reason ? { reason } : {});
+  if (reply === null) throw new Error(`no reply from program/cmd/${command}`);
+  return reply as Ack;
+}
+
+export async function programEvent(
+  session: Session,
+  realm: string,
+  event: string,
+  data: Record<string, unknown> = {},
+): Promise<Ack> {
+  const reply = await query(session, programCmdEvent(realm), { event, data });
+  if (reply === null) throw new Error("no reply from program/cmd/event");
   return reply as Ack;
 }
 

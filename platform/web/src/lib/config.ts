@@ -99,6 +99,40 @@ export function dioAlive(realm: string, rid: string): string {
   return `${realm}/dio/${rid}/alive`;
 }
 
+// program contract (wf/contracts/program/keys.py): one PackML unit per cell.
+export const UNIT_COMMANDS = [
+  "start", "hold", "unhold", "suspend", "unsuspend", "stop", "abort", "clear", "reset", "unload",
+] as const;
+export type UnitCommand = (typeof UNIT_COMMANDS)[number];
+
+export function programsCatalog(realm: string): string {
+  return `${realm}/programs/catalog`;
+}
+
+export function programsCmdLoad(realm: string): string {
+  return `${realm}/programs/cmd/load`;
+}
+
+export function programState(realm: string): string {
+  return `${realm}/program/state`;
+}
+
+export function programCmd(realm: string, command: UnitCommand): string {
+  return `${realm}/program/cmd/${command}`;
+}
+
+export function programCmdEvent(realm: string): string {
+  return `${realm}/program/cmd/event`;
+}
+
+export function programTransitions(realm: string): string {
+  return `${realm}/program/transitions`;
+}
+
+export function programAlive(realm: string): string {
+  return `${realm}/program/alive`;
+}
+
 // Cell-level control lease (wf/contracts/control/keys.py): ONE holder for every
 // device in the cell, granted by the supervisor-hosted authority. No rid.
 export function controlCmdAcquire(realm: string): string {

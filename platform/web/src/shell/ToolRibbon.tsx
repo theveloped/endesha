@@ -2,6 +2,7 @@ import {
   Activity,
   Camera,
   Hand,
+  ListChecks,
   Move3d,
   RadioTower,
   Settings2,
@@ -11,6 +12,7 @@ import {
 export type WorkspaceTool =
   | "overview"
   | "operate"
+  | "programs"
   | "io"
   | "cameras"
   | "configuration"
@@ -24,6 +26,7 @@ const TOOLS: Array<{
 }> = [
   { id: "overview", label: "Overview", hint: "Cell status and engineering motion", icon: Activity },
   { id: "operate", label: "Operate", hint: "Joint and Cartesian jogging", icon: Hand },
+  { id: "programs", label: "Programs", hint: "Load and run programs (PackML unit)", icon: ListChecks },
   { id: "io", label: "IO", hint: "Digital and analog signals", icon: SlidersHorizontal },
   { id: "cameras", label: "Cameras", hint: "Images and acquisition", icon: Camera },
   { id: "topics", label: "Topics", hint: "Raw Zenoh samples and metadata", icon: RadioTower },

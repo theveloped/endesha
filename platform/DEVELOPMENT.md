@@ -207,6 +207,12 @@ pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program-state -f
 pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 dio-force part_present on   # feed the sim a part
 ```
 
+In the browser, the **Programs** tool (`http://localhost:5173/#/cell/programs`)
+does the same: load with role bindings and params, Start/Hold/Stop/Reset, live
+unit and program state, transition log. `http://localhost:5173/#/hmi` is the
+operator page (unit state + PackML buttons only). Views are deep-linkable:
+`#/cell/<tool>`, `#/replay/<sid>/<tool>`, `#/hmi`.
+
 While a program runs it holds the cell control lease, so the UI cannot jog or
 set outputs; forcing INPUTS stays possible (test override). Editing a program
 file is picked up by the next `program-load`; a `python -m wf.services.program_runner`

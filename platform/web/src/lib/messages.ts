@@ -72,6 +72,49 @@ export interface ChannelDecl {
   [address: string]: unknown;
 }
 
+// ── program contract (wf/contracts/program/messages.py) ─────────────────────
+
+export type UnitState =
+  | "idle" | "starting" | "execute" | "completing" | "complete"
+  | "holding" | "held" | "unholding" | "suspending" | "suspended" | "unsuspending"
+  | "stopping" | "stopped" | "aborting" | "aborted" | "clearing" | "resetting";
+
+export interface CatalogEntry {
+  name: string;
+  roles: Record<string, string>; // role -> contract
+  params: Record<string, unknown>;
+  doc: string;
+  path: string;
+  error: string | null;
+}
+
+export interface ProgramCatalog {
+  t: WireTimestamp;
+  programs: CatalogEntry[];
+}
+
+export interface ProgramState {
+  t: WireTimestamp;
+  unit: UnitState;
+  program: string | null;
+  program_states: string[];
+  actions: string[];
+  reason: string | null;
+  params: Record<string, unknown>;
+  bindings: Record<string, string>;
+  client_id: string | null;
+  cycle: number;
+}
+
+export interface TransitionEvent {
+  t: WireTimestamp;
+  scope: "unit" | "program";
+  source: string | null;
+  target: string;
+  event: string | null;
+  detail: string | null;
+}
+
 export interface ArmStatus {
   t: WireTimestamp;
   mode: string;
