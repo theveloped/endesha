@@ -24,7 +24,7 @@ if (-not (Test-Path (Join-Path $root "deploy\recordings\demo.mcap"))) {
     Start-Process -Wait -WindowStyle Hidden -WorkingDirectory $root cmd -ArgumentList '/c', 'pixi run python scripts/make_demo_recording.py'
 }
 
-Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'wf\.services\.supervisor|wf\.hal\.|wf\.services\.recording|wf\.services\.config|zenoh-bridge-remote-api' } |
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'wf\.services\.supervisor|wf\.hal\.|wf\.services\.recording|wf\.services\.config|wf\.services\.program_runner|zenoh-bridge-remote-api' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 $zcfg = "deploy/zenoh/driver-router.dev.json5"
@@ -32,7 +32,7 @@ $zcfg = "deploy/zenoh/driver-router.dev.json5"
 # arm/camera providers and config service, and serves the device tree
 # (cmd/set_source) so sources switch live in the UI. A provider that cannot
 # start is logged and left down; switch it back to sim/replay from the tree.
-Start-Process -WindowStyle Hidden cmd -WorkingDirectory $root -ArgumentList '/c', "pixi run python -m wf.services.supervisor --cell deploy/cell.yaml --runtime $Runtime --realm cell --with-config --zenoh-config $zcfg > deploy\logs\supervisor.log 2>&1"
+Start-Process -WindowStyle Hidden cmd -WorkingDirectory $root -ArgumentList '/c', "pixi run python -m wf.services.supervisor --cell deploy/cell.yaml --runtime $Runtime --realm cell --with-config --programs deploy/programs --zenoh-config $zcfg > deploy\logs\supervisor.log 2>&1"
 Start-Process -WindowStyle Hidden cmd -WorkingDirectory $root -ArgumentList '/c', "pixi run python -m wf.services.recording.recorder --realm cell --out-dir deploy\recordings --zenoh-config $zcfg > deploy\logs\recorder.log 2>&1"
 if (-not $BridgeInDocker) {
     Start-Process -WindowStyle Hidden cmd -WorkingDirectory $root -ArgumentList '/c', 'deploy\bridge\zenoh-bridge-remote-api.exe -m peer -e tcp/127.0.0.1:7447 --no-multicast-scouting --ws-port 127.0.0.1:10000 > deploy\logs\bridge.log 2>&1'

@@ -5,8 +5,10 @@
     {realm}/dio/{rid}/cmd/force        queryable ForceChannel -> Ack  (any channel)
     {realm}/dio/{rid}/alive            liveliness token
 
-``set`` and ``force`` are guarded by the cell-level control lease
+``set`` and forcing an OUTPUT are guarded by the cell-level control lease
 (``wf.contracts.control``); requests carry the ``client_id`` that must hold it.
+Forcing an INPUT is ungated (flagged test override, works while a program
+holds the lease).
 """
 
 from __future__ import annotations

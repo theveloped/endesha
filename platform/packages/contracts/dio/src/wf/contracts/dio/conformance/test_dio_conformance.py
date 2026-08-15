@@ -81,10 +81,14 @@ def test_unknown_channel(session, realm, dio, client_id):
     assert not ack.ok and ack.error.startswith("unknown_channel:")
 
 
-def test_commands_require_lease(session, realm, dio):
+def test_set_requires_lease(session, realm, dio):
     name = _first_input(_query_state(session, realm, dio))
-    ack = _ack(session, keys.cmd_force(realm, dio), ForceChannel("not-the-holder", name, True))
-    assert not ack.ok and ack.error == "no_control"
+    ack = _ack(session, keys.cmd_set(realm, dio), SetChannel("not-the-holder", name, True))
+    assert not ack.ok and ack.error in ("no_control", "read_only")
+    outputs = [n for n, cv in _query_state(session, realm, dio).channels.items() if cv.kind in ("do", "ao")]
+    if outputs:
+        ack = _ack(session, keys.cmd_force(realm, dio), ForceChannel("not-the-holder", outputs[0], True))
+        assert not ack.ok and ack.error == "no_control"
 
 
 def test_force_input_roundtrip(session, realm, dio, client_id):

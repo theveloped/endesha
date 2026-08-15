@@ -27,11 +27,15 @@ mcap = ">=1.1,<2"
 # 0.19.4 restores published CPython 3.12 wheels. Pin it so a future source-only
 # release cannot silently reintroduce native compilation in Linux images.
 ruckig = "==0.19.4"
+python-statemachine = ">=2.5"
 wf-core = { path = "packages/core", editable = true }
 wf-world-model = { path = "packages/world_model", editable = true }
 wf-contracts-control = { path = "packages/contracts/control", editable = true }
 wf-contracts-arm = { path = "packages/contracts/arm", editable = true }
 wf-contracts-dio = { path = "packages/contracts/dio", editable = true }
+wf-contracts-program = { path = "packages/contracts/program", editable = true }
+wf-program = { path = "packages/program", editable = true }
+wf-services-program-runner = { path = "packages/services/program_runner", editable = true }
 wf-contracts-camera2d = { path = "packages/contracts/camera2d", editable = true }
 wf-hal-arm-core = { path = "packages/hal/arm_core", editable = true }
 wf-hal-aubo-i10 = { path = "packages/hal/aubo_i10", editable = true }

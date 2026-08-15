@@ -122,9 +122,13 @@ def test_lease_gate(stack):
     session, realm, core, backend = stack
     ack = _ack(session, keys.cmd_set(realm, "io0"), SetChannel("intruder", "clamp", True))
     assert not ack.ok and ack.error == "no_control"
-    ack = _ack(session, keys.cmd_force(realm, "io0"), ForceChannel("intruder", "part_present", True))
+    ack = _ack(session, keys.cmd_force(realm, "io0"), ForceChannel("intruder", "clamp", True))
     assert not ack.ok and ack.error == "no_control"
     assert backend.writes == []
+    # forcing an INPUT is a flagged test override: no lease needed
+    assert _ack(session, keys.cmd_force(realm, "io0"), ForceChannel("intruder", "part_present", True)).ok
+    assert core.reported("part_present") is True
+    assert _ack(session, keys.cmd_force(realm, "io0"), ForceChannel("intruder", "part_present", None)).ok
 
 
 def test_force_input_overrides_backend_and_publishes(stack):

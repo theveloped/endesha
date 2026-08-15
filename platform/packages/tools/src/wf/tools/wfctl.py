@@ -31,6 +31,9 @@ from wf.contracts.arm.messages import (
 from wf.contracts.camera2d import keys as cam_keys
 from wf.contracts.control import keys as control_keys
 from wf.contracts.dio import keys as dio_keys
+from wf.contracts.program import keys as program_keys
+from wf.contracts.program.messages import Ack as ProgramAck
+from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, ProgramState
 from wf.contracts.dio.messages import ForceChannel, SetChannel
 from wf.contracts.dio.messages import Ack as DioAck
 from wf.contracts.control.messages import AcquireControl, ControlAck
@@ -317,6 +320,101 @@ def _parse_channel_value(text: str):
     return float(text)
 
 
+def _kv_pairs(items) -> dict:
+    """``["k=v", ...]`` -> dict; values parsed as JSON when possible."""
+    import json as _json
+
+    out: dict = {}
+    for item in items or []:
+        if "=" not in item:
+            raise SystemExit(f"expected key=value, got {item!r}")
+        k, v = item.split("=", 1)
+        try:
+            out[k] = _json.loads(v)
+        except ValueError:
+            out[k] = v
+    return out
+
+
+def cmd_program_catalog(session, args) -> int:
+    reply = _query(session, program_keys.catalog(args.realm), {})
+    if reply is None:
+        print("no reply from programs/catalog (runner down?)", file=sys.stderr)
+        return 1
+    cat = Catalog.from_wire(reply)
+    for entry in cat.programs:
+        if entry.error:
+            print(f"{entry.name:20s} BROKEN  {entry.error.splitlines()[-1]}")
+        else:
+            roles = ", ".join(f"{r}:{c}" for r, c in entry.roles.items())
+            print(f"{entry.name:20s} roles[{roles}] params={entry.params}")
+            if entry.doc:
+                print(f"{'':20s} {entry.doc.splitlines()[0]}")
+    return 0
+
+
+def cmd_program_load(session, args) -> int:
+    req = LoadRequest(name=args.name, bindings=_kv_pairs(args.bind), params=_kv_pairs(args.param))
+    reply = _query(session, program_keys.cmd_load(args.realm), req.to_wire())
+    if reply is None:
+        print("no reply from programs/cmd/load", file=sys.stderr)
+        return 1
+    ack = ProgramAck.from_wire(reply)
+    print("loaded" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_program(session, args) -> int:
+    payload = {"reason": args.reason} if args.reason else {}
+    reply = _query(session, program_keys.cmd(args.realm, args.command), payload)
+    if reply is None:
+        print(f"no reply from program/cmd/{args.command}", file=sys.stderr)
+        return 1
+    ack = ProgramAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_program_event(session, args) -> int:
+    reply = _query(
+        session,
+        program_keys.cmd_event(args.realm),
+        EventRequest(event=args.event, data=_kv_pairs(args.data)).to_wire(),
+    )
+    if reply is None:
+        print("no reply from program/cmd/event", file=sys.stderr)
+        return 1
+    ack = ProgramAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_program_state(session, args) -> int:
+    def show(raw):
+        st = ProgramState.from_wire(raw)
+        line = f"unit={st.unit:12s} program={st.program or '-':16s} states={st.program_states} actions={st.actions}"
+        if st.reason:
+            line += f" reason={st.reason}"
+        print(line)
+
+    reply = _query(session, program_keys.state(args.realm), {})
+    if reply is None:
+        print("no reply from program/state (runner down?)", file=sys.stderr)
+        return 1
+    show(reply)
+    if not args.follow:
+        return 0
+    sub = session.declare_subscriber(program_keys.state(args.realm), lambda s: show(decode(s.payload)))
+    try:
+        while True:
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sub.undeclare()
+    return 0
+
+
 def cmd_dio_state(session, args) -> int:
     reply = _query(session, dio_keys.state_channels(args.realm, args.dio), {})
     if reply is None:
@@ -351,22 +449,29 @@ def cmd_dio_set(session, args) -> int:
 
 
 def cmd_dio_force(session, args) -> int:
+    if not args.clear and args.value is None:
+        print("dio-force needs a value or --clear", file=sys.stderr)
+        return 2
+    value = None if args.clear else _parse_channel_value(args.value)
     external_cid = args.client_id
-    cid = external_cid or str(uuid.uuid4())
-    if external_cid is None:
+
+    def attempt(cid: str):
+        req = ForceChannel(client_id=cid, channel=args.channel, value=value)
+        return _query(session, dio_keys.cmd_force(args.realm, args.dio), req.to_wire())
+
+    # Forcing an INPUT needs no lease (flagged test override); try that first so
+    # it works while a program holds the cell lease. Outputs fall back to a
+    # lease-acquiring attempt.
+    reply = attempt(external_cid or "wfctl")
+    if reply is not None and not reply.get("ok") and reply.get("error") == "no_control" and external_cid is None:
+        cid = str(uuid.uuid4())
         ack = _acquire_lease(session, args, cid)
         if not ack.ok:
             print(f"lease denied: {ack.error}", file=sys.stderr)
             return 1
-    if not args.clear and args.value is None:
-        print("dio-force needs a value or --clear", file=sys.stderr)
-        return 2
-    try:
-        value = None if args.clear else _parse_channel_value(args.value)
-        req = ForceChannel(client_id=cid, channel=args.channel, value=value)
-        reply = _query(session, dio_keys.cmd_force(args.realm, args.dio), req.to_wire())
-    finally:
-        if external_cid is None:
+        try:
+            reply = attempt(cid)
+        finally:
             _release_lease(session, args, cid)
     if reply is None:
         print("no reply from dio cmd/force", file=sys.stderr)
@@ -844,6 +949,29 @@ def main(argv=None) -> int:
     p = sub.add_parser("release-control", help="release the cell control lease")
     p.add_argument("--client-id", required=True, help="the holding client id")
     p.set_defaults(fn=cmd_release_control)
+
+    p = sub.add_parser("program-catalog", help="list discoverable programs")
+    p.set_defaults(fn=cmd_program_catalog)
+
+    p = sub.add_parser("program-load", help="load a program into the unit (Idle/Stopped)")
+    p.add_argument("name")
+    p.add_argument("--bind", action="append", metavar="ROLE=RID", help="bind a role to a device id")
+    p.add_argument("--param", action="append", metavar="KEY=VALUE", help="override a param (JSON value)")
+    p.set_defaults(fn=cmd_program_load)
+
+    p = sub.add_parser("program", help="send a PackML unit command")
+    p.add_argument("command", choices=program_keys.UNIT_COMMANDS)
+    p.add_argument("--reason", default=None, help="reason (stop/abort)")
+    p.set_defaults(fn=cmd_program)
+
+    p = sub.add_parser("program-event", help="send an event to the running program")
+    p.add_argument("event")
+    p.add_argument("--data", action="append", metavar="KEY=VALUE")
+    p.set_defaults(fn=cmd_program_event)
+
+    p = sub.add_parser("program-state", help="print the unit/program state")
+    p.add_argument("--follow", "-f", action="store_true", help="keep printing updates")
+    p.set_defaults(fn=cmd_program_state)
 
     p = sub.add_parser("dio-state", help="print a dio device's named channels")
     p.add_argument("--dio", default="io0", help="dio resource id (default io0)")

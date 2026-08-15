@@ -45,6 +45,7 @@ class SupervisorService:
         *,
         config_dir: str = "deploy/config",
         with_config: bool = False,
+        programs_dir: str | None = None,
         zenoh_config: str | None = None,
         node: str = "main",
     ) -> None:
@@ -56,6 +57,7 @@ class SupervisorService:
         self.cell_path = _write_realized_cell(self.realized)
         self.config_dir = config_dir
         self.with_config = with_config
+        self.programs_dir = programs_dir
         self.zenoh_config = zenoh_config
         self.node = node
 
@@ -142,6 +144,12 @@ class SupervisorService:
             if self.zenoh_config:
                 argv += ["--zenoh-config", self.zenoh_config]
             self._procs.spawn("config", argv)
+        if self.programs_dir:
+            argv = ["wf.services.program_runner", "--programs", self.programs_dir,
+                    "--realm", self.realm, "--node", self.node]
+            if self.zenoh_config:
+                argv += ["--zenoh-config", self.zenoh_config]
+            self._procs.spawn("program_runner", argv)
 
         for resource_id in self.realized["resources"]:
             try:
@@ -323,6 +331,12 @@ def main(argv=None) -> int:
         help="spawn the config service as an always-on child",
     )
     parser.add_argument(
+        "--programs",
+        default=None,
+        metavar="DIR",
+        help="spawn the program runner over this directory of program modules",
+    )
+    parser.add_argument(
         "--node",
         default="main",
         help="node id (default main)",
@@ -345,6 +359,7 @@ def main(argv=None) -> int:
         active,
         config_dir=args.config_dir,
         with_config=args.with_config,
+        programs_dir=args.programs,
         zenoh_config=args.zenoh_config,
         node=args.node,
     )

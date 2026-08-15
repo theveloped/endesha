@@ -193,6 +193,25 @@ The headless page queries the supervisor for the same `cam0` device optics, moun
 
 Use `Ctrl-C` to stop the headless process. Switch `cam0` back to `browser_sim` before starting an in-tab producer.
 
+## Programs
+
+The supervisor spawns the program runner over `deploy/programs/` (any `*.py`
+defining a `wf.program.Program` subclass; see `demo_pick.py`). Drive it with
+`wfctl` (`--connect tcp/127.0.0.1:7447` when the router is in Docker):
+
+```powershell
+pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program-catalog
+pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program-load demo_pick --param cycles=2
+pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program start      # hold|unhold|stop|abort|clear|reset
+pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program-state -f
+pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 dio-force part_present on   # feed the sim a part
+```
+
+While a program runs it holds the cell control lease, so the UI cannot jog or
+set outputs; forcing INPUTS stays possible (test override). Editing a program
+file is picked up by the next `program-load`; a `python -m wf.services.program_runner`
+restart is not needed.
+
 ## Other runtime overlays
 
 | Overlay | Arm | Camera | Use |

@@ -10,6 +10,10 @@ Force semantics (PLC style): a forced channel *reports* the forced value no
 matter what the backend reads; forcing an OUTPUT additionally writes it and
 blocks ``set`` (``forced``) until cleared. Clearing a forced output leaves the
 last forced value written.
+
+Lease policy: ``set`` and forcing an OUTPUT need the cell control lease (they
+drive actuators). Forcing an INPUT does not — it is a visibly flagged test /
+commissioning override (drive a sensor in sim while a program holds the lease).
 """
 
 from __future__ import annotations
@@ -265,11 +269,11 @@ class DioCore:
     def _on_state_query(self, query) -> None:
         query.reply(str(query.key_expr), encode(self.snapshot().to_wire()))
 
-    def _guard(self, client_id: str | None, name: str) -> tuple[ChannelDef | None, str | None]:
+    def _guard(self, client_id: str | None, name: str, *, lease: bool = True) -> tuple[ChannelDef | None, str | None]:
         ch = self.channels.get(name)
         if ch is None:
             return None, f"unknown_channel:{name}"
-        if not self._lease.holds(client_id):
+        if lease and not self._lease.holds(client_id):
             return None, "no_control"
         return ch, None
 
@@ -307,7 +311,8 @@ class DioCore:
         except Exception as exc:
             self._reply(query, Ack(ok=False, error=f"bad_request:{exc!r}"))
             return
-        ch, err = self._guard(req.client_id, req.channel)
+        ch = self.channels.get(req.channel)
+        ch, err = self._guard(req.client_id, req.channel, lease=ch is None or not ch.is_input)
         if err is not None:
             self._reply(query, Ack(ok=False, error=err))
             return

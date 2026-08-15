@@ -383,8 +383,14 @@ No XML. Rename in docs/UI, keep keys:
 1. **DONE** `dio` contract + `dio_core` + arm-hosted `provides.io0` + `sim_dio`
    (+ force + script + layout/raw pins) + conformance tests + `_CONTRACTS` +
    `wfctl dio-*`. Web IO channel table with unmapped pins.
-2. `wf.program` facade (from `leaves.py`) + `Program` base + runner with PackML
-   unit + keys + one demo program under `deploy/programs/`, validated in `sim`.
+2. **DONE** `wf.program` SDK (`Program` StateChart base, `Machine`/`Roles`
+   facade, `ArmProxy`/`DioProxy`, `ActionContext` cancel token, `on_channel` /
+   `after` triggers) + `wf.contracts.program` + `wf.services.program_runner`
+   (PackML unit, driver thread, actions, lease, safety abort, discovery) +
+   `deploy/programs/demo_pick.py` + `wfctl program-*`. Supervisor spawns the
+   runner with `--programs DIR`. Validated by an in-process e2e suite and on
+   the sim stack. Deviation from §3.2: the catalog name attribute is
+   `program_name` (python-statemachine reserves `name`).
 3. Web Programs tool + `/hmi`; router + AppShell split land here because the
    Programs tool needs them.
 4. Nominal/calibrated frames; CameraInfo reshaping; `disabled_pairs`.
@@ -405,5 +411,7 @@ Remaining open (defaulting to the proposal unless objected):
 
 3. Program discovery: plain directory of modules (proposed) vs. Python entry
    points.
-4. `force` on a *live* `dio` device: allowed, lease-gated, visibly flagged
-   (proposed).
+4. `force`: **decided** — forcing an OUTPUT is lease-gated (it drives an
+   actuator); forcing an INPUT is ungated (a visibly flagged test/commissioning
+   override that must work while a program holds the lease, e.g. feeding parts
+   to a running program in sim).

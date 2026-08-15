@@ -1,22 +1,18 @@
 [project]
-name = "wf-tools"
+name = "wf-services-program-runner"
 version = "0.1.0"
-description = "WF platform CLI tooling (wfctl)"
+description = "WF program runner: PackML unit machine hosting one wf.program Program at a time"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "wf-core",
-    "wf-contracts-arm",
-    "wf-contracts-control",
-    "wf-contracts-dio",
     "wf-contracts-program",
-    "wf-contracts-camera2d",
-    "wf-services-recording",
-    "wf-services-config",
-    "wf-world-model",
+    "wf-contracts-control",
+    "wf-contracts-supervisor",
+    "wf-contracts-arm",
+    "wf-contracts-dio",
+    "wf-program",
+    "python-statemachine>=2.5",
 ]
-
-[project.scripts]
-wfctl = "wf.tools.wfctl:main"
 
 [build-system]
 requires = ["hatchling"]
