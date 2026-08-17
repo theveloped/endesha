@@ -403,7 +403,11 @@ No XML. Rename in docs/UI, keep keys:
    legacy entries migrated at load, browser producer reads it); declared
    collision exceptions (`config/arm/{rid}/collision/disabled_pairs`,
    `CollisionModel.set_disabled_pairs`, refreshed by `ArmCore` at goal accept).
-5. Program-scoped assets in the store + Frames page group.
+5. **DONE (poses)** Program-scoped poses: `config/programs/{name}/poses/{p}`
+   store family (served by the config service), facade resolves them before
+   cell poses, "Program poses" card in the Programs tool (teach current /
+   re-teach / delete). Program-scoped *frames* deferred: they would have to be
+   merged into the arm's live frame tree at goal accept.
 6. (later) `serial` / `opcua` / `http` contracts, cell-level lease, SRDF export.
 
 Each step: pytest + `tsc -b` + `npm run build` + a sim e2e (`start_stack.ps1

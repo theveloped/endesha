@@ -54,6 +54,20 @@ def intrinsics_glob() -> str:
     return key(CONFIG_PREFIX, "intrinsics", "**")
 
 
+def program_pose(program: str, name: str) -> str:
+    """``config/programs/{program}/poses/{name}`` — a pose scoped to one program
+    (resolved before the cell-wide ``config/poses/{name}``)."""
+    return key(CONFIG_PREFIX, "programs", program, "poses", name)
+
+
+def program_poses_glob(program: str) -> str:
+    return key(CONFIG_PREFIX, "programs", program, "poses", "**")
+
+
+def programs_glob() -> str:
+    return key(CONFIG_PREFIX, "programs", "**")
+
+
 def collision_disabled_pairs(rid: str) -> str:
     """``config/arm/{rid}/collision/disabled_pairs`` — declared collision
     exceptions (SRDF ``disable_collisions``): ``{pairs: [{a, b, reason?}]}``."""

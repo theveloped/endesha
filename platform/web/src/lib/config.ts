@@ -199,6 +199,14 @@ export function configPosesGlob(): string {
   return "config/poses/**";
 }
 
+export function configProgramPosesGlob(program: string): string {
+  return `config/programs/${program}/poses/**`;
+}
+
+export function configProgramPose(program: string, name: string): string {
+  return `config/programs/${program}/poses/${name}`;
+}
+
 export function configPose(name: string): string {
   return `config/poses/${name}`;
 }

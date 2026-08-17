@@ -45,6 +45,9 @@ _SCENE_PREFIX = "config/scene/"
 _INTRINSICS_PREFIX = "config/intrinsics/"
 _TCP_RE = re.compile(r"^config/arm/[^/]+/tcp/.+")
 _COLLISION_RE = re.compile(r"^config/arm/[^/]+/collision/disabled_pairs$")
+# Program-scoped assets (RFC §3.7): poses that travel with a program. Same
+# validator as cell poses; the program facade resolves these first.
+_PROGRAM_POSE_RE = re.compile(r"^config/programs/[^/]+/poses/.+")
 _TCP_ROLES = ("tool", "sensor", "virtual")
 RESERVED_TCP_NAME = "flange"
 
@@ -176,6 +179,8 @@ class ConfigStore:
             return "tcp"
         if _COLLISION_RE.match(key):
             return "collision"
+        if _PROGRAM_POSE_RE.match(key):
+            return "pose"
         return None
 
     # ── normalization ────────────────────────────────────────────────────

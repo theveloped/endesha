@@ -2,16 +2,24 @@
 // load (bindings + params), PackML command bar, live unit/program state,
 // external events, transition log. Program commands do NOT need the operator
 // lease: the running program holds it; the operator commands the unit.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 import type { Session } from "@eclipse-zenoh/zenoh-ts";
 import { Badge } from "../catalyst/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { programCommand, programEvent, programLoad } from "../lib/actions";
-import type { UnitCommand } from "../lib/config";
-import type { CatalogEntry, DeviceEntry, ProgramState, TransitionEvent } from "../lib/messages";
+import { configDelete, configSet, programCommand, programEvent, programLoad } from "../lib/actions";
+import { subscribeConfigList, type Unsubscribe } from "../lib/bus";
+import { configProgramPose, configProgramPosesGlob, type UnitCommand } from "../lib/config";
+import type {
+  CatalogEntry,
+  DeviceEntry,
+  JointState,
+  PoseDef,
+  ProgramState,
+  TransitionEvent,
+} from "../lib/messages";
 import { unitAccepts, unitLabel, unitTone } from "../lib/unit";
 import type { ProgramView } from "../runtime/useProgram";
 
@@ -21,6 +29,7 @@ interface ProgramsPageProps {
   devices: DeviceEntry[];
   program: ProgramView;
   wsConnected: boolean;
+  jointsRef: RefObject<JointState | null>;
 }
 
 const COMMAND_LABEL: Record<UnitCommand, string> = {
@@ -352,6 +361,145 @@ function EventCard({
   );
 }
 
+function ProgramPosesCard({
+  session,
+  programName,
+  jointsRef,
+  onError,
+}: {
+  session: Session | null;
+  programName: string;
+  jointsRef: RefObject<JointState | null>;
+  onError: (message: string | null) => void;
+}) {
+  const [poses, setPoses] = useState<{ name: string; value: PoseDef }[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const glob = configProgramPosesGlob(programName);
+
+  useEffect(() => {
+    setPoses([]);
+    if (session === null) return;
+    let disposed = false;
+    let unsub: Unsubscribe | null = null;
+    void subscribeConfigList(session, glob, `config/programs/${programName}/poses/`, (items) =>
+      setPoses(items.map((i) => ({ name: i.name, value: i.value as PoseDef })).sort((a, b) => a.name.localeCompare(b.name))),
+    ).then((u) => {
+      if (disposed) u();
+      else unsub = u;
+    });
+    return () => {
+      disposed = true;
+      unsub?.();
+    };
+  }, [session, glob, programName]);
+
+  const teach = async (name: string) => {
+    if (session === null) return;
+    const q = jointsRef.current?.q;
+    if (q === undefined) {
+      onError("teach: no joint state");
+      return;
+    }
+    setBusy(true);
+    onError(null);
+    try {
+      const reply = await configSet(session, configProgramPose(programName, name), { q: [...q] });
+      if (!reply.ok) onError(`teach ${name}: ${reply.error ?? "failed"}`);
+      else setDraft("");
+    } catch (e) {
+      onError(`teach ${name}: ${String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async (name: string) => {
+    if (session === null) return;
+    try {
+      const reply = await configDelete(session, configProgramPose(programName, name));
+      if (!reply.ok) onError(`delete ${name}: ${reply.error ?? "failed"}`);
+    } catch (e) {
+      onError(`delete ${name}: ${String(e)}`);
+    }
+  };
+  const valid = /^[a-z][a-z0-9_]*$/.test(draft);
+
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          Program poses
+          <span className="text-xs font-normal text-muted-foreground">
+            config/programs/{programName}/poses — resolved before cell poses
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {poses.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No program-scoped poses. A pose taught here overrides a cell pose of the same name for
+            this program only, so the program travels between cells.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border/60 rounded-md border border-border/60 font-mono text-xs">
+            {poses.map((p) => (
+              <li key={p.name} className="flex items-center gap-2 px-2 py-1">
+                <span>{p.name}</span>
+                <span className="text-muted-foreground">
+                  {p.value.q.map((v) => ((v * 180) / Math.PI).toFixed(1)).join(", ")}°
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-6 px-2 text-xs"
+                  disabled={session === null || busy}
+                  onClick={() => void teach(p.name)}
+                  title="Re-teach from the current joints"
+                >
+                  re-teach
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-destructive"
+                  disabled={session === null}
+                  onClick={() => void remove(p.name)}
+                >
+                  delete
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form
+          className="flex items-center gap-1"
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            if (valid) void teach(draft);
+          }}
+        >
+          <Input
+            className="h-7 flex-1 font-mono text-xs"
+            placeholder="pose name (a-z, 0-9, _)"
+            value={draft}
+            onChange={(ev) => setDraft(ev.target.value)}
+          />
+          <Button
+            type="submit"
+            variant="outline"
+            size="sm"
+            className="cmd h-7"
+            disabled={!valid || busy || session === null}
+            title="Store the arm's current joints under this name for this program"
+          >
+            teach current
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
 function TransitionsCard({ transitions }: { transitions: TransitionEvent[] }) {
   const items = useMemo(() => [...transitions].reverse().slice(0, 60), [transitions]);
   return (
@@ -384,7 +532,7 @@ function TransitionsCard({ transitions }: { transitions: TransitionEvent[] }) {
   );
 }
 
-export default function ProgramsPage({ session, realm, devices, program, wsConnected }: ProgramsPageProps) {
+export default function ProgramsPage({ session, realm, devices, program, wsConnected, jointsRef }: ProgramsPageProps) {
   const [error, setError] = useState<string | null>(null);
   const alive = wsConnected && program.alive;
   return (
@@ -410,6 +558,9 @@ export default function ProgramsPage({ session, realm, devices, program, wsConne
         onError={setError}
         onRefresh={program.refreshCatalog}
       />
+      {program.state?.program && (
+        <ProgramPosesCard session={session} programName={program.state.program} jointsRef={jointsRef} onError={setError} />
+      )}
       <EventCard session={session} realm={realm} state={program.state} onError={setError} />
       <TransitionsCard transitions={program.transitions} />
     </div>

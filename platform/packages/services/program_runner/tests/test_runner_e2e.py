@@ -96,10 +96,13 @@ PROGRAM_SRC = textwrap.dedent(
 
 
 class FakeConfig:
-    """Answers config/poses/{name} queries (the config service's job)."""
+    """Answers config/poses/{name} and config/programs/tp/poses/{name} queries
+    (the config service's job). ``program_poses`` shadow cell poses for tp."""
 
-    def __init__(self, session):
+    def __init__(self, session, program_poses: dict | None = None):
+        self.program_poses = dict(program_poses or {})
         self.q = session.declare_queryable(config_keys.poses_glob(), self._on_query)
+        self.pq = session.declare_queryable(config_keys.programs_glob(), self._on_program_query)
 
     def _on_query(self, query):
         key = str(query.key_expr)
@@ -108,8 +111,15 @@ class FakeConfig:
         if name in poses:
             query.reply(key, encode({"q": poses[name]}))
 
+    def _on_program_query(self, query):
+        key = str(query.key_expr)
+        name = key.rsplit("/", 1)[-1]
+        if key.startswith("config/programs/tp/poses/") and name in self.program_poses:
+            query.reply(key, encode({"q": self.program_poses[name]}))
+
     def close(self):
         self.q.undeclare()
+        self.pq.undeclare()
 
 
 def _ack(session, key, payload) -> Ack:
@@ -295,6 +305,23 @@ def test_action_error_aborts_with_reason(cell):
     _wait_unit(session, realm, "stopped")
     assert _ack(session, keys.cmd(realm, "reset"), {}).ok
     _wait_unit(session, realm, "idle")
+
+
+def test_program_scoped_pose_shadows_cell_pose(cell):
+    """RFC §3.7: config/programs/{name}/poses/{p} wins over config/poses/{p}."""
+    session, realm, runner, arm, backend = cell
+    shadow_q = [0.0, -0.5236, 2.0944, -0.6981, 1.5708, 0.3]
+    cfg = FakeConfig(session, program_poses={"near": shadow_q})
+    try:
+        assert _ack(session, keys.cmd_load(realm), LoadRequest("tp").to_wire()).ok
+        assert _ack(session, keys.cmd(realm, "start"), {}).ok
+        _wait_unit(session, realm, "execute")
+        assert _ack(session, keys.cmd_event(realm), EventRequest("kick").to_wire()).ok
+        # the "near" move must go to the program-scoped q (joint 5 = 0.3)
+        assert _wait(lambda: backend.core.backend.latest_q() is not None and abs(backend.core.backend.latest_q()[5] - 0.3) < 0.02, timeout_s=15.0)
+        _wait_unit(session, realm, "complete", timeout_s=30.0)
+    finally:
+        cfg.close()
 
 
 def test_protective_stop_aborts(cell):

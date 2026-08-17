@@ -43,6 +43,7 @@ class ConfigService:
             self.session.declare_queryable(
                 f"{keys.CONFIG_PREFIX}/arm/**", self._on_get
             ),
+            self.session.declare_queryable(keys.programs_glob(), self._on_get),
             self.session.declare_queryable(keys.cmd_set(), self._on_cmd_set),
             self.session.declare_queryable(keys.cmd_delete(), self._on_cmd_delete),
         ]
@@ -75,10 +76,12 @@ class ConfigService:
         try:
             req = decode(query.payload) if query.payload is not None else {}
             revision = self.store.set(req["key"], req["value"])
-            # Publish the new value on its own key so live subscribers (e.g. the
-            # sim camera page) see the edit without re-GETting. config/** stays
-            # queryable too; this only adds a latest-wins sample on change.
-            self.session.put(req["key"], encode(req["value"]))
+            # Publish the STORED (normalized, revision-stamped) value on its own
+            # key so live subscribers (e.g. the sim camera page) see the edit
+            # without re-GETting. config/** stays queryable too; this only adds
+            # a latest-wins sample on change.
+            stored = self.store.get_matching(req["key"]).get(req["key"], req["value"])
+            self.session.put(req["key"], encode(stored))
             query.reply(
                 key, encode({"ok": True, "revision": revision, "error": None})
             )

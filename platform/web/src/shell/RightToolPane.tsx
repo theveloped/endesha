@@ -72,6 +72,7 @@ const PANES: Record<WorkspaceTool, (ctx: ToolPaneContext) => ReactNode> = {
       devices={structure.devices}
       program={program}
       wsConnected={runtime.wsConnected}
+      jointsRef={runtime.jointsRef}
     />
   ),
   io: ({ runtime, prefix, structure }) => (

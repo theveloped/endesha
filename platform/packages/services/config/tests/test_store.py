@@ -317,6 +317,23 @@ def test_frame_rejects_bad_nominal(tmp_path):
         store.set("config/frames/x", {"parent": "world", "xyz": [0, 0, 0], "quat": [0, 0, 0, 1], "nominal": {"xyz": [1]}})
 
 
+# ── program-scoped poses ──────────────────────────────────────────────────
+
+
+def test_program_pose_family(tmp_path):
+    store = ConfigStore(str(tmp_path))
+    key = "config/programs/demo_pick/poses/pick_above"
+    assert store.set(key, {"q": [0, 0, 0, 0, 0, 0]}) == 1
+    assert store.get_matching("config/programs/**")[key]["q"] == [0, 0, 0, 0, 0, 0]
+    assert store.get_matching("config/programs/demo_pick/poses/**")[key]["revision"] == 1
+    with pytest.raises(ValueError, match="^bad_pose"):
+        store.set(key, {"q": [0, 0]})
+    with pytest.raises(ValueError, match="^invalid_key"):
+        store.set("config/programs/demo_pick/frames/x", {"parent": "world", "xyz": [0, 0, 0], "quat": [0, 0, 0, 1]})
+    store.delete(key)
+    assert store.get_matching("config/programs/**") == {}
+
+
 # ── collision exceptions ──────────────────────────────────────────────────
 
 
