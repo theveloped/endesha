@@ -107,7 +107,10 @@ class Machine:
 
 
 class Roles:
-    """Attribute view over bound roles: ``roles.arm``, ``roles.io``."""
+    """What a program sees as ``self.m``: the bound roles as attributes
+    (``self.m.arm``, ``self.m.io``) plus the cell-level helpers a program may
+    need (``pose``, ``device``, ``ids``, ``bindings``). Role names shadow the
+    helpers, so don't call a role ``pose`` / ``device`` / ``ids``."""
 
     def __init__(self, machine: Machine, bindings: dict[str, str]):
         self._machine = machine
@@ -117,6 +120,23 @@ class Roles:
     def bindings(self) -> dict[str, str]:
         return dict(self._bindings)
 
+    @property
+    def machine(self) -> Machine:
+        """The underlying cell facade (all devices, not just the bound roles)."""
+        return self._machine
+
+    def pose(self, name: str) -> list[float]:
+        """Resolve a named pose (program-scoped first, then cell-wide)."""
+        return self._machine.pose(name)
+
+    def device(self, rid: str):
+        """A device proxy by device id (outside the role bindings)."""
+        return self._machine.device(rid)
+
+    def ids(self, contract: str | None = None) -> list[str]:
+        """Device ids in the cell (optionally of one contract)."""
+        return self._machine.ids(contract)
+
     def rid(self, role: str) -> str:
         try:
             return self._bindings[role]
@@ -124,6 +144,7 @@ class Roles:
             raise ProgramError(f"unbound_role:{role}") from None
 
     def __getattr__(self, role: str):
+        # Only reached for names that are not real attributes/methods above.
         if role.startswith("_"):
             raise AttributeError(role)
         return self._machine.device(self.rid(role))

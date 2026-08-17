@@ -133,10 +133,13 @@ refuses (no lease, protective stop, `target_outside_limits`, collision, …).
 Channel names come from `cell.yaml` (`channels:` / `provides:`); unmapped
 physical pins are also addressable by their auto names (`di3`, `tool_do0`).
 
-### other
+### other (`self.m` helpers)
 
-`self.m.pose("name")` resolves a pose (same order as `move_j`); `self.m.bindings`
-is the role→device map; `self.m["role"]` is the same as attribute access.
+`self.m.pose("name")` resolves a pose (same order as `move_j`);
+`self.m.bindings` is the role→device-id map; `self.m["role"]` equals attribute
+access; `self.m.device("io1")` reaches a device outside the bindings;
+`self.m.ids("dio")` lists device ids. Role names shadow these helpers, so do
+not name a role `pose`, `device`, `ids`, `bindings` or `machine`.
 
 ## Unit hooks (optional overrides)
 
