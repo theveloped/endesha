@@ -92,12 +92,14 @@ function DioDeviceCard({
   realm,
   device,
   canCommand,
+  canForceInputs,
   clientId,
 }: {
   session: Session | null;
   realm: string;
   device: DeviceEntry;
-  canCommand: boolean;
+  canCommand: boolean; // set outputs / force outputs: needs the cell lease
+  canForceInputs: boolean; // force inputs: lease-free test override (works while a program runs)
   clientId: string;
 }) {
   const [state, setState] = useState<ChannelsState | null>(null);
@@ -174,7 +176,9 @@ function DioDeviceCard({
     const isDigital = row.kind === "di" || row.kind === "do";
     const forced = cv?.forced === true;
     const on = cv !== undefined && cv.value === true;
-    const controlsOn = canCommand && alive;
+    // Outputs (set/force) need the lease; forcing an INPUT is a lease-free
+    // test override so parts can be fed to a running program in sim.
+    const controlsOn = (isOutput ? canCommand : canForceInputs) && alive;
     return (
       <tr
         key={name}
@@ -339,12 +343,13 @@ export default function IoPage({
     [devices],
   );
   const canCommand = wsConnected && commandsEnabled && holdsControl;
+  const canForceInputs = wsConnected && commandsEnabled;
 
   return (
     <div className="h-full space-y-2 overflow-y-auto p-2">
       {!holdsControl && wsConnected && (
         <p className="px-1 text-xs text-muted-foreground">
-          Request control to set outputs or force channels.
+          Forcing inputs works without control (test override). Request control to set or force outputs.
         </p>
       )}
       {dioDevices.length === 0 ? (
@@ -364,6 +369,7 @@ export default function IoPage({
             realm={realm}
             device={device}
             canCommand={canCommand}
+            canForceInputs={canForceInputs}
             clientId={clientId}
           />
         ))
