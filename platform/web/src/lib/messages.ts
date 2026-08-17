@@ -86,6 +86,7 @@ export interface CatalogEntry {
   doc: string;
   path: string;
   error: string | null;
+  hmi?: Record<string, string>; // event -> operator button label
 }
 
 export interface ProgramCatalog {
@@ -165,6 +166,69 @@ export interface TagValue {
 export interface TagsState {
   t: WireTimestamp;
   tags: Record<string, TagValue>;
+}
+
+// ── washer contract (wf/contracts/washer/messages.py) ───────────────────────
+
+export type WasherPhase =
+  | "initializing"
+  | "ready_to_load"
+  | "door_open"
+  | "door_moving"
+  | "washing"
+  | "ready_to_unload"
+  | "fault";
+
+export interface WasherStatus {
+  t: WireTimestamp;
+  phase: WasherPhase;
+  door: "open" | "closed" | "moving" | "unknown";
+  connected: boolean;
+  auto: boolean;
+  fault: boolean;
+  fault_code: number;
+  washing: boolean;
+  ready_to_load: boolean;
+  ready_to_unload: boolean;
+  program: string;
+  program_no: number;
+  sequence: string | null;
+  detail: string;
+}
+
+export interface RecipeStep {
+  cleaning: number;
+  time_s: number;
+  movement: number;
+  additional: number;
+  pump_off: boolean;
+}
+
+export interface Recipe {
+  name: string;
+  steps: RecipeStep[];
+  params: Record<string, number>;
+}
+
+export interface ParamSpec {
+  title: string;
+  min?: number;
+  max?: number;
+  choices?: number[];
+  unit?: string;
+}
+
+export interface RecipeSchema {
+  steps: number;
+  step_fields: Record<string, ParamSpec>;
+  params: Record<string, ParamSpec>;
+}
+
+export interface RecipeReply {
+  ok: boolean;
+  error: string | null;
+  recipe?: Recipe;
+  schema?: RecipeSchema;
 }
 
 export interface ArmStatus {

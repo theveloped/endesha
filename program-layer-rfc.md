@@ -413,9 +413,22 @@ No XML. Rename in docs/UI, keep keys:
    `wf.hal.tags_core` (inventory resolution: named + auto tags from the
    controller's own names), providers `sim_tags` and `opcua` (asyncua:
    subscriptions, typed writes, reconnect, watchdog), `TagsProxy` +
-   `on_channel` for programs, `wfctl tags-*`, IO page card. Next: the ecoclean
-   `washer` HAL (sim + live over opcua) — see the ecoclean plan. Still later:
-   `serial` / `http`, SRDF export.
+   `on_channel` for programs, `wfctl tags-*`, IO page card.
+7. **`washer` contract + Ecoclean HAL DONE** (2026-08-17): `wf.contracts.washer`
+   (status/phase, actions `open_door`/`close_door`/`start_wash`/`reset` with
+   cancel = door stops, `stop_door`, `get_recipe`/`set_recipe` with a
+   `RecipeSchema`), `wf.hal.ecoclean` (`WasherCore` over a `TagsCore` it also
+   *provides* as the raw `plc0` tags device; `ecoclean_sim` PLC emulation with
+   door travel / cycle time / fault injection; `ecoclean` live = the opcua
+   backend + inventory + watchdog), `provides:` generalised to `tags`,
+   `ChannelsCore` host API (`write`/`wait_until`), `WasherProxy` +
+   `Machine.washer`, `Program.hmi` labels -> HMI operator buttons for the
+   events a program waits for, `WasherCard` (workspace centre pane for
+   no-arm cells + HMI, recipe editor), `wfctl washer*`,
+   `deploy/ecoclean/{cell.yaml,runtime,programs/ecoclean_cycle.py}`,
+   `start_stack.ps1 -Cell/-Programs`, compose `WF_CELL/WF_RUNTIME/WF_PROGRAMS`.
+   Next: commission on the machine (`deploy/ecoclean/runtime/live.yaml`),
+   recipes as a store family. Still later: `serial` / `http`, SRDF export.
 
 Each step: pytest + `tsc -b` + `npm run build` + a sim e2e (`start_stack.ps1
 -Runtime deploy/runtime/sim.yaml`).

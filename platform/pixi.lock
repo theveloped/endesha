@@ -148,6 +148,7 @@ environments:
       - pypi: ./packages/contracts/program
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/contracts/tags
+      - pypi: ./packages/contracts/washer
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
@@ -156,6 +157,7 @@ environments:
       - pypi: ./packages/hal/camera2d_core
       - pypi: ./packages/hal/channels_core
       - pypi: ./packages/hal/dio_core
+      - pypi: ./packages/hal/ecoclean
       - pypi: ./packages/hal/genicam
       - pypi: ./packages/hal/opcua
       - pypi: ./packages/hal/replay
@@ -309,6 +311,7 @@ environments:
       - pypi: ./packages/contracts/program
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/contracts/tags
+      - pypi: ./packages/contracts/washer
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
@@ -317,6 +320,7 @@ environments:
       - pypi: ./packages/hal/camera2d_core
       - pypi: ./packages/hal/channels_core
       - pypi: ./packages/hal/dio_core
+      - pypi: ./packages/hal/ecoclean
       - pypi: ./packages/hal/opcua
       - pypi: ./packages/hal/replay
       - pypi: ./packages/hal/sim_dio
@@ -448,6 +452,7 @@ environments:
       - pypi: ./packages/contracts/program
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/contracts/tags
+      - pypi: ./packages/contracts/washer
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
@@ -456,6 +461,7 @@ environments:
       - pypi: ./packages/hal/camera2d_core
       - pypi: ./packages/hal/channels_core
       - pypi: ./packages/hal/dio_core
+      - pypi: ./packages/hal/ecoclean
       - pypi: ./packages/hal/opcua
       - pypi: ./packages/hal/replay
       - pypi: ./packages/hal/sim_dio
@@ -580,6 +586,7 @@ environments:
       - pypi: ./packages/contracts/program
       - pypi: ./packages/contracts/supervisor
       - pypi: ./packages/contracts/tags
+      - pypi: ./packages/contracts/washer
       - pypi: ./packages/core
       - pypi: ./packages/hal/arm_core
       - pypi: ./packages/hal/arm_sim
@@ -588,6 +595,7 @@ environments:
       - pypi: ./packages/hal/camera2d_core
       - pypi: ./packages/hal/channels_core
       - pypi: ./packages/hal/dio_core
+      - pypi: ./packages/hal/ecoclean
       - pypi: ./packages/hal/genicam
       - pypi: ./packages/hal/opcua
       - pypi: ./packages/hal/replay
@@ -5779,6 +5787,14 @@ packages:
   - wf-core
   requires_python: '>=3.12,<3.13'
   editable: true
+- pypi: ./packages/contracts/washer
+  name: wf-contracts-washer
+  version: 0.1.0
+  sha256: ebcfe83c362915536316c1e6dcb33cfa1e5f3ed088e0226c9529663ffdd4c700
+  requires_dist:
+  - wf-core
+  requires_python: '>=3.12,<3.13'
+  editable: true
 - pypi: ./packages/core
   name: wf-core
   version: 0.1.0
@@ -5873,6 +5889,21 @@ packages:
   - wf-hal-channels-core
   requires_python: '>=3.12,<3.13'
   editable: true
+- pypi: ./packages/hal/ecoclean
+  name: wf-hal-ecoclean
+  version: 0.1.1
+  sha256: 34e7361b92e4a2a5f44578d7218b7f1f4ef32d9f3384deb0af118a644937cd2d
+  requires_dist:
+  - wf-core
+  - wf-contracts-control
+  - wf-contracts-tags
+  - wf-contracts-washer
+  - wf-hal-channels-core
+  - wf-hal-tags-core
+  - wf-hal-sim-tags
+  - wf-hal-opcua
+  requires_python: '>=3.12,<3.13'
+  editable: true
 - pypi: ./packages/hal/genicam
   name: wf-hal-genicam
   version: 0.1.0
@@ -5946,12 +5977,13 @@ packages:
 - pypi: ./packages/program
   name: wf-program
   version: 0.1.0
-  sha256: 9f9a22073b220d3f91c6d0a452f509bdcbf3c4fa17bbc3e53c92aafbff852c15
+  sha256: 239457a6003a5d4c08af8ec72ec270c8061fb4a84b36e25867a216f67e29517c
   requires_dist:
   - wf-core
   - wf-contracts-arm
   - wf-contracts-dio
   - wf-contracts-tags
+  - wf-contracts-washer
   - wf-contracts-control
   - wf-services-config
   - python-statemachine>=2.5
@@ -6006,7 +6038,7 @@ packages:
 - pypi: ./packages/tools
   name: wf-tools
   version: 0.1.0
-  sha256: 91b0395de8d5c85ad873e023a723b9b7923dacb5ccf2ceb731f1b4ebf5ce2948
+  sha256: dd36e497306c260a307e3e21c5b37491c73e6449ed16048a73661d8b1ec20541
   requires_dist:
   - wf-core
   - wf-contracts-arm
@@ -6014,6 +6046,7 @@ packages:
   - wf-contracts-dio
   - wf-contracts-program
   - wf-contracts-tags
+  - wf-contracts-washer
   - wf-contracts-camera2d
   - wf-services-recording
   - wf-services-config

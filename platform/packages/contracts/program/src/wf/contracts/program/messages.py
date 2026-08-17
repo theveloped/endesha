@@ -51,6 +51,7 @@ class CatalogEntry:
     doc: str = ""
     path: str = ""
     error: str | None = None
+    hmi: dict[str, str] = field(default_factory=dict)  # event -> operator label
 
     def to_wire(self) -> dict:
         return {
@@ -60,6 +61,7 @@ class CatalogEntry:
             "doc": self.doc,
             "path": self.path,
             "error": self.error,
+            "hmi": dict(self.hmi),
         }
 
     @classmethod
@@ -71,6 +73,7 @@ class CatalogEntry:
             doc=d.get("doc", ""),
             path=d.get("path", ""),
             error=d.get("error"),
+            hmi=dict(d.get("hmi") or {}),
         )
 
 

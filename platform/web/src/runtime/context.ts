@@ -8,6 +8,7 @@ import type {
   FlangeState,
   IoState,
   JointState,
+  DevicesList,
 } from "../lib/messages";
 
 export interface RuntimeState {
@@ -22,6 +23,8 @@ export interface RuntimeState {
   prefix: string | null;
   replaySessions: string[];
   io: IoState | null;
+  /** The supervisor's device inventory (cell realms only). */
+  devices: DevicesList | null;
   status: ArmStatus | null;
   wsConnected: boolean;
   driverAlive: boolean;

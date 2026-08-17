@@ -26,7 +26,7 @@ from wf.contracts.tags.messages import parse_tags
 
 from .procs import LAUNCH_EXTERNAL, LAUNCH_MODULE
 
-_CONTRACTS = ("arm", "camera2d", "dio", "tags")
+_CONTRACTS = ("arm", "camera2d", "dio", "tags", "washer")
 # Selectable provider source names. ``off`` is a selection (no provider), never
 # a declared source. The camera exposes two independent simulated providers.
 _MODES = ("live", "sim", "browser_sim", "replay")
@@ -181,11 +181,13 @@ def load_cell(path: str | Path) -> dict:
 
 
 # Contracts a resource may provide in-process. Only dio for now (arm IO bank).
-_PROVIDABLE = ("dio",)
+_PROVIDABLE = ("dio", "tags")
 
 
 def _parse_provides(rid: str, raw: object) -> dict[str, dict]:
-    """``provides: {device_id: {contract: dio, channels: {...}, layout?: {...}}}``."""
+    """``provides: {device_id: {contract: dio, channels: {...}, layout?: {...}}}``
+    or ``{contract: tags, tags: {...}}`` — devices hosted by this resource's
+    provider process (arm -> its io pins, washer -> its PLC tags)."""
     if raw is None:
         return {}
     if not isinstance(raw, dict):
@@ -202,7 +204,10 @@ def _parse_provides(rid: str, raw: object) -> dict[str, dict]:
                 f"bad_cell:resource {rid}.provides.{pid}.contract must be one of {_PROVIDABLE}"
             )
         try:
-            parse_channels(spec.get("channels"))
+            if contract == "dio":
+                parse_channels(spec.get("channels"))
+            else:
+                parse_tags(spec.get("tags"))
         except ValueError as exc:
             raise ValueError(f"bad_cell:resource {rid}.provides.{pid}.{exc}") from exc
         model = spec.get("model")

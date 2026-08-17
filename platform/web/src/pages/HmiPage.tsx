@@ -1,13 +1,70 @@
 // Operator page (`#/hmi`, program-layer RFC §7.2): the unit state, big
 // PackML buttons, e-stop status, the loaded program's state and last error.
 // No scene editing, no jogging — the engineering workspace lives at #/cell.
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "../catalyst/badge";
 import { Button } from "../catalyst/button";
+import { WasherCard } from "../components/WasherCard";
+import { programEvent } from "../lib/actions";
 import { CELL_NAME } from "../lib/config";
 import { useProgram } from "../runtime/useProgram";
 import { useRuntime } from "../runtime/context";
 import { CommandBar, UnitBadge } from "./ProgramsPage";
+
+/** Operator buttons: one per event the running program is waiting for
+ * (`waiting_for[kind=event]`), labelled by the program's `hmi` map. */
+function OperatorEvents({
+  session,
+  realm,
+  state,
+  labels,
+  onError,
+}: {
+  session: import("@eclipse-zenoh/zenoh-ts").Session | null;
+  realm: string;
+  state: import("../lib/messages").ProgramState | null;
+  labels: Record<string, string>;
+  onError: (message: string | null) => void;
+}) {
+  const events = useMemo(() => {
+    if (state === null || state.unit !== "execute") return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const w of state.waiting_for ?? []) {
+      if (w.kind === "event" && typeof w.event === "string" && !seen.has(w.event)) {
+        seen.add(w.event);
+        out.push(w.event);
+      }
+    }
+    return out;
+  }, [state]);
+  if (events.length === 0) return null;
+  return (
+    <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-950/5 dark:bg-zinc-900 dark:ring-white/10">
+      <div className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        Program is waiting for you
+      </div>
+      <div className="flex flex-wrap gap-3">
+        {events.map((ev) => (
+          <Button
+            key={ev}
+            color="blue"
+            className="cmd"
+            disabled={session === null}
+            onClick={() => {
+              if (session === null) return;
+              void programEvent(session, realm, ev)
+                .then((ack) => onError(ack.ok ? null : `event ${ev}: ${ack.error ?? "failed"}`))
+                .catch((e) => onError(`event ${ev}: ${String(e)}`));
+            }}
+          >
+            {labels[ev] ?? ev}
+          </Button>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 export default function HmiPage({ onExit }: { onExit: () => void }) {
   const runtime = useRuntime();
@@ -16,6 +73,12 @@ export default function HmiPage({ onExit }: { onExit: () => void }) {
   const alive = runtime.wsConnected && program.alive;
   const state = program.state;
   const safety = runtime.status?.estop ? "E-STOP" : runtime.status?.protective_stop ? "PROTECTIVE STOP" : null;
+  const devices = runtime.devices?.devices ?? [];
+  const washers = devices.filter((d) => d.contract === "washer" && d.active !== "off");
+  const hmiLabels = useMemo(() => {
+    const entry = program.catalog?.programs.find((p) => p.name === state?.program);
+    return entry?.hmi ?? {};
+  }, [program.catalog, state?.program]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-zinc-100 dark:bg-zinc-950">
@@ -58,6 +121,27 @@ export default function HmiPage({ onExit }: { onExit: () => void }) {
             </div>
           )}
         </section>
+
+        <OperatorEvents
+          session={runtime.session}
+          realm={runtime.prefix ?? "cell"}
+          state={state}
+          labels={hmiLabels}
+          onError={setError}
+        />
+
+        {washers.map((w) => (
+          <WasherCard
+            key={w.id}
+            session={runtime.session}
+            realm={runtime.prefix ?? "cell"}
+            rid={w.id}
+            active={w.active}
+            clientId={runtime.clientId}
+            canCommand={runtime.commandsEnabled && runtime.holdsControl}
+            operator
+          />
+        ))}
 
         <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-950/5 dark:bg-zinc-900 dark:ring-white/10">
           <CommandBar

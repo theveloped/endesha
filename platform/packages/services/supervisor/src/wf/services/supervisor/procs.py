@@ -34,6 +34,8 @@ PROVIDER_MODULES: dict[tuple[str, str], str] = {
     ("dio", "sim_dio"): "wf.hal.sim_dio",
     ("tags", "sim_tags"): "wf.hal.sim_tags",
     ("tags", "opcua"): "wf.hal.opcua",
+    ("washer", "ecoclean"): "wf.hal.ecoclean",
+    ("washer", "ecoclean_sim"): "wf.hal.ecoclean",
 }
 
 

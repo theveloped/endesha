@@ -242,6 +242,22 @@ restart is not needed.
 
 Pass the selected file with `-Runtime` or `--runtime`.
 
+## Other cells (the Ecoclean washer)
+
+`deploy/ecoclean/` is a second cell: one parts washer (`washer` contract, no
+arm) whose HAL also provides the raw PLC as a `tags` device. It replaces the
+`ecoclean-controller` repo. Host stack:
+
+```powershell
+.\deploy\start_stack.ps1 -Cell deploy/ecoclean/cell.yaml -Runtime deploy/ecoclean/runtime/sim.yaml -Programs deploy/ecoclean/programs -BridgeInDocker
+```
+
+`runtime/sim.yaml` runs the PLC emulation at 10x speed; `runtime/live.yaml`
+talks OPC-UA to `opc.tcp://192.168.0.1:4840`. Full Docker stack:
+`WF_CELL=./ecoclean/cell.yaml WF_RUNTIME=./ecoclean/runtime/sim.yaml WF_PROGRAMS=./ecoclean/programs docker compose -f deploy/compose.yaml up -d`.
+Try it: `wfctl washer-status`, `wfctl washer open_door`, `wfctl washer-recipe`,
+load `ecoclean_cycle` and confirm the operator steps on the HMI page.
+
 ## Checks before committing
 
 ```powershell

@@ -1,0 +1,3 @@
+# Simulated Ecoclean (PLC emulation, 10x speed).
+active_sources:
+  washer0: sim

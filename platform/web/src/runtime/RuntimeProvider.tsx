@@ -236,7 +236,13 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
 
   const wsConnected = session !== null && !wsClosed;
   const driverAlive = wsConnected && !stale && aliveToken;
-  const commandsEnabled = realm.kind !== "replay" && driverAlive;
+  // Commands need a live driver in an arm cell; a cell without an arm (e.g. a
+  // washer + PLC) is commandable as soon as the supervisor's control authority
+  // answers (owner state), since every provider is gated by that lease anyway.
+  const hasArm =
+    devices === null || devices.devices.length === 0 || devices.devices.some((d) => d.contract === "arm");
+  const authorityAlive = wsConnected && controlOwner !== null;
+  const commandsEnabled = realm.kind !== "replay" && (hasArm ? driverAlive : authorityAlive);
   const safetyActive = status?.estop === true || status?.protective_stop === true;
   const holdsControl = controlOwner?.owner?.client_id === clientId;
 
@@ -274,6 +280,7 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
         prefix,
         replaySessions,
         io,
+        devices,
         status,
         wsConnected,
         driverAlive,

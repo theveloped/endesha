@@ -13,6 +13,7 @@ import math
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import yaml
 import zenoh
@@ -33,6 +34,10 @@ from wf.contracts.control import keys as control_keys
 from wf.contracts.dio import keys as dio_keys
 from wf.contracts.program import keys as program_keys
 from wf.contracts.tags import keys as tags_keys
+from wf.contracts.washer import keys as washer_keys
+from wf.contracts.washer.messages import Ack as WasherAck
+from wf.contracts.washer.messages import Recipe, RecipeReply, SetRecipe, WasherStatus
+from wf.core.action import ActionClient, ActionRejected
 from wf.contracts.tags.messages import Ack as TagsAck
 from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
 from wf.contracts.program.messages import Ack as ProgramAck
@@ -466,6 +471,120 @@ def _parse_tag_value(text: str):
         return float(text)
     except ValueError:
         return text
+
+
+def cmd_washer_status(session, args) -> int:
+    reply = _query(session, washer_keys.state_status(args.realm, args.washer), {})
+    if reply is None:
+        print("no reply from washer state/status (device down?)", file=sys.stderr)
+        return 1
+    st = WasherStatus.from_wire(reply)
+    print(f"phase      {st.phase}")
+    print(f"door       {st.door}")
+    print(f"connected  {st.connected}   auto {st.auto}   fault {st.fault} (#{st.fault_code})")
+    print(f"program    {st.program!r} #{st.program_no}")
+    print(f"flags      ready_to_load={st.ready_to_load} ready_to_unload={st.ready_to_unload} washing={st.washing}")
+    if st.sequence:
+        print(f"sequence   {st.sequence}  {st.detail}")
+    return 0
+
+
+def cmd_washer_action(session, args) -> int:
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    try:
+        goal = {"client_id": cid}
+        if args.action == "start_wash" and args.program is not None:
+            goal["program"] = int(args.program)
+        client = ActionClient(session, washer_keys.action_prefix(args.realm, args.washer), args.action)
+        try:
+            g = client.send(goal, on_feedback=lambda fb: print(f"  … {fb.get('data', {}).get('step', '')} {fb.get('progress', 0):.0%}"))
+        except ActionRejected as exc:
+            print(f"rejected: {exc.reason}", file=sys.stderr)
+            return 1
+        print(f"goal {g.goal_id} accepted; waiting (Ctrl-C cancels = stop door)")
+        try:
+            result = g.result(timeout_s=float(args.timeout))
+        except KeyboardInterrupt:
+            g.cancel()
+            print("cancelled: door permission released")
+            return 130
+        print(f"{result.get('state')}" + (f": {result.get('error')}" if result.get("error") else ""))
+        return 0 if result.get("state") == "succeeded" else 1
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+
+
+def cmd_washer_stop_door(session, args) -> int:
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    try:
+        reply = _query(session, washer_keys.cmd_stop_door(args.realm, args.washer), {"client_id": cid})
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+    if reply is None:
+        print("no reply", file=sys.stderr)
+        return 1
+    ack = WasherAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_washer_recipe(session, args) -> int:
+    if args.set is None:
+        reply = _query(session, washer_keys.cmd_get_recipe(args.realm, args.washer), {})
+        if reply is None:
+            print("no reply", file=sys.stderr)
+            return 1
+        rr = RecipeReply.from_wire(reply)
+        if not rr.ok or rr.recipe is None:
+            print(f"error: {rr.error}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(rr.recipe.to_wire(), indent=2))
+            return 0
+        r = rr.recipe
+        print(f"recipe {r.name!r}")
+        print("  #  cleaning  time_s  movement  additional  pump_off")
+        for i, st in enumerate(r.steps):
+            if st.cleaning == 0 and st.time_s == 0:
+                continue
+            print(f"  {i + 1:<2} {st.cleaning:>8}  {st.time_s:>6}  {st.movement:>8}  {st.additional:>10}  {st.pump_off}")
+        for k, v in r.params.items():
+            spec = rr.schema.params.get(k) if rr.schema else None
+            print(f"  {k:24s} {v:>6}  {spec.title if spec else ''}")
+        return 0
+    recipe = Recipe.from_wire(json.loads(Path(args.set).read_text(encoding="utf-8")))
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    try:
+        reply = _query(session, washer_keys.cmd_set_recipe(args.realm, args.washer), SetRecipe(cid, recipe).to_wire(), timeout_s=15.0)
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+    if reply is None:
+        print("no reply", file=sys.stderr)
+        return 1
+    ack = WasherAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
 
 
 def cmd_tags_state(session, args) -> int:
@@ -1088,6 +1207,30 @@ def main(argv=None) -> int:
     p.add_argument("--tail", type=int, default=50, help="last N lines (default 50)")
     p.add_argument("--follow", "-f", action="store_true", help="keep printing new lines")
     p.set_defaults(fn=cmd_program_log)
+
+    p = sub.add_parser("washer-status", help="print a washer's phase/door/program")
+    p.add_argument("--washer", default="washer0", help="washer resource id (default washer0)")
+    p.set_defaults(fn=cmd_washer_status)
+
+    p = sub.add_parser("washer", help="run a washer action (auto-acquires the lease; Ctrl-C cancels)")
+    p.add_argument("action", choices=washer_keys.ACTIONS)
+    p.add_argument("--program", default=None, help="wash program number (start_wash)")
+    p.add_argument("--timeout", default=300.0)
+    p.add_argument("--washer", default="washer0")
+    p.add_argument("--client-id", default=None, help="reuse an external lease")
+    p.set_defaults(fn=cmd_washer_action)
+
+    p = sub.add_parser("washer-stop-door", help="release the door permission (a travelling door stops)")
+    p.add_argument("--washer", default="washer0")
+    p.add_argument("--client-id", default=None)
+    p.set_defaults(fn=cmd_washer_stop_door)
+
+    p = sub.add_parser("washer-recipe", help="print the machine's wash program, or --set it from a JSON file")
+    p.add_argument("--set", default=None, metavar="FILE.json")
+    p.add_argument("--json", action="store_true", help="print as JSON (round-trips with --set)")
+    p.add_argument("--washer", default="washer0")
+    p.add_argument("--client-id", default=None)
+    p.set_defaults(fn=cmd_washer_recipe)
 
     p = sub.add_parser("tags-state", help="print a tags device's variables")
     p.add_argument("--tags", default="plc0", help="tags resource id (default plc0)")

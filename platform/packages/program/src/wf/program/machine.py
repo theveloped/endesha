@@ -77,6 +77,12 @@ class Machine:
             raise ProgramError(f"not_a_tags_device:{rid}")
         return proxy
 
+    def washer(self, rid: str):
+        proxy = self.device(rid)
+        if proxy.contract != "washer":
+            raise ProgramError(f"not_a_washer:{rid}")
+        return proxy
+
     def pose(self, name: str) -> list[float]:
         return self._pose_resolver(name)
 

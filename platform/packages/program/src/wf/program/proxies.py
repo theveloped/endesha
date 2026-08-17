@@ -29,6 +29,9 @@ from wf.contracts.dio.messages import ChannelsState, ForceChannel, SetChannel
 from wf.contracts.tags import keys as tags_keys
 from wf.contracts.tags.messages import Ack as TagsAck
 from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
+from wf.contracts.washer import keys as washer_keys
+from wf.contracts.washer.messages import Ack as WasherAck
+from wf.contracts.washer.messages import Recipe, RecipeReply, RecipeSchema, SetRecipe, WasherStatus
 from wf.core.action import ActionClient, ActionRejected
 from wf.core.codec import decode, encode
 from wf.core.log import get_logger
@@ -503,4 +506,184 @@ def make_pose_resolver(session, program_name: str | None = None) -> Callable[[st
     return resolve
 
 
-PROXIES: dict[str, type[DeviceProxy]] = {"arm": ArmProxy, "dio": DioProxy, "tags": TagsProxy}
+# ── washer ─────────────────────────────────────────────────────────────────
+
+
+class WasherProxy(DeviceProxy):
+    """``self.m.washer("washer0")`` — a parts washer (door + wash cycle + recipe).
+
+    Actions (``open_door`` / ``close_door`` / ``start_wash`` / ``reset``) block
+    until the machine confirms and honour cancel (the door stops). The wash
+    itself is observed with :meth:`wait_phase`::
+
+        w = self.m.washer("washer0")
+        w.open_door()                # ready_to_load -> door_open
+        ...                          # load the basket
+        w.start_wash(program=2)      # door closes, cycle starts
+        w.wait_phase("ready_to_unload", timeout_s=1800)
+        w.open_door()                # unload side
+        w.close_door()
+    """
+
+    contract = "washer"
+
+    def __init__(self, session, realm, rid, client_id):
+        super().__init__(session, realm, rid, client_id)
+        self._lock = threading.Lock()
+        self._changed = threading.Condition(self._lock)
+        self._status: WasherStatus | None = None
+        self._sub = None
+
+    def start(self) -> None:
+        self._sub = self.session.declare_subscriber(washer_keys.state_status(self.realm, self.rid), self._on_status)
+        reply = _query(self.session, washer_keys.state_status(self.realm, self.rid), {}, timeout_s=2.0)
+        if reply is not None:
+            self._on_payload(reply)
+
+    def close(self) -> None:
+        if self._sub is not None:
+            try:
+                self._sub.undeclare()
+            except Exception:
+                pass
+            self._sub = None
+
+    def _on_status(self, sample) -> None:
+        try:
+            self._on_payload(decode(sample.payload))
+        except Exception:
+            return
+
+    def _on_payload(self, payload: dict) -> None:
+        st = WasherStatus.from_wire(payload)
+        with self._changed:
+            self._status = st
+            self._changed.notify_all()
+
+    # ── reads ────────────────────────────────────────────────────────────
+
+    @property
+    def status(self) -> WasherStatus | None:
+        with self._lock:
+            return self._status
+
+    @property
+    def phase(self) -> str:
+        st = self.status
+        return "initializing" if st is None else st.phase
+
+    def wait_phase(self, phase, *, timeout_s: float | None = None) -> bool:
+        """Block until the phase is ``phase`` (a str or a set/tuple of str).
+        True when met, False on timeout; raises on cancel and when the machine
+        reports a fault while waiting for something else."""
+        want = {phase} if isinstance(phase, str) else set(phase)
+        ctx = _ctx()
+        deadline = None if timeout_s is None else time.monotonic() + timeout_s
+        while True:
+            if ctx is not None:
+                ctx.check()
+            with self._lock:
+                st = self._status
+                if st is not None and st.phase in want:
+                    return True
+                if st is not None and st.phase == "fault" and "fault" not in want:
+                    raise ProgramError(f"washer_fault:{self.rid}:{st.fault_code}")
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    return False
+                self._changed.wait(timeout=min(_POLL_S * 4, remaining) if remaining is not None else _POLL_S * 4)
+
+    # ── actions ──────────────────────────────────────────────────────────
+
+    def open_door(self, *, timeout_s: float = 180.0) -> dict:
+        return self._action("open_door", {}, timeout_s)
+
+    def close_door(self, *, timeout_s: float = 180.0) -> dict:
+        return self._action("close_door", {}, timeout_s)
+
+    def start_wash(self, program: int | None = None, *, timeout_s: float = 180.0) -> dict:
+        goal = {} if program is None else {"program": int(program)}
+        return self._action("start_wash", goal, timeout_s)
+
+    def reset(self, *, timeout_s: float = 30.0) -> dict:
+        return self._action("reset", {}, timeout_s)
+
+    def _action(self, name: str, goal: dict, timeout_s: float) -> dict:
+        _check()
+        client = ActionClient(self.session, washer_keys.action_prefix(self.realm, self.rid), name)
+        try:
+            g = client.send({"client_id": self.client_id, **goal})
+        except ActionRejected as exc:
+            raise ProgramError(f"washer_{name}:{self.rid}:rejected:{exc.reason}") from exc
+        except TimeoutError as exc:
+            raise ProgramError(f"washer_{name}:{self.rid}:no_reply") from exc
+        ctx = _ctx()
+        unregister = ctx.on_cancel(lambda: ArmProxy._cancel_goal(g)) if ctx is not None else None
+        try:
+            deadline = time.monotonic() + timeout_s
+            while True:
+                try:
+                    result = g.result(timeout_s=0.5)
+                    break
+                except TimeoutError:
+                    if ctx is not None and ctx.cancelled:
+                        raise ActionCancelled(ctx.state_id) from None
+                    if time.monotonic() >= deadline:
+                        ArmProxy._cancel_goal(g)
+                        raise ProgramError(f"washer_{name}:{self.rid}:timeout") from None
+        finally:
+            if unregister is not None:
+                unregister()
+        if ctx is not None and ctx.cancelled:
+            raise ActionCancelled(ctx.state_id)
+        if result.get("state") != "succeeded":
+            raise ProgramError(f"washer_{name}:{self.rid}:{result.get('state')}:{result.get('error')}")
+        return result
+
+    # ── commands ─────────────────────────────────────────────────────────
+
+    def stop_door(self) -> None:
+        _check()
+        reply = _query(self.session, washer_keys.cmd_stop_door(self.realm, self.rid), {"client_id": self.client_id})
+        if reply is None:
+            raise ProgramError(f"washer_stop_door:{self.rid}:no_reply")
+        ack = WasherAck.from_wire(reply)
+        if not ack.ok:
+            raise ProgramError(f"washer_stop_door:{self.rid}:{ack.error}")
+
+    def get_recipe(self) -> Recipe:
+        _check()
+        reply = _query(self.session, washer_keys.cmd_get_recipe(self.realm, self.rid), {})
+        if reply is None:
+            raise ProgramError(f"washer_get_recipe:{self.rid}:no_reply")
+        rr = RecipeReply.from_wire(reply)
+        if not rr.ok or rr.recipe is None:
+            raise ProgramError(f"washer_get_recipe:{self.rid}:{rr.error}")
+        return rr.recipe
+
+    def recipe_schema(self) -> RecipeSchema:
+        _check()
+        reply = _query(self.session, washer_keys.cmd_get_recipe(self.realm, self.rid), {})
+        if reply is None:
+            raise ProgramError(f"washer_get_recipe:{self.rid}:no_reply")
+        rr = RecipeReply.from_wire(reply)
+        if rr.schema is None:
+            raise ProgramError(f"washer_get_recipe:{self.rid}:no_schema")
+        return rr.schema
+
+    def set_recipe(self, recipe: Recipe | dict) -> None:
+        _check()
+        if isinstance(recipe, dict):
+            recipe = Recipe.from_wire(recipe)
+        reply = _query(self.session, washer_keys.cmd_set_recipe(self.realm, self.rid),
+                       SetRecipe(self.client_id, recipe).to_wire(), timeout_s=15.0)
+        if reply is None:
+            raise ProgramError(f"washer_set_recipe:{self.rid}:no_reply")
+        ack = WasherAck.from_wire(reply)
+        if not ack.ok:
+            raise ProgramError(f"washer_set_recipe:{self.rid}:{ack.error}")
+
+
+PROXIES: dict[str, type[DeviceProxy]] = {
+    "arm": ArmProxy, "dio": DioProxy, "tags": TagsProxy, "washer": WasherProxy,
+}

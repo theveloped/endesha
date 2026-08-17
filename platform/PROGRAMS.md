@@ -53,9 +53,10 @@ PROGRAM = PickAndPlace   # optional when the file has exactly one Program subcla
 | attribute | meaning |
 |---|---|
 | `program_name` | catalog name. **Not** `name` — python-statemachine owns that. Default: file stem. |
-| `roles` | `{role: contract}`. Contracts today: `arm`, `dio`, `tags`. Bound to device ids at Load (default: the sole device of that contract; else pick in the UI / `--bind role=rid`). |
+| `roles` | `{role: contract}`. Contracts today: `arm`, `dio`, `tags`, `washer`. Bound to device ids at Load (default: the sole device of that contract; else pick in the UI / `--bind role=rid`). |
 | `params` | defaults; overridden at Load (`--param k=v`, JSON values). Available as `self.p[...]`. Unknown keys are rejected at Load. |
 | `triggers` | declarative event sources evaluated by the runner (see below). |
+| `hmi` | `{event: "Button label"}` — while the program waits for one of these events the HMI page shows a button with that label (operator confirmations such as "Basket loaded"). |
 
 Reserved names you must not reuse for states/events: anything python-statemachine
 defines (`name`, `states`, `events`, `send`, `configuration`, `current_state`,
@@ -149,6 +150,27 @@ Names: the ones you gave in `cell.yaml` `tags:` (`load_request: {tag: LoadReques
 plus the controller's own inventory as auto tags named after their display
 names (`ReadyToLoad` → `ready_to_load`, `Programmfolgen[2].BEH` →
 `programmfolgen_2_beh`). `on_channel(...)` triggers work on tags too.
+
+### washer (parts washer: door + wash cycle + recipe — Ecoclean)
+
+`self.m.washer("washer0")` (or a bound role). Actions are goals: they block
+until the machine confirms, and a cancel (Hold/Stop/Abort, `Stop door`)
+releases the door permission so a travelling door stops where it is.
+
+| call | notes |
+|---|---|
+| `status` / `phase` | latest `WasherStatus` (`phase`, `door`, `fault`, `fault_code`, `program`, `program_no`, `sequence`, `detail`) / its phase. Phases: `initializing`, `ready_to_load`, `door_open`, `door_moving`, `washing`, `ready_to_unload`, `fault`. |
+| `wait_phase(phase, *, timeout_s=None)` | block until the phase (str or set) is reached; True/False on timeout; raises `washer_fault:<rid>:<code>` if the machine faults meanwhile. |
+| `open_door()` | `ready_to_load` → `door_open` (load side) or `ready_to_unload` → `door_open` (unload side). Needs the lease. |
+| `start_wash(program=None)` | from `door_open`: close and start the cycle (optionally select wash program *n* first); returns when the machine reports washing. Then `wait_phase("ready_to_unload")`. |
+| `close_door()` | from `door_open`: close without a cycle. |
+| `reset()` | clear the handshake lines, acknowledge a fault. |
+| `stop_door()` | immediate: release the door permission. |
+| `get_recipe()` / `set_recipe(recipe)` / `recipe_schema()` | the wash program on the machine as a `Recipe(name, steps[...], params{...})`; `set_recipe` validates against the schema (ranges) and needs the lease. |
+
+The washer HAL also *provides* the raw PLC as a `tags` device (`plc0`), so
+`self.m.tags("plc0")` / forcing on the IO page work as usual — force
+`general_fault` on to test a fault path in sim.
 
 ### other (`self.m` helpers)
 

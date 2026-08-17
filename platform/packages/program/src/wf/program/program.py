@@ -71,6 +71,10 @@ class Program(StateChart):
     params: dict = {}
     #: declarative event sources evaluated by the runner.
     triggers: list[Trigger] = []
+    #: operator-facing labels for events the HMI may offer as buttons
+    #: (``{"start": "Start wash"}``); an event the program is waiting for
+    #: shows up on the HMI page as a button with this label.
+    hmi: dict[str, str] = {}
 
     def __init__(self, roles: Roles, params: dict, runtime: ProgramRuntime):
         self.m = roles
@@ -133,6 +137,7 @@ class Program(StateChart):
             "doc": (cls.__doc__ or "").strip(),
             "states": [s.id for s in cls.states],
             "events": sorted({e.id for e in cls.events}),
+            "hmi": {str(k): str(v) for k, v in dict(cls.hmi).items()},
         }
 
 

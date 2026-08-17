@@ -67,14 +67,16 @@ services:
       # Hot-reload the canonical cell + overlays like packages/: they live in
       # deploy/ (NOT under the packages mount), so bind them explicitly or the
       # supervisor reads the STALE copies baked into the wf-sim image at build.
-      - ./cell.yaml:/platform/deploy/cell.yaml:ro
-      - ./runtime:/platform/deploy/runtime:ro
+      # WF_CELL / WF_RUNTIME / WF_PROGRAMS pick another cell, e.g. the Ecoclean:
+      #   WF_CELL=./ecoclean/cell.yaml WF_RUNTIME=./ecoclean/runtime/sim.yaml WF_PROGRAMS=./ecoclean/programs docker compose -f deploy/compose.yaml up -d
+      - ${WF_CELL:-./cell.yaml}:/platform/deploy/cell.yaml:ro
+      - ${WF_RUNTIME:-./runtime/sim.yaml}:/platform/deploy/runtime/active.yaml:ro
       # Programs are edited in place (in-app editor / your IDE): read-write.
-      - ./programs:/platform/deploy/programs
+      - ${WF_PROGRAMS:-./programs}:/platform/deploy/programs
     command: ["python", "-m", "wf.services.supervisor",
               "--realm", "cell",
               "--cell", "deploy/cell.yaml",
-              "--runtime", "deploy/runtime/sim.yaml",
+              "--runtime", "deploy/runtime/active.yaml",
               "--programs", "deploy/programs",
               "--zenoh-config", "deploy/zenoh/sim-container.json5"]
 

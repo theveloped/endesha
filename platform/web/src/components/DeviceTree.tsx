@@ -17,13 +17,14 @@ import {
 import { cn } from "@/lib/utils";
 import { setDeviceSource } from "../lib/actions";
 import { query, subscribeLatest, watchAlive, type Unsubscribe } from "../lib/bus";
-import { alive, camAlive, dioAlive, supervisorDevices, tagsAlive } from "../lib/config";
+import { alive, camAlive, dioAlive, supervisorDevices, tagsAlive, washerAlive } from "../lib/config";
 import type { DeviceEntry, DevicesList } from "../lib/messages";
 
 function deviceAliveKey(realm: string, d: DeviceEntry): string {
   if (d.contract === "camera2d") return camAlive(realm, d.id);
   if (d.contract === "dio") return dioAlive(realm, d.id);
   if (d.contract === "tags") return tagsAlive(realm, d.id);
+  if (d.contract === "washer") return washerAlive(realm, d.id);
   return alive(realm, d.id);
 }
 

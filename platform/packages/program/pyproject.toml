@@ -8,6 +8,7 @@ dependencies = [
     "wf-contracts-arm",
     "wf-contracts-dio",
     "wf-contracts-tags",
+    "wf-contracts-washer",
     "wf-contracts-control",
     "wf-services-config",
     "python-statemachine>=2.5",

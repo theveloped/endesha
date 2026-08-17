@@ -166,6 +166,31 @@ export function tagsAlive(realm: string, rid: string): string {
   return `${realm}/tags/${rid}/alive`;
 }
 
+// washer contract (wf/contracts/washer/keys.py): parts washer door/cycle/recipe.
+export function washerState(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/state/status`;
+}
+
+export function washerActionPrefix(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/action`;
+}
+
+export function washerCmdStopDoor(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/cmd/stop_door`;
+}
+
+export function washerCmdGetRecipe(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/cmd/get_recipe`;
+}
+
+export function washerCmdSetRecipe(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/cmd/set_recipe`;
+}
+
+export function washerAlive(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/alive`;
+}
+
 // Cell-level control lease (wf/contracts/control/keys.py): ONE holder for every
 // device in the cell, granted by the supervisor-hosted authority. No rid.
 export function controlCmdAcquire(realm: string): string {

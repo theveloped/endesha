@@ -127,6 +127,8 @@ class ChannelsCore:
             self.channels[auto.name] = auto
 
         self._lock = threading.Lock()
+        # Hosts (a device HAL built on top of this table) block on ``changed``.
+        self.changed = threading.Condition(self._lock)
         self._hw: dict[str, Any] = {name: ch.default_value() for name, ch in self.channels.items()}
         self._forced: dict[str, Any] = {}
 
@@ -216,6 +218,49 @@ class ChannelsCore:
             ]
         return self.schema.state_wire(now_ns(), values)
 
+    # ── host API (a device HAL hosting this table in-process) ────────────
+
+    def write(self, name: str, value) -> Any:
+        """Host-side write: no lease check (the host is the device), still
+        refused while the channel is forced (``RuntimeError('forced')``) and
+        for read-only channels. Returns the coerced value."""
+        ch = self.channels.get(name)
+        if ch is None:
+            raise KeyError(f"unknown_channel:{name}")
+        if not ch.writable:
+            raise RuntimeError(f"read_only:{name}")
+        with self._lock:
+            if name in self._forced:
+                raise RuntimeError(f"forced:{name}")
+        value = ch.coerce(value)
+        self.backend.write(ch, ch.to_raw(value))
+        with self._lock:
+            self._hw[name] = value
+            self.changed.notify_all()
+        self.publish()
+        return value
+
+    def wait_until(self, pred: Callable[[Callable[[str], Any]], bool], timeout_s: float | None,
+                   *, cancel: threading.Event | None = None, tick_s: float = 0.1) -> bool:
+        """Block until ``pred(get)`` is true (``get(name)`` -> reported value),
+        the timeout passes (False) or ``cancel`` is set (False)."""
+        deadline = None if timeout_s is None else time.monotonic() + timeout_s
+        with self.changed:
+            while True:
+                if pred(self._reported_locked):
+                    return True
+                if cancel is not None and cancel.is_set():
+                    return False
+                if self._stop.is_set():
+                    return False
+                if deadline is not None:
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        return False
+                    self.changed.wait(min(tick_s, left))
+                else:
+                    self.changed.wait(tick_s)
+
     # ── polling / publishing ─────────────────────────────────────────────
 
     def _poll_once(self) -> bool:
@@ -241,6 +286,8 @@ class ChannelsCore:
                     if name not in self._forced:
                         changed = True
                         changes.append((name, old, eng))
+            if changed:
+                self.changed.notify_all()
         if self._on_change is not None:
             for name, old, new in changes:
                 try:
@@ -309,6 +356,7 @@ class ChannelsCore:
             return
         with self._lock:
             self._hw[name] = value
+            self.changed.notify_all()
         self.publish()
         self._reply(query, True)
 
@@ -326,6 +374,7 @@ class ChannelsCore:
         if value is None:
             with self._lock:
                 self._forced.pop(name, None)
+                self.changed.notify_all()
             self.publish()
             self._reply(query, True)
             return
@@ -340,5 +389,6 @@ class ChannelsCore:
             self._forced[name] = value
             if ch.writable:
                 self._hw[name] = value
+            self.changed.notify_all()
         self.publish()
         self._reply(query, True)

@@ -262,6 +262,8 @@ def test_provider_modules_cover_module_launched_kinds():
         ("dio", "sim_dio"): "wf.hal.sim_dio",
         ("tags", "sim_tags"): "wf.hal.sim_tags",
         ("tags", "opcua"): "wf.hal.opcua",
+        ("washer", "ecoclean"): "wf.hal.ecoclean",
+        ("washer", "ecoclean_sim"): "wf.hal.ecoclean",
     }
 
 
@@ -494,4 +496,43 @@ def test_dio_resource_rejects_bad_channels(tmp_path, channels, reason):
         """
     )
     with pytest.raises(ValueError, match=reason):
+        load_cell(_write(tmp_path, cell))
+
+
+# ── the shipped Ecoclean cell (washer host + provided tags device) ──────────
+
+_ECOCLEAN_CELL = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "deploy", "ecoclean", "cell.yaml")
+
+
+def test_ecoclean_cell_loads_and_realizes():
+    cell = load_cell(_ECOCLEAN_CELL)
+    washer = cell["resources"]["washer0"]
+    assert washer["contract"] == "washer"
+    assert washer["provides"]["plc0"]["contract"] == "tags"
+    for mode in ("sim", "live"):
+        realized = realize_cell(cell, {"washer0": mode})
+        assert list(realized["resources"]) == ["washer0"], "the tags device is hosted, not spawned"
+        res = realized["resources"]["washer0"]
+        assert provider_module(res["contract"], res["kind"]) == "wf.hal.ecoclean"
+        assert res["params"]["provides"]["plc0"]["tags"]["machine_ready"] == {"tag": "ReadyToLoad"}
+        assert res["params"]["door_timeout_s"] == 90
+    by_id = {d["id"]: d for d in devices_inventory(cell, {"washer0": "sim"})}
+    assert by_id["plc0"]["provided_by"] == "washer0" and by_id["plc0"]["contract"] == "tags"
+    assert by_id["washer0"]["active"] == "sim"
+
+
+def test_provides_tags_validates_names(tmp_path):
+    cell = textwrap.dedent(
+        """
+        cell_type: t@0.1
+        resources:
+          w:
+            contract: washer
+            sources:
+              sim: {kind: ecoclean_sim, params: {}}
+            provides:
+              plc0: {contract: tags, tags: {"Bad Name": {tag: X}}}
+        """
+    )
+    with pytest.raises(ValueError, match="provides.plc0"):
         load_cell(_write(tmp_path, cell))

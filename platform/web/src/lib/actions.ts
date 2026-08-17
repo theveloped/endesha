@@ -19,6 +19,10 @@ import {
   programsCmdSource,
   tagsCmdForce,
   tagsCmdWrite,
+  washerActionPrefix,
+  washerCmdGetRecipe,
+  washerCmdSetRecipe,
+  washerCmdStopDoor,
   type UnitCommand,
   cmdClearProtectiveStop,
   controlCmdRelease,
@@ -38,6 +42,8 @@ import type {
   GoalFeedback,
   GoalReply,
   GoalResult,
+  Recipe,
+  RecipeReply,
   SetSourceReply,
   Waypoint,
 } from "./messages";
@@ -57,7 +63,18 @@ export async function sendExecutePath(
     clientId,
   }: { onFeedback?: (fb: GoalFeedback) => void; clientId?: string } = {},
 ): Promise<GoalHandle> {
-  const prefix = actionPrefix(realm);
+  return sendGoal(session, actionPrefix(realm), "execute_path", { waypoints, client_id: clientId ?? null }, { onFeedback });
+}
+
+/** Submit a goal to `{prefix}/{name}` and return a handle whose `result`
+ * resolves with the terminal result (any action server, any contract). */
+export async function sendGoal(
+  session: Session,
+  prefix: string,
+  name: string,
+  goal: Record<string, unknown>,
+  { onFeedback }: { onFeedback?: (fb: GoalFeedback) => void } = {},
+): Promise<GoalHandle> {
   const goalId = uuidv7();
 
   const feedbackSub = await session.declareSubscriber(
@@ -98,17 +115,14 @@ export async function sendExecutePath(
 
   let reply: GoalReply | null;
   try {
-    reply = (await query(session, `${prefix}/execute_path`, {
-      goal_id: goalId,
-      goal: { waypoints, client_id: clientId ?? null },
-    })) as GoalReply | null;
+    reply = (await query(session, `${prefix}/${name}`, { goal_id: goalId, goal })) as GoalReply | null;
   } catch (e) {
     undeclareBoth();
     throw e;
   }
   if (reply === null) {
     undeclareBoth();
-    throw new Error("no reply from action server for execute_path");
+    throw new Error(`no reply from action server for ${name}`);
   }
   if (!reply.accepted) {
     undeclareBoth();
@@ -122,11 +136,56 @@ export async function cancelGoal(
   realm: string,
   goalId: string,
 ): Promise<CancelReply> {
-  const reply = await query(session, `${actionPrefix(realm)}/cancel`, {
-    goal_id: goalId,
-  });
+  return cancelGoalAt(session, actionPrefix(realm), goalId);
+}
+
+export async function cancelGoalAt(session: Session, prefix: string, goalId: string): Promise<CancelReply> {
+  const reply = await query(session, `${prefix}/cancel`, { goal_id: goalId });
   if (reply === null) throw new Error(`no cancel reply for goal ${goalId}`);
   return reply as CancelReply;
+}
+
+// ── washer ──────────────────────────────────────────────────────────────────
+
+export type WasherAction = "open_door" | "close_door" | "start_wash" | "reset";
+
+export async function washerAction(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  name: WasherAction,
+  goal: Record<string, unknown> = {},
+): Promise<GoalHandle> {
+  return sendGoal(session, washerActionPrefix(realm, rid), name, { client_id: clientId, ...goal });
+}
+
+export async function washerCancel(session: Session, realm: string, rid: string, goalId: string): Promise<CancelReply> {
+  return cancelGoalAt(session, washerActionPrefix(realm, rid), goalId);
+}
+
+export async function washerStopDoor(session: Session, realm: string, rid: string, clientId: string): Promise<Ack> {
+  const reply = await query(session, washerCmdStopDoor(realm, rid), { client_id: clientId });
+  if (reply === null) throw new Error("no reply from washer cmd/stop_door");
+  return reply as Ack;
+}
+
+export async function washerGetRecipe(session: Session, realm: string, rid: string): Promise<RecipeReply> {
+  const reply = await query(session, washerCmdGetRecipe(realm, rid), {});
+  if (reply === null) throw new Error("no reply from washer cmd/get_recipe");
+  return reply as RecipeReply;
+}
+
+export async function washerSetRecipe(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  recipe: Recipe,
+): Promise<Ack> {
+  const reply = await query(session, washerCmdSetRecipe(realm, rid), { client_id: clientId, recipe }, 15000);
+  if (reply === null) throw new Error("no reply from washer cmd/set_recipe");
+  return reply as Ack;
 }
 
 export async function setDo(

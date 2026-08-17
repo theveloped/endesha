@@ -37,12 +37,50 @@ import { RIGHT_DEFAULT_WIDTH, useRememberedWidth, useWindowWidth } from "./layou
 import { ResizablePane } from "./Panes";
 import { RightToolPane } from "./RightToolPane";
 import { useRoute, type Route } from "./router";
+import type { Session } from "@eclipse-zenoh/zenoh-ts";
+import { WasherCard } from "../components/WasherCard";
 import { ToolRibbon, type WorkspaceTool } from "./ToolRibbon";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 
 const LEFT_DEFAULT = 300;
 
-function NoArmWorkspace({ devices }: { devices: { id: string; contract: string; active: string | null }[] }) {
+function NoArmWorkspace({
+  devices,
+  session,
+  realm,
+  clientId,
+  canCommand,
+}: {
+  devices: { id: string; contract: string; active: string | null }[];
+  session: Session | null;
+  realm: string;
+  clientId: string;
+  canCommand: boolean;
+}) {
+  const washers = devices.filter((d) => d.contract === "washer");
+  if (washers.length > 0) {
+    return (
+      <div className="h-full overflow-auto p-6">
+        <div className="mx-auto flex max-w-3xl flex-col gap-4">
+          {washers.map((w) => (
+            <WasherCard
+              key={w.id}
+              session={session}
+              realm={realm}
+              rid={w.id}
+              active={w.active}
+              clientId={clientId}
+              canCommand={canCommand}
+              showRecipe
+            />
+          ))}
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            The machine's raw PLC variables are on the IO tool ({devices.filter((d) => d.contract === "tags").map((d) => d.id).join(", ") || "no tags device"}).
+          </p>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex h-full items-center justify-center p-8">
       <div className="max-w-md rounded-xl bg-white p-6 text-sm shadow-sm ring-1 ring-zinc-950/5 dark:bg-zinc-900 dark:ring-white/10">
@@ -261,7 +299,13 @@ function Workspace({
                 Select a recording from the main navigation.
               </div>
             ) : !hasArm ? (
-              <NoArmWorkspace devices={structure.devices} />
+              <NoArmWorkspace
+                devices={structure.devices}
+                session={runtime.session}
+                realm={runtime.prefix}
+                clientId={runtime.clientId}
+                canCommand={runtime.commandsEnabled && runtime.holdsControl}
+              />
             ) : (
               <OverviewPage
                 key={runtime.prefix}
