@@ -255,7 +255,38 @@ docker compose -f deploy/compose.yaml config --quiet
 
 `npm run build` synchronizes static assets before compiling. Stop any Docker `web` container first if Windows reports that a file under `web/public/assets` is locked.
 
+## Full Docker stack (no host processes)
+
+The compose stack runs everything in containers (router, bridge, config,
+supervisor with providers and the program runner, Vite). It shares the host
+`deploy/config` and `deploy/programs` directories, so config edits and
+programs written in the in-app editor land in the repo either way.
+
+```powershell
+.\deploy\stop_stack.ps1                                   # never run both modes at once (ports 5173/10000)
+docker compose -f deploy/compose.yaml up -d
+```
+
+Rebuild rules (the images bake dependencies, the code is bind-mounted):
+
+- `pixi.toml` / `pixi.lock` or a NEW package under `packages/` →
+  `docker compose -f deploy/compose.yaml build config` (builds `wf-sim`, used by
+  config + supervisor), then `up -d`.
+- `web/package.json` changed → `docker compose -f deploy/compose.yaml up -d --build
+  --force-recreate --renew-anon-volumes web`. The `--renew-anon-volumes` matters:
+  the container masks the host `node_modules` with an anonymous volume, and a plain
+  restart keeps the OLD volume even after the image was rebuilt ("Failed to
+  resolve import ..." in the web container log).
+
 ## Troubleshooting
+
+### `npm ci` fails with EPERM on `lightningcss...node`
+
+The host Vite (started by `start_stack.ps1`) holds the file. Run
+`.\deploy\stop_stack.ps1` first, then `npm ci`, then start the stack again. An
+interrupted `npm ci` leaves `web/node_modules` half-deleted — always rerun it
+to completion.
+
 
 ### UI reports `no browser producer`
 
