@@ -195,6 +195,8 @@ Use `Ctrl-C` to stop the headless process. Switch `cam0` back to `browser_sim` b
 
 ## Programs
 
+Authoring reference: [PROGRAMS.md](PROGRAMS.md).
+
 The supervisor spawns the program runner over `deploy/programs/` (any `*.py`
 defining a `wf.program.Program` subclass; see `demo_pick.py`). Drive it with
 `wfctl` (`--connect tcp/127.0.0.1:7447` when the router is in Docker):
