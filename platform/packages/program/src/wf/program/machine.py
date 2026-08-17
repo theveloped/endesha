@@ -4,6 +4,7 @@ Built from the supervisor's device inventory (``[{id, contract, …}]``). A
 program declares ``roles = {"arm": "arm", "io": "dio"}`` (role -> contract);
 the runner binds roles to device ids and hands the program a :class:`Roles`
 view so it can write ``self.m.arm.move_j(...)`` and ``self.m.io.wait(...)``.
+Role names in :data:`RESERVED_ROLE_NAMES` are rejected at bind time.
 """
 
 from __future__ import annotations
@@ -12,6 +13,11 @@ import threading
 
 from .errors import ProgramError
 from .proxies import PROXIES, ArmProxy, DeviceProxy, make_pose_resolver
+
+
+# Names a program's ``self.m`` uses for helpers; not usable as role names
+# (a real attribute wins over ``__getattr__``, so the role would be unreachable).
+RESERVED_ROLE_NAMES = frozenset({"bindings", "machine", "pose", "device", "ids", "rid"})
 
 
 class Machine:
@@ -75,6 +81,8 @@ class Machine:
         sole device of its contract; ambiguity or a contract mismatch raises."""
         out: dict[str, str] = {}
         for role, contract in roles.items():
+            if role in RESERVED_ROLE_NAMES or role.startswith("_"):
+                raise ProgramError(f"bind:{role}:reserved_role_name")
             rid = bindings.get(role)
             if rid is None:
                 candidates = self.ids(contract)
@@ -109,8 +117,8 @@ class Machine:
 class Roles:
     """What a program sees as ``self.m``: the bound roles as attributes
     (``self.m.arm``, ``self.m.io``) plus the cell-level helpers a program may
-    need (``pose``, ``device``, ``ids``, ``bindings``). Role names shadow the
-    helpers, so don't call a role ``pose`` / ``device`` / ``ids``."""
+    need (``pose``, ``device``, ``ids``, ``bindings``, ``machine``, ``rid``).
+    Those names are reserved as role names (see :data:`RESERVED_ROLE_NAMES`)."""
 
     def __init__(self, machine: Machine, bindings: dict[str, str]):
         self._machine = machine

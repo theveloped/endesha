@@ -48,3 +48,5 @@ def test_bind_resolves_defaults_and_rejects_ambiguity():
         m.resolve_bindings({"io": "dio"}, {})
     with pytest.raises(ProgramError, match="no_device_of_contract"):
         m.resolve_bindings({"cam": "camera2d"}, {})
+    with pytest.raises(ProgramError, match="bind:pose:reserved_role_name"):
+        m.resolve_bindings({"pose": "arm"}, {})

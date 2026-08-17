@@ -138,8 +138,9 @@ physical pins are also addressable by their auto names (`di3`, `tool_do0`).
 `self.m.pose("name")` resolves a pose (same order as `move_j`);
 `self.m.bindings` is the role→device-id map; `self.m["role"]` equals attribute
 access; `self.m.device("io1")` reaches a device outside the bindings;
-`self.m.ids("dio")` lists device ids. Role names shadow these helpers, so do
-not name a role `pose`, `device`, `ids`, `bindings` or `machine`.
+`self.m.ids("dio")` lists device ids. These helper names (`pose`, `device`,
+`ids`, `rid`, `bindings`, `machine`) are reserved — Load rejects a role with
+such a name (`bind:<role>:reserved_role_name`).
 
 ## Unit hooks (optional overrides)
 
