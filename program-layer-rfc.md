@@ -397,7 +397,12 @@ No XML. Rename in docs/UI, keep keys:
    (resize-aware, cached pane widths), Programs tool (`ProgramsPage`: catalog,
    load with bindings + params, PackML command bar, unit/program state, events,
    transition log), operator page (`HmiPage`), no-arm centre pane.
-4. Nominal/calibrated frames; CameraInfo reshaping; `disabled_pairs`.
+4. **DONE** Nominal/calibrated frames (`FrameDef.nominal/calibration/drift()`,
+   store-side rule for every writer, UI detail shows nominal + drift);
+   CameraInfo (`wf.core.camera_info.CameraInfo`, store validates/normalizes,
+   legacy entries migrated at load, browser producer reads it); declared
+   collision exceptions (`config/arm/{rid}/collision/disabled_pairs`,
+   `CollisionModel.set_disabled_pairs`, refreshed by `ArmCore` at goal accept).
 5. Program-scoped assets in the store + Frames page group.
 6. (later) `serial` / `opcua` / `http` contracts, cell-level lease, SRDF export.
 

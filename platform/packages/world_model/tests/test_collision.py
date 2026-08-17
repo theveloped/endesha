@@ -101,6 +101,28 @@ def test_scene_box_hit(model, fk, tree):
     assert obs == "scene/blocker"
 
 
+def test_declared_exception_disables_pair(model, fk, tree):
+    """SRDF-style disable_collisions: a whitelisted (link, obstacle) pair no
+    longer reports, other pairs still do."""
+    flange = fk.get_ee_transform(HOME_Q)[:3, 3]
+    box = _box(BASE, flange, name="scene/blocker")
+    hit = model.check_collision(HOME_Q, [box], tree, BASE)
+    assert hit["hit"] is True
+    links = {p[0] if p[1] == "scene/blocker" else p[1] for p in hit["pairs"] if "scene/blocker" in p}
+    model.set_disabled_pairs([(link, "scene/blocker") for link in links])
+    assert model.disabled_pairs == sorted(tuple(sorted((l, "scene/blocker"))) for l in links)
+    cleared = model.check_collision(HOME_Q, [box], tree, BASE)
+    assert not any("scene/blocker" in p for p in cleared["pairs"])
+    # self-collision pairs are unaffected until declared
+    assert model.check_collision(SELF_COLLIDE_Q, [], tree, BASE)["hit"] is True
+    a, b = model.check_collision(SELF_COLLIDE_Q, [], tree, BASE)["pairs"][0]
+    model.set_disabled_pairs([(a, b)])
+    still = model.check_collision(SELF_COLLIDE_Q, [], tree, BASE)
+    assert (a, b) not in still["pairs"] and (b, a) not in still["pairs"]
+    model.set_disabled_pairs([])
+    assert model.disabled_pairs == []
+
+
 def test_scene_box_miss(model, fk, tree):
     flange = fk.get_ee_transform(HOME_Q)[:3, 3]
     box = _box(BASE, [flange[0] + 5.0, flange[1], flange[2]])

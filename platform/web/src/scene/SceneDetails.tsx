@@ -68,14 +68,31 @@ export function SceneDetails({
       return deviceFields;
     }
     if (selection.kind === "frame") {
-      return [
-        ["parent", selection.value.parent],
-        ["xyz", `${formatVector(selection.value.xyz)} m`],
-        ["rpy", `${formatVector(quatToRpyDeg(selection.value.quat), 2)}°`],
-        ["quaternion", formatVector(selection.value.quat)],
-        ["source", selection.value.source ?? "—"],
-        ["revision", String(selection.value.revision ?? "—")],
+      const frame = selection.value;
+      const rows: [string, string][] = [
+        ["parent", frame.parent],
+        ["xyz", `${formatVector(frame.xyz)} m`],
+        ["rpy", `${formatVector(quatToRpyDeg(frame.quat), 2)}°`],
+        ["quaternion", formatVector(frame.quat)],
+        ["source", frame.source ?? "—"],
       ];
+      if (frame.calibration !== undefined && frame.nominal !== undefined) {
+        // Calibrated: show the design value and the drift the calibration applied.
+        const dx = Math.hypot(...frame.xyz.map((v, i) => v - (frame.nominal?.xyz[i] ?? v)));
+        const dot = Math.abs(frame.quat.reduce((acc, v, i) => acc + v * (frame.nominal?.quat[i] ?? 0), 0));
+        const dAngle = (2 * Math.acos(Math.min(1, dot)) * 180) / Math.PI;
+        rows.push(
+          ["nominal xyz", `${formatVector(frame.nominal.xyz)} m`],
+          ["nominal rpy", `${formatVector(quatToRpyDeg(frame.nominal.quat), 2)}°`],
+          ["drift", `${(dx * 1000).toFixed(2)} mm · ${dAngle.toFixed(3)}°`],
+          ["calibrated", [frame.calibration.method, frame.calibration.by].filter(Boolean).join(" · ") || "yes"],
+        );
+        if (typeof frame.calibration.residual === "number") {
+          rows.push(["residual", String(frame.calibration.residual)]);
+        }
+      }
+      rows.push(["revision", String(frame.revision ?? "—")]);
+      return rows;
     }
     if (selection.kind === "tcp") {
       return [

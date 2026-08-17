@@ -54,6 +54,12 @@ def intrinsics_glob() -> str:
     return key(CONFIG_PREFIX, "intrinsics", "**")
 
 
+def collision_disabled_pairs(rid: str) -> str:
+    """``config/arm/{rid}/collision/disabled_pairs`` — declared collision
+    exceptions (SRDF ``disable_collisions``): ``{pairs: [{a, b, reason?}]}``."""
+    return key(CONFIG_PREFIX, "arm", rid, "collision", "disabled_pairs")
+
+
 def cmd_set() -> str:
     return key(CONFIG_PREFIX, "cmd", "set")
 

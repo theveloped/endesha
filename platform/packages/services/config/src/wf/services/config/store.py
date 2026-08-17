@@ -1,10 +1,21 @@
-"""File-backed config store: frames, poses, and TCP definitions.
+"""File-backed config store: frames, poses, scene, TCPs, camera intrinsics
+and collision exceptions.
 
 Pure (no zenoh): the service layer wires it to queryables. Persistence is
 ``{root_dir}/store.yaml`` (atomic replace on every write) plus an append-only
 ``{root_dir}/history.jsonl`` revision log. Stored entries keep the value dict
-as written; the service-stamped ``revision``/``t`` live beside it and are
-merged into a FLAT dict on reads only.
+as written (after family normalization, see below); the service-stamped
+``revision``/``t`` live beside it and are merged into a FLAT dict on reads only.
+
+Normalization at ``set`` (so EVERY writer gets the same semantics):
+
+- frames — nominal vs calibrated (RFC §4): a manual write (``source`` !=
+  ``calibration``) sets ``nominal`` to the written pose and drops any stale
+  ``calibration``; a calibration write keeps the previous ``nominal`` (or the
+  previous effective pose when none was recorded) and stamps ``calibration.t``.
+- intrinsics — the legacy flat ``{fx,fy,cx,cy,w,h}`` is rewritten to the
+  ROS CameraInfo layout (RFC §5); legacy entries already on disk are migrated
+  once at load.
 """
 
 from __future__ import annotations
@@ -16,7 +27,15 @@ import threading
 
 import yaml
 
-from wf.core.frametree import FrameCycle, FrameDef, FrameTree, FrameUnknown
+from wf.core.camera_info import CameraInfo
+from wf.core.frametree import (
+    SOURCE_CALIBRATION,
+    SOURCE_MANUAL,
+    FrameCycle,
+    FrameDef,
+    FrameTree,
+    FrameUnknown,
+)
 from wf.core.scene import SceneObject
 from wf.core.time import now_ns
 
@@ -25,6 +44,7 @@ _POSES_PREFIX = "config/poses/"
 _SCENE_PREFIX = "config/scene/"
 _INTRINSICS_PREFIX = "config/intrinsics/"
 _TCP_RE = re.compile(r"^config/arm/[^/]+/tcp/.+")
+_COLLISION_RE = re.compile(r"^config/arm/[^/]+/collision/disabled_pairs$")
 _TCP_ROLES = ("tool", "sensor", "virtual")
 RESERVED_TCP_NAME = "flange"
 
@@ -49,6 +69,21 @@ class ConfigStore:
         if os.path.exists(self._store_path):
             with open(self._store_path, encoding="utf-8") as f:
                 self._entries = yaml.safe_load(f) or {}
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """One-time in-place upgrades of legacy shapes (rewrites the store)."""
+        changed = False
+        for key, entry in self._entries.items():
+            value = entry.get("value")
+            if key.startswith(_INTRINSICS_PREFIX) and CameraInfo.is_legacy(value):
+                try:
+                    entry["value"] = CameraInfo.from_wire(value).to_wire()
+                    changed = True
+                except ValueError:
+                    continue
+        if changed:
+            self._write_store()
 
     def get_matching(self, selector: str) -> dict[str, dict]:
         """Entries matching ``selector``; values FLAT (payload + revision/t).
@@ -77,6 +112,7 @@ class ConfigStore:
         with self._lock:
             self._validate(key, value)
             prev = self._entries.get(key)
+            value = self._normalize(key, value, prev["value"] if prev is not None else None)
             revision = prev["revision"] + 1 if prev is not None else 1
             t = now_ns()
             self._entries[key] = {"value": dict(value), "revision": revision, "t": t}
@@ -127,7 +163,7 @@ class ConfigStore:
 
     def _key_family(self, key: str) -> str | None:
         """Family of a config key: ``frame``/``pose``/``scene``/``tcp``/
-        ``intrinsics`` or None."""
+        ``intrinsics``/``collision`` or None."""
         if key.startswith(_FRAMES_PREFIX) and len(key) > len(_FRAMES_PREFIX):
             return "frame"
         if key.startswith(_POSES_PREFIX) and len(key) > len(_POSES_PREFIX):
@@ -138,7 +174,41 @@ class ConfigStore:
             return "intrinsics"
         if _TCP_RE.match(key):
             return "tcp"
+        if _COLLISION_RE.match(key):
+            return "collision"
         return None
+
+    # ── normalization ────────────────────────────────────────────────────
+
+    def _normalize(self, key: str, value: dict, prev: dict | None) -> dict:
+        family = self._key_family(key)
+        if family == "frame":
+            return self._normalize_frame(value, prev)
+        if family == "intrinsics":
+            return CameraInfo.from_wire(value).to_wire()
+        return dict(value)
+
+    @staticmethod
+    def _normalize_frame(value: dict, prev: dict | None) -> dict:
+        out = dict(value)
+        pose = {"xyz": [float(v) for v in out["xyz"]], "quat": [float(v) for v in out["quat"]]}
+        if out.get("source") == SOURCE_CALIBRATION:
+            if out.get("nominal") is None:
+                if prev is not None and prev.get("nominal") is not None:
+                    out["nominal"] = dict(prev["nominal"])
+                elif prev is not None:
+                    out["nominal"] = {"xyz": list(prev["xyz"]), "quat": list(prev["quat"])}
+                else:
+                    out["nominal"] = pose  # first ever write: nominal == calibrated
+            calibration = dict(out.get("calibration") or {})
+            calibration.setdefault("t", now_ns())
+            out["calibration"] = calibration
+        else:
+            out.setdefault("source", SOURCE_MANUAL)
+            if out.get("nominal") is None:
+                out["nominal"] = pose
+            out.pop("calibration", None)
+        return out
 
     def _validate(self, key: str, value: dict) -> None:
         if not isinstance(value, dict):
@@ -154,6 +224,8 @@ class ConfigStore:
             self._validate_intrinsics(value)
         elif family == "tcp":
             self._validate_tcp(key.rsplit("/", 1)[-1], value)
+        elif family == "collision":
+            self._validate_collision(value)
         else:
             raise ValueError(f"invalid_key:{key}")
 
@@ -164,6 +236,13 @@ class ConfigStore:
             raise ValueError("bad_frame:xyz must be 3 floats")
         if not _is_numbers(value.get("quat"), 4):
             raise ValueError("bad_frame:quat must be 4 floats [qx,qy,qz,qw]")
+        nominal = value.get("nominal")
+        if nominal is not None:
+            if not isinstance(nominal, dict) or not _is_numbers(nominal.get("xyz"), 3) or not _is_numbers(nominal.get("quat"), 4):
+                raise ValueError("bad_frame:nominal must be {xyz:[3], quat:[4]}")
+        calibration = value.get("calibration")
+        if calibration is not None and not isinstance(calibration, dict):
+            raise ValueError("bad_frame:calibration must be a mapping")
         frames = {
             k[len(_FRAMES_PREFIX) :]: FrameDef.from_wire(e["value"])
             for k, e in self._entries.items()
@@ -188,15 +267,25 @@ class ConfigStore:
             raise ValueError(f"bad_scene:{exc!r}") from exc
 
     def _validate_intrinsics(self, value: dict) -> None:
-        # Pinhole optics + frame size. fx/fy/cx/cy px (float >0); w/h px (int >0).
-        for k in ("fx", "fy", "cx", "cy"):
-            v = value.get(k)
-            if not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0:
-                raise ValueError(f"bad_intrinsics:{k} must be a positive number")
-        for k in ("w", "h"):
-            v = value.get(k)
-            if not isinstance(v, int) or isinstance(v, bool) or v <= 0:
-                raise ValueError(f"bad_intrinsics:{k} must be a positive int")
+        # ROS CameraInfo layout (K/D/width/height…) or the legacy flat pinhole
+        # shape; both parse through CameraInfo, which raises bad_intrinsics:*.
+        CameraInfo.from_wire(value)
+
+    def _validate_collision(self, value: dict) -> None:
+        pairs = value.get("pairs")
+        if not isinstance(pairs, list):
+            raise ValueError("bad_collision:pairs must be a list")
+        for i, pair in enumerate(pairs):
+            if not isinstance(pair, dict):
+                raise ValueError(f"bad_collision:pairs[{i}] must be a mapping {{a, b, reason?}}")
+            a, b = pair.get("a"), pair.get("b")
+            if not isinstance(a, str) or not a or not isinstance(b, str) or not b:
+                raise ValueError(f"bad_collision:pairs[{i}].a/b must be non-empty body names")
+            if a == b:
+                raise ValueError(f"bad_collision:pairs[{i}] a and b must differ")
+            reason = pair.get("reason")
+            if reason is not None and not isinstance(reason, str):
+                raise ValueError(f"bad_collision:pairs[{i}].reason must be a string")
 
     def _validate_tcp(self, name: str, value: dict) -> None:
         if name == RESERVED_TCP_NAME:

@@ -76,7 +76,9 @@ resources:
       mount_arm: r1
       mount_xyz: [0.08685228895, 0.06511, 0.029]
       mount_rpy_deg: [90.0, 0.0, 180.0]
-      # Physical camera optics shared by every simulated provider.
+      # Design optics for the simulated providers. When the config store has
+      # config/intrinsics/cam0 (ROS CameraInfo layout: K/D/width/height — the
+      # calibrated truth) the browser producer uses that instead of this block.
       render:
         width: 1280
         height: 800

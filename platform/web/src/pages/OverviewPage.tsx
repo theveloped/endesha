@@ -38,12 +38,14 @@ import {
   RID,
 } from "../lib/config";
 import { BASE_FRAME, frameWorldMatrix } from "../lib/framemath";
+import { intrinsicsFromCameraInfo } from "../lib/messages";
 import type {
   ArmStatus,
   FlangeState,
   FrameDef,
   FrameHeader,
   Intrinsics,
+  CameraInfo,
   JointState,
   Pose,
   SceneObject,
@@ -142,7 +144,7 @@ export default function OverviewPage({
           })),
         );
         const cam = intr.find((r) => r.key === configIntrinsics());
-        setIntrinsics(cam !== undefined ? (cam.value as Intrinsics) : null);
+        setIntrinsics(cam !== undefined ? intrinsicsFromCameraInfo(cam.value as CameraInfo) : null);
       } catch (e) {
         console.error("overview config fetch failed:", e);
       }

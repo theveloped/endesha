@@ -11,6 +11,7 @@ from wf.contracts.camera2d.messages import (
     ProducerFrame,
     ProducerGrant,
 )
+from wf.core.camera_info import CameraInfo
 from wf.core.codec import decode, encode
 from wf.core.lease import FencedLease
 from wf.core.log import get_logger
@@ -216,18 +217,37 @@ class BrowserCameraBackend:
         }
         self._owner_pub.put(encode(payload))
 
+    def _optics(self) -> dict:
+        """Pinhole optics for the browser producer: ``config/intrinsics/{cid}``
+        (CameraInfo layout, the calibrated truth) when the store has it, else
+        the cell ``render`` block (design defaults)."""
+        render = self.params.get("render", {})
+        fallback = {
+            "w": int(render.get("width", 1280)),
+            "h": int(render.get("height", 800)),
+            "fx": float(render.get("fx", 900.0)),
+            "fy": float(render.get("fy", 900.0)),
+        }
+        session = getattr(self, "session", None)
+        cid = getattr(self, "cid", None)
+        if session is None or cid is None:
+            return fallback
+        try:
+            for reply in session.get(f"config/intrinsics/{cid}", timeout=0.5):
+                if reply.ok is not None:
+                    info = CameraInfo.from_wire(decode(reply.ok.payload))
+                    return {"w": info.width, "h": info.height, "fx": info.fx, "fy": info.fy}
+        except Exception:
+            _log.debug("intrinsics fetch failed; using render block", exc_info=True)
+        return fallback
+
     def _demand_payload(self) -> dict:
         stream = self.active_stream()
         render = self.params.get("render", {})
         return {
             "t": now_ns(),
             "stream": None if stream is None else stream.to_wire(),
-            "intrinsics": {
-                "w": int(render.get("width", 1280)),
-                "h": int(render.get("height", 800)),
-                "fx": float(render.get("fx", 900.0)),
-                "fy": float(render.get("fy", 900.0)),
-            },
+            "intrinsics": self._optics(),
             "mount_xyz": list(
                 render.get(
                     "mount_xyz",

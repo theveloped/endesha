@@ -215,12 +215,16 @@ export interface ControlAck {
 
 export interface FrameDef {
   parent: string;
-  xyz: number[];
+  xyz: number[]; // EFFECTIVE pose (calibrated when a calibration exists)
   quat: number[];
-  source?: string;
+  source?: string; // "manual" | "calibration" | ...
   meta?: Record<string, unknown>;
   revision?: number;
   t?: WireTimestamp;
+  /** Design value; set by the store on every manual write, kept by calibration writes. */
+  nominal?: { xyz: number[]; quat: number[] };
+  /** Present iff the effective pose came from a calibration. */
+  calibration?: { t?: WireTimestamp; method?: string; residual?: number; by?: string; [k: string]: unknown };
 }
 
 export interface PoseDef {
@@ -364,8 +368,7 @@ export interface FrameHeader {
   pose?: Pose;
 }
 
-// camera intrinsics config doc (config/intrinsics/{cid}); served flat with
-// the store's revision/t stamped on.
+// Pinhole view used by the renderers (derived from CameraInfo).
 export interface Intrinsics {
   fx: number;
   fy: number;
@@ -375,6 +378,31 @@ export interface Intrinsics {
   h: number;
   revision?: number;
   t?: WireTimestamp;
+}
+
+// config/intrinsics/{cid} in the ROS sensor_msgs/CameraInfo layout
+// (wf/core/camera_info.py); served flat with the store's revision/t stamped on.
+export interface CameraInfo {
+  width: number;
+  height: number;
+  distortion_model: string;
+  D: number[];
+  K: number[]; // 3x3 row-major: [fx,0,cx, 0,fy,cy, 0,0,1]
+  R?: number[];
+  P?: number[];
+  revision?: number;
+  t?: WireTimestamp;
+}
+
+/** Pinhole view of a CameraInfo doc (also accepts the legacy flat shape). */
+export function intrinsicsFromCameraInfo(doc: CameraInfo | Intrinsics): Intrinsics {
+  if ("K" in doc && Array.isArray(doc.K)) {
+    return {
+      fx: doc.K[0], fy: doc.K[4], cx: doc.K[2], cy: doc.K[5],
+      w: doc.width, h: doc.height, revision: doc.revision, t: doc.t,
+    };
+  }
+  return doc as Intrinsics;
 }
 
 export interface StreamParams {

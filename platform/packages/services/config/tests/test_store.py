@@ -212,13 +212,43 @@ def test_delete_persists(tmp_path):
 _INTRINSICS = {"fx": 900.0, "fy": 900.0, "cx": 639.5, "cy": 399.5, "w": 1280, "h": 800}
 
 
-def test_intrinsics_set_and_get(tmp_path):
+_CAMERA_INFO = {
+    "width": 1280, "height": 800, "distortion_model": "plumb_bob",
+    "D": [0.1, -0.2, 0.0, 0.0, 0.0],
+    "K": [900.0, 0.0, 639.5, 0.0, 900.0, 399.5, 0.0, 0.0, 1.0],
+}
+
+
+def test_intrinsics_legacy_shape_is_normalized_to_camera_info(tmp_path):
     store = ConfigStore(str(tmp_path))
     assert store.set("config/intrinsics/cam0", dict(_INTRINSICS)) == 1
     flat = store.get_matching("config/intrinsics/cam0")["config/intrinsics/cam0"]
-    assert flat["fx"] == 900.0
-    assert flat["w"] == 1280
+    assert flat["width"] == 1280 and flat["height"] == 800
+    assert flat["K"][0] == 900.0 and flat["K"][2] == 639.5 and flat["K"][5] == 399.5
+    assert flat["D"] == [] and flat["distortion_model"] == "plumb_bob"
+    assert "fx" not in flat
     assert flat["revision"] == 1
+
+
+def test_intrinsics_camera_info_round_trip_and_migration(tmp_path):
+    store = ConfigStore(str(tmp_path))
+    assert store.set("config/intrinsics/cam0", dict(_CAMERA_INFO)) == 1
+    flat = store.get_matching("config/intrinsics/cam0")["config/intrinsics/cam0"]
+    assert flat["D"] == [0.1, -0.2, 0.0, 0.0, 0.0]
+    assert flat["R"] == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    # a legacy entry already on disk is migrated once at load
+    import yaml
+    path = tmp_path / "store.yaml"
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["config/intrinsics/old"] = {"value": dict(_INTRINSICS), "revision": 3, "t": 5}
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    reloaded = ConfigStore(str(tmp_path))
+    old = reloaded.get_matching("config/intrinsics/old")["config/intrinsics/old"]
+    assert old["K"][4] == 900.0 and old["revision"] == 3
+    with pytest.raises(ValueError, match="^bad_intrinsics:distortion_model"):
+        store.set("config/intrinsics/cam0", dict(_CAMERA_INFO, distortion_model="fisheye_v9"))
+    with pytest.raises(ValueError, match="^bad_intrinsics:K"):
+        store.set("config/intrinsics/cam0", dict(_CAMERA_INFO, K=[1, 2, 3]))
 
 
 def test_intrinsics_empty_glob_is_empty(tmp_path):
@@ -236,5 +266,69 @@ def test_intrinsics_rejects_nonpositive_fx(tmp_path):
 def test_intrinsics_rejects_float_w(tmp_path):
     store = ConfigStore(str(tmp_path))
     bad = dict(_INTRINSICS, w=1280.5)
-    with pytest.raises(ValueError, match="^bad_intrinsics:w"):
+    with pytest.raises(ValueError, match="^bad_intrinsics:width"):
         store.set("config/intrinsics/cam0", bad)
+
+
+# ── frames: nominal vs calibrated ─────────────────────────────────────────
+
+
+def test_manual_frame_write_sets_nominal_and_drops_calibration(tmp_path):
+    store = ConfigStore(str(tmp_path))
+    store.set("config/frames/tray", {"parent": "world", "xyz": [1.0, 0.0, 0.0], "quat": [0, 0, 0, 1]})
+    flat = store.get_matching("config/frames/tray")["config/frames/tray"]
+    assert flat["source"] == "manual"
+    assert flat["nominal"] == {"xyz": [1.0, 0.0, 0.0], "quat": [0.0, 0.0, 0.0, 1.0]}
+    assert "calibration" not in flat
+
+
+def test_calibration_write_keeps_nominal_and_stamps_calibration(tmp_path):
+    store = ConfigStore(str(tmp_path))
+    store.set("config/frames/tray", {"parent": "world", "xyz": [1.0, 0.0, 0.0], "quat": [0, 0, 0, 1]})
+    store.set(
+        "config/frames/tray",
+        {"parent": "world", "xyz": [1.002, 0.001, 0.0], "quat": [0, 0, 0, 1],
+         "source": "calibration", "calibration": {"method": "board", "residual": 0.0004}},
+    )
+    flat = store.get_matching("config/frames/tray")["config/frames/tray"]
+    assert flat["xyz"] == [1.002, 0.001, 0.0]                      # effective = calibrated
+    assert flat["nominal"]["xyz"] == [1.0, 0.0, 0.0]                # design value kept
+    assert flat["calibration"]["method"] == "board" and flat["calibration"]["t"] > 0
+    from wf.core.frametree import FrameDef
+    fd = FrameDef.from_wire(flat)
+    dx, da = fd.drift()
+    assert abs(dx - (0.002**2 + 0.001**2) ** 0.5) < 1e-9 and da < 1e-9
+    # a later manual re-teach becomes the new nominal and clears the calibration
+    store.set("config/frames/tray", {"parent": "world", "xyz": [1.1, 0.0, 0.0], "quat": [0, 0, 0, 1]})
+    flat = store.get_matching("config/frames/tray")["config/frames/tray"]
+    assert flat["nominal"]["xyz"] == [1.1, 0.0, 0.0] and "calibration" not in flat
+
+
+def test_calibration_write_of_new_frame_uses_itself_as_nominal(tmp_path):
+    store = ConfigStore(str(tmp_path))
+    store.set("config/frames/new", {"parent": "world", "xyz": [0.5, 0, 0], "quat": [0, 0, 0, 1], "source": "calibration"})
+    flat = store.get_matching("config/frames/new")["config/frames/new"]
+    assert flat["nominal"]["xyz"] == [0.5, 0.0, 0.0] and "calibration" in flat
+
+
+def test_frame_rejects_bad_nominal(tmp_path):
+    store = ConfigStore(str(tmp_path))
+    with pytest.raises(ValueError, match="^bad_frame:nominal"):
+        store.set("config/frames/x", {"parent": "world", "xyz": [0, 0, 0], "quat": [0, 0, 0, 1], "nominal": {"xyz": [1]}})
+
+
+# ── collision exceptions ──────────────────────────────────────────────────
+
+
+def test_collision_disabled_pairs_family(tmp_path):
+    store = ConfigStore(str(tmp_path))
+    key = "config/arm/r1/collision/disabled_pairs"
+    assert store.set(key, {"pairs": [{"a": "wrist3_Link", "b": "gripper", "reason": "rigid mount"}]}) == 1
+    flat = store.get_matching("config/arm/**")[key]
+    assert flat["pairs"][0]["a"] == "wrist3_Link"
+    with pytest.raises(ValueError, match="^bad_collision:pairs must be a list"):
+        store.set(key, {"pairs": "x"})
+    with pytest.raises(ValueError, match="must differ"):
+        store.set(key, {"pairs": [{"a": "x", "b": "x"}]})
+    with pytest.raises(ValueError, match="^invalid_key"):
+        store.set("config/arm/r1/collision/other", {"pairs": []})

@@ -138,6 +138,32 @@ class CollisionModel:
         self._flange_geom_id = next(
             gid for gid in self._robot_geom_ids if self._link_name[gid] == _FLANGE_LINK
         )
+        # Declared exceptions (SRDF ``disable_collisions`` semantics; RFC §6):
+        # body-name pairs an operator whitelisted, e.g. a tool that legitimately
+        # touches a link, or a link pair the URDF hulls make touch. Names are
+        # robot link names and scene object names. Merged on top of the
+        # computed adjacency rule at every query.
+        self._disabled: set[frozenset[str]] = set()
+
+    def set_disabled_pairs(self, pairs) -> None:
+        """Replace the declared collision exceptions with ``[(a, b), ...]``."""
+        self._disabled = {frozenset((str(a), str(b))) for a, b in pairs if a != b}
+
+    @property
+    def disabled_pairs(self) -> list[tuple[str, str]]:
+        return sorted(tuple(sorted(p)) for p in self._disabled)
+
+    def _remove_disabled(self, geom, scene_names: dict[int, str]) -> None:
+        if not self._disabled:
+            return
+        doomed = [
+            pin.CollisionPair(cp.first, cp.second)
+            for cp in geom.collisionPairs
+            if frozenset((self._name_of(cp.first, scene_names), self._name_of(cp.second, scene_names)))
+            in self._disabled
+        ]
+        for cp in doomed:
+            geom.removeCollisionPair(cp)
 
     def _link_for(self, geom_id: int) -> str:
         """Robot link name owning geometry object ``geom_id``."""
@@ -236,6 +262,7 @@ class CollisionModel:
                 geom.addCollisionPair(pin.CollisionPair(tid, link_id))
             for wid in world_ids:
                 geom.addCollisionPair(pin.CollisionPair(tid, wid))
+        self._remove_disabled(geom, scene_names)
         return geom, scene_names
 
     def check_collision(

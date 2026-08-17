@@ -64,6 +64,7 @@ from wf.world_model.trajectory import (
 )
 from wf.world_model.validate import (
     TCP_FLANGE,
+    fetch_disabled_pairs,
     fetch_tcp,
     resolve_goal,
     tcp_transform,
@@ -481,6 +482,15 @@ class ArmCore:
         with self._jog_lock:
             return self._jog_active
 
+    def _refresh_collision_exceptions(self) -> None:
+        """Pick up operator-declared collision exceptions (SRDF-style
+        ``disable_collisions``) from the config store; a failed fetch keeps
+        the last good set."""
+        try:
+            self.collision.set_disabled_pairs(fetch_disabled_pairs(self.session, self.rid, timeout_s=1.0))
+        except Exception:
+            _log.debug("collision exceptions refresh failed", exc_info=True)
+
     # ── execute_path action ──────────────────────────────────────────────
 
     def _accept_execute_path(self, goal: dict) -> str | None:
@@ -500,6 +510,7 @@ class ArmCore:
         # the last good layer.
         self._live_frames.refresh_static(self.session)
         self._live_scene.refresh_static(self.session)
+        self._refresh_collision_exceptions()
         tree = self._live_frames.snapshot()
         with self._tcp_lock:
             tcp_name, tcp_T = self._active_tcp

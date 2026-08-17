@@ -48,20 +48,56 @@ class FrameLowConfidence(FrameError):
     """Stub per design §4.5 — unused until dynamic frames."""
 
 
+SOURCE_MANUAL = "manual"
+SOURCE_CALIBRATION = "calibration"
+
+
 @dataclass
 class FrameDef:
-    """One static frame: pose of this frame in its parent."""
+    """One static frame: pose of this frame in its parent.
+
+    ``xyz``/``quat`` are the EFFECTIVE pose (what the tree resolves — backwards
+    compatible everywhere). ``nominal`` (``{xyz, quat}``) is the design value:
+    a manual write sets both; a calibration write updates the effective pose,
+    keeps ``nominal`` and records ``calibration`` (``{t, method, residual,
+    by}``), so drift stays visible and "reset to nominal" is possible
+    (RFC §4). The config store enforces that rule for every writer.
+    """
 
     parent: str
     xyz: list[float]
     quat: list[float]  # [qx, qy, qz, qw]
-    source: str = "manual"
+    source: str = SOURCE_MANUAL
     meta: dict = field(default_factory=dict)
     revision: int = 0
     t: int = 0
+    nominal: dict | None = None
+    calibration: dict | None = None
+
+    @property
+    def is_calibrated(self) -> bool:
+        return self.calibration is not None
+
+    def nominal_pose(self) -> tuple[list[float], list[float]]:
+        """``(xyz, quat)`` of the design value; the effective pose when no
+        nominal was ever recorded."""
+        if self.nominal is None:
+            return list(self.xyz), list(self.quat)
+        return list(self.nominal["xyz"]), list(self.nominal["quat"])
+
+    def drift(self) -> tuple[float, float]:
+        """``(translation_m, angle_rad)`` between nominal and effective pose."""
+        nx, nq = self.nominal_pose()
+        dx = float(np.linalg.norm(np.asarray(self.xyz) - np.asarray(nx)))
+        a = np.asarray(nq, dtype=np.float64)
+        b = np.asarray(self.quat, dtype=np.float64)
+        a /= np.linalg.norm(a)
+        b /= np.linalg.norm(b)
+        dot = min(1.0, abs(float(np.dot(a, b))))
+        return dx, 2.0 * float(np.arccos(dot))
 
     def to_wire(self) -> dict:
-        return {
+        d = {
             "parent": self.parent,
             "xyz": [float(v) for v in self.xyz],
             "quat": [float(v) for v in self.quat],
@@ -70,17 +106,28 @@ class FrameDef:
             "revision": int(self.revision),
             "t": int(self.t),
         }
+        if self.nominal is not None:
+            d["nominal"] = {
+                "xyz": [float(v) for v in self.nominal["xyz"]],
+                "quat": [float(v) for v in self.nominal["quat"]],
+            }
+        if self.calibration is not None:
+            d["calibration"] = dict(self.calibration)
+        return d
 
     @classmethod
     def from_wire(cls, d: dict) -> "FrameDef":
+        nominal = d.get("nominal")
         return cls(
             parent=d["parent"],
             xyz=list(d["xyz"]),
             quat=list(d["quat"]),
-            source=d.get("source", "manual"),
+            source=d.get("source", SOURCE_MANUAL),
             meta=dict(d.get("meta") or {}),
             revision=int(d.get("revision", 0)),
             t=int(d.get("t", 0)),
+            nominal=None if nominal is None else {"xyz": list(nominal["xyz"]), "quat": list(nominal["quat"])},
+            calibration=None if d.get("calibration") is None else dict(d["calibration"]),
         )
 
 
