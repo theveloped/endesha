@@ -17,8 +17,10 @@ import type {
   DeviceEntry,
   JointState,
   PoseDef,
+  ProgramLogLine,
   ProgramState,
   TransitionEvent,
+  WaitingFor,
 } from "../lib/messages";
 import { unitAccepts, unitLabel, unitTone } from "../lib/unit";
 import type { ProgramView } from "../runtime/useProgram";
@@ -30,6 +32,7 @@ interface ProgramsPageProps {
   program: ProgramView;
   wsConnected: boolean;
   jointsRef: RefObject<JointState | null>;
+  onEdit: (programName: string | null) => void;
 }
 
 const COMMAND_LABEL: Record<UnitCommand, string> = {
@@ -125,6 +128,7 @@ function CatalogCard({
   state,
   onError,
   onRefresh,
+  onEdit,
 }: {
   session: Session | null;
   realm: string;
@@ -133,6 +137,7 @@ function CatalogCard({
   state: ProgramState | null;
   onError: (message: string | null) => void;
   onRefresh: () => void;
+  onEdit: (programName: string | null) => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [bindings, setBindings] = useState<Record<string, string>>({});
@@ -183,7 +188,10 @@ function CatalogCard({
         <CardTitle className="flex items-center gap-2">
           Programs
           <span className="text-xs font-normal text-muted-foreground">deploy/programs</span>
-          <Button variant="ghost" size="sm" className="ml-auto h-7 px-2 text-xs" onClick={onRefresh}>
+          <Button variant="outline" size="sm" className="ml-auto h-7 px-2 text-xs" onClick={() => onEdit(null)} title="Open the program editor">
+            new / edit
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onRefresh}>
             rescan
           </Button>
         </CardTitle>
@@ -220,7 +228,12 @@ function CatalogCard({
         {entry !== null && (
           <div className="space-y-2 rounded-md border border-border/60 p-2">
             {entry.error !== null ? (
-              <pre className="whitespace-pre-wrap text-xs text-destructive">{entry.error}</pre>
+              <>
+                <pre className="whitespace-pre-wrap text-xs text-destructive">{entry.error}</pre>
+                <Button variant="outline" size="sm" onClick={() => onEdit(entry.name)}>
+                  Fix in editor
+                </Button>
+              </>
             ) : (
               <>
                 {entry.doc && <p className="text-xs text-muted-foreground">{entry.doc}</p>}
@@ -259,18 +272,107 @@ function CatalogCard({
                     ))}
                   </div>
                 )}
-                <Button
-                  size="sm"
-                  className="cmd"
-                  disabled={!canLoad || busy || session === null}
-                  onClick={() => void load()}
-                  title={canLoad ? "Load into the unit" : "Unit must be Idle or Stopped to load"}
-                >
-                  Load {entry.name}
-                </Button>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    className="cmd"
+                    disabled={!canLoad || busy || session === null}
+                    onClick={() => void load()}
+                    title={canLoad ? "Load into the unit" : "Unit must be Idle or Stopped to load"}
+                  >
+                    Load {entry.name}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => onEdit(entry.name)} title="Open in the editor">
+                    Edit
+                  </Button>
+                </div>
               </>
             )}
           </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function describeWait(w: WaitingFor): string {
+  switch (w.kind) {
+    case "channel":
+      return `${w.role}.${w.channel} ${w.edge} → ${w.event}${w.target ? ` (→ ${w.target})` : ""}`;
+    case "timer":
+      return `after ${w.seconds}s in ${w.state} → ${w.event}${w.target ? ` (→ ${w.target})` : ""}`;
+    default:
+      return `event "${w.event}"${w.target ? ` (→ ${w.target})` : ""} — from an action's emit() or "Send event"`;
+  }
+}
+
+function WaitingForCard({ state, alive }: { state: ProgramState | null; alive: boolean }) {
+  if (!alive || state === null || state.unit !== "execute") return null;
+  const waits = state.waiting_for ?? [];
+  const running = state.actions.length > 0;
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          {running ? "Running" : "Waiting for"}
+          <span className="text-xs font-normal text-muted-foreground">
+            {running
+              ? `action${state.actions.length > 1 ? "s" : ""} ${state.actions.join(", ")} in progress`
+              : "the program is idle in its current state until one of these happens"}
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {waits.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No outgoing transition from {state.program_states.join(", ") || "the current state"} — is it final?
+          </p>
+        ) : (
+          <ul className="space-y-0.5 font-mono text-xs">
+            {waits.map((w, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <Badge color={w.kind === "channel" ? "emerald" : w.kind === "timer" ? "sky" : "zinc"} className="mt-0.5">
+                  {w.kind}
+                </Badge>
+                <span>{describeWait(w)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {!running && waits.some((w) => w.kind === "channel") && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            In sim, drive an input from the IO tool (force) or <span className="font-mono">wfctl dio-force &lt;channel&gt; on</span>.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function LogCard({ log }: { log: ProgramLogLine[] }) {
+  const items = useMemo(() => [...log].reverse().slice(0, 80), [log]);
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>Log</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {items.length === 0 ? (
+          <p className="text-sm text-muted-foreground">nothing yet — programs write here with self.log(...)</p>
+        ) : (
+          <ul className="max-h-56 space-y-0.5 overflow-y-auto font-mono text-xs">
+            {items.map((l, i) => (
+              <li key={`${String(l.t)}-${i}`} className="flex gap-2">
+                <span className="text-muted-foreground">{formatTime(l.t)}</span>
+                <span className={cn("w-14 shrink-0", l.source === "runner" ? "text-sky-600 dark:text-sky-400" : "text-emerald-600 dark:text-emerald-400")}>
+                  {l.source}
+                </span>
+                <span className={cn(l.level === "error" && "text-destructive", l.level === "warning" && "text-amber-600 dark:text-amber-400")}>
+                  {l.message}
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
       </CardContent>
     </Card>
@@ -532,7 +634,7 @@ function TransitionsCard({ transitions }: { transitions: TransitionEvent[] }) {
   );
 }
 
-export default function ProgramsPage({ session, realm, devices, program, wsConnected, jointsRef }: ProgramsPageProps) {
+export default function ProgramsPage({ session, realm, devices, program, wsConnected, jointsRef, onEdit }: ProgramsPageProps) {
   const [error, setError] = useState<string | null>(null);
   const alive = wsConnected && program.alive;
   return (
@@ -548,7 +650,9 @@ export default function ProgramsPage({ session, realm, devices, program, wsConne
           {error !== null && <p className="text-sm text-destructive">{error}</p>}
         </CardContent>
       </Card>
+      <WaitingForCard state={program.state} alive={alive} />
       <StateCard state={program.state} alive={alive} />
+      <LogCard log={program.log} />
       <CatalogCard
         session={session}
         realm={realm}
@@ -557,6 +661,7 @@ export default function ProgramsPage({ session, realm, devices, program, wsConne
         state={program.state}
         onError={setError}
         onRefresh={program.refreshCatalog}
+        onEdit={onEdit}
       />
       {program.state?.program && (
         <ProgramPosesCard session={session} programName={program.state.program} jointsRef={jointsRef} onError={setError} />

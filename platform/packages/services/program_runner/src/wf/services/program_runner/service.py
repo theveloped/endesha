@@ -32,12 +32,15 @@ Program events come from ``self.emit`` (action threads), declarative
 from __future__ import annotations
 
 import argparse
+import collections
 import concurrent.futures
 import os
 import queue
+import re
 import threading
 import time
 import uuid
+from pathlib import Path
 
 import zenoh
 
@@ -50,9 +53,14 @@ from wf.contracts.program.keys import UNIT_COMMANDS
 from wf.contracts.program.messages import (
     Ack,
     Catalog,
+    CatalogEntry,
     EventRequest,
     LoadRequest,
+    LogLine,
     ProgramState,
+    SaveReply,
+    SaveRequest,
+    SourceReply,
     TransitionEvent,
 )
 from wf.contracts.supervisor import keys as sup_keys
@@ -71,6 +79,8 @@ _LEASE_RENEW_S = 10.0
 _STATE_TICK_S = 1.0
 _ACTION_JOIN_S = 3.0
 _DRIVER_CALL_TIMEOUT_S = 10.0
+_LOG_KEEP = 300
+_FILE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.py$")
 
 
 class _Loaded:
@@ -134,6 +144,10 @@ class ProgramRunner:
         self._lease_thread: threading.Thread | None = None
         self._tick_thread: threading.Thread | None = None
 
+        self._log_lines: collections.deque = collections.deque(maxlen=_LOG_KEEP)
+        self._pub_log = session.declare_publisher(
+            keys.log(realm), congestion_control=zenoh.CongestionControl.DROP
+        )
         self._pub_state = session.declare_publisher(keys.state(realm))
         self._pub_catalog = session.declare_publisher(keys.catalog(realm))
         self._pub_transitions = session.declare_publisher(
@@ -162,6 +176,10 @@ class ProgramRunner:
             self.session.declare_queryable(keys.cmd_load(self.realm), self._on_load),
             self.session.declare_queryable(keys.state(self.realm), self._on_state_query),
             self.session.declare_queryable(keys.cmd_event(self.realm), self._on_event),
+            self.session.declare_queryable(keys.cmd_source(self.realm), self._on_source),
+            self.session.declare_queryable(keys.cmd_save(self.realm), self._on_save),
+            self.session.declare_queryable(keys.cmd_delete(self.realm), self._on_delete),
+            self.session.declare_queryable(keys.log(self.realm), self._on_log_query),
         ] + [
             self.session.declare_queryable(keys.cmd(self.realm, c), self._make_cmd_handler(c))
             for c in UNIT_COMMANDS
@@ -286,6 +304,32 @@ class ProgramRunner:
 
     # ── state publishing ─────────────────────────────────────────────────
 
+    def _waiting_for(self, program: Program | None) -> list[dict]:
+        """What would move the program on from its active states (debug aid)."""
+        if program is None:
+            return []
+        active = set(program.active_state_ids)
+        out: list[dict] = []
+        try:
+            accepted: dict[str, str] = {}
+            for st in program.configuration:
+                for tr in st.transitions:
+                    for ev in tr.events:
+                        eid = getattr(ev, "id", str(ev))
+                        accepted.setdefault(eid, getattr(tr.target, "id", str(tr.target)))
+            for trig in program.triggers:
+                if trig.kind == "channel" and trig.event in accepted:
+                    out.append({"kind": "channel", "event": trig.event, "target": accepted[trig.event], **trig.params})
+                elif trig.kind == "timer" and trig.params.get("state") in active:
+                    out.append({"kind": "timer", "event": trig.event, "target": accepted.get(trig.event, ""), **trig.params})
+            covered = {w["event"] for w in out}
+            for eid, target in sorted(accepted.items()):
+                if eid not in covered:
+                    out.append({"kind": "event", "event": eid, "target": target})
+        except Exception:  # noqa: BLE001 - never let a debug aid break state publishing
+            _log.debug("waiting_for failed", exc_info=True)
+        return out
+
     def _state_msg(self) -> ProgramState:
         program = self._program
         loaded = self._loaded
@@ -300,7 +344,107 @@ class ProgramRunner:
             bindings={} if loaded is None else dict(loaded.bindings),
             client_id=self._client_id,
             cycle=self._cycle,
+            waiting_for=self._waiting_for(program) if self.unit.state_id in EXECUTING_STATES else [],
         )
+
+    # ── program log ──────────────────────────────────────────────────────
+
+    def _emit_log(self, level: str, message: str, source: str | None = None) -> None:
+        line = LogLine(
+            t=now_ns(),
+            level=level,
+            source=source or (self._loaded.name if self._loaded is not None else "runner"),
+            message=message,
+        )
+        self._log_lines.append(line)
+        try:
+            self._pub_log.put(encode(line.to_wire()))
+        except Exception:
+            _log.debug("log publish failed", exc_info=True)
+
+    def _on_log_query(self, query) -> None:
+        query.reply(str(query.key_expr), encode({"lines": [ln.to_wire() for ln in self._log_lines]}))
+
+    # ── program sources (editor) ─────────────────────────────────────────
+
+    def _resolve_file(self, name_or_file: str) -> Path | None:
+        """A program's file by catalog name, or a bare ``x.py`` file name."""
+        root = Path(self.programs_dir)
+        for d in self._catalog:
+            if d.entry.name == name_or_file and d.entry.path:
+                return Path(d.entry.path)
+        if _FILE_RE.match(name_or_file):
+            return root / name_or_file
+        return None
+
+    def _on_source(self, query) -> None:
+        try:
+            req = decode(query.payload) if query.payload is not None else {}
+            name = str(req.get("name") or req.get("file") or "")
+            path = self._resolve_file(name)
+            if path is None or not path.is_file():
+                reply = SourceReply(ok=False, name=name, error=f"unknown_program:{name}")
+            else:
+                entry = next((d.entry for d in self._catalog if d.entry.path == str(path)), None)
+                reply = SourceReply(ok=True, name=entry.name if entry else path.stem, path=str(path),
+                                    text=path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            reply = SourceReply(ok=False, error=f"source_failed:{exc!r}")
+        query.reply(str(query.key_expr), encode(reply.to_wire()))
+
+    def _on_save(self, query) -> None:
+        try:
+            req = SaveRequest.from_wire(decode(query.payload))
+        except Exception as exc:
+            query.reply(str(query.key_expr), encode(SaveReply(ok=False, error=f"bad_request:{exc!r}").to_wire()))
+            return
+        try:
+            reply = self._call(lambda: self._save(req))
+        except Exception as exc:  # noqa: BLE001
+            reply = SaveReply(ok=False, error=f"save_failed:{exc!r}")
+        query.reply(str(query.key_expr), encode(reply.to_wire()))
+
+    def _save(self, req: SaveRequest) -> SaveReply:
+        if not _FILE_RE.match(req.file):
+            return SaveReply(ok=False, error="bad_file:expected a bare module name like my_program.py")
+        root = Path(self.programs_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / req.file
+        tmp = path.with_suffix(".py.tmp")
+        tmp.write_text(req.text, encoding="utf-8")
+        os.replace(tmp, path)
+        self._rescan()
+        entry = next((d.entry for d in self._catalog if d.entry.path == str(path)), None)
+        if entry is None:
+            entry = CatalogEntry(name=path.stem, path=str(path), error="not discovered after save")
+        self._emit_log("info" if entry.error is None else "warning",
+                       f"saved {req.file}" + ("" if entry.error is None else f" (import error: {entry.error.splitlines()[-1]})"),
+                       source="runner")
+        return SaveReply(ok=True, entry=entry)
+
+    def _on_delete(self, query) -> None:
+        try:
+            req = decode(query.payload) if query.payload is not None else {}
+            name = str(req.get("name") or req.get("file") or "")
+            err = self._call(lambda: self._delete(name))
+        except Exception as exc:  # noqa: BLE001
+            err = f"delete_failed:{exc!r}"
+        query.reply(str(query.key_expr), encode(Ack(ok=err is None, error=err).to_wire()))
+
+    def _delete(self, name: str) -> str | None:
+        if self._loaded is not None and self._loaded.name == name and self.unit.state_id not in ("idle", "stopped"):
+            return f"invalid_in_state:{self.unit.state_id}"
+        path = self._resolve_file(name)
+        if path is None or not path.is_file():
+            return f"unknown_program:{name}"
+        path.unlink()
+        if self._loaded is not None and self._loaded.name == name:
+            self._teardown_program("deleted")
+            self._loaded = None
+        self._rescan()
+        self._emit_log("info", f"deleted {path.name}", source="runner")
+        self._publish_state()
+        return None
 
     def _publish_state(self) -> None:
         try:
@@ -416,10 +560,11 @@ class ProgramRunner:
             return "no_program_loaded"
         if not self.unit.accepts(command):
             return f"invalid_in_state:{self.unit.state_id}"
-        if command == "abort":
+        if command in ("abort", "stop"):
             self._reason = str(data.get("reason") or "operator")
-        elif command == "stop":
-            self._reason = str(data.get("reason") or "operator")
+            self._emit_log("warning" if command == "abort" else "info", f"{command}: {self._reason}", source="runner")
+        else:
+            self._emit_log("info", f"command: {command}", source="runner")
         self.unit.send(command)
         return None
 
@@ -457,6 +602,7 @@ class ProgramRunner:
     def log(self, message: str) -> None:
         name = self._loaded.name if self._loaded is not None else "?"
         _log.info("[%s] %s", name, message)
+        self._emit_log("info", message, source=name)
 
     # ── program event dispatch (driver thread) ───────────────────────────
 
@@ -504,10 +650,12 @@ class ProgramRunner:
         except ProgramError as exc:
             reason = f"action_error:{state_id}:{exc}"
             _log.warning("action %s failed: %s", state_id, exc)
+            self._emit_log("error", reason)
             self._post(lambda: self._abort(reason))
         except Exception as exc:  # noqa: BLE001
             reason = f"action_crash:{state_id}:{exc!r}"
             _log.exception("action %s crashed", state_id)
+            self._emit_log("error", reason)
             self._post(lambda: self._abort(reason))
         finally:
             ctx._unbind()
@@ -631,6 +779,7 @@ class ProgramRunner:
             _log.warning("abort (%s) ignored in state %s", reason, self.unit.state_id)
             return
         self._reason = reason
+        self._emit_log("warning", f"abort: {reason}", source="runner")
         self.unit.send("abort")
 
     # ── lease ────────────────────────────────────────────────────────────
@@ -702,6 +851,7 @@ class ProgramRunner:
             self.unit.send("abort")
             return
         self._cycle += 1
+        self._emit_log("info", f"started {loaded.name} cycle {self._cycle} bindings={loaded.bindings} params={loaded.params}", source="runner")
         self.unit.send("sc")
 
     def on_enter_execute(self, source=None, **kwargs) -> None:

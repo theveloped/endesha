@@ -33,7 +33,7 @@ from wf.contracts.control import keys as control_keys
 from wf.contracts.dio import keys as dio_keys
 from wf.contracts.program import keys as program_keys
 from wf.contracts.program.messages import Ack as ProgramAck
-from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, ProgramState
+from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, LogLine, ProgramState
 from wf.contracts.dio.messages import ForceChannel, SetChannel
 from wf.contracts.dio.messages import Ack as DioAck
 from wf.contracts.control.messages import AcquireControl, ControlAck
@@ -396,6 +396,13 @@ def cmd_program_state(session, args) -> int:
         if st.reason:
             line += f" reason={st.reason}"
         print(line)
+        for w in st.waiting_for:
+            if w.get("kind") == "channel":
+                print(f"  waiting: {w.get('role')}.{w.get('channel')} {w.get('edge')} -> {w.get('event')} (-> {w.get('target')})")
+            elif w.get("kind") == "timer":
+                print(f"  waiting: after {w.get('seconds')}s in {w.get('state')} -> {w.get('event')} (-> {w.get('target')})")
+            else:
+                print(f"  accepts: event {w.get('event')!r} (-> {w.get('target')})")
 
     reply = _query(session, program_keys.state(args.realm), {})
     if reply is None:
@@ -405,6 +412,31 @@ def cmd_program_state(session, args) -> int:
     if not args.follow:
         return 0
     sub = session.declare_subscriber(program_keys.state(args.realm), lambda s: show(decode(s.payload)))
+    try:
+        while True:
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sub.undeclare()
+    return 0
+
+
+def cmd_program_log(session, args) -> int:
+    def show(raw):
+        ln = LogLine.from_wire(raw)
+        stamp = time.strftime("%H:%M:%S", time.localtime(ln.t / 1e9))
+        print(f"{stamp} {ln.level:7s} {ln.source:12s} {ln.message}")
+
+    reply = _query(session, program_keys.log(args.realm), {})
+    if reply is None:
+        print("no reply from program/log (runner down?)", file=sys.stderr)
+        return 1
+    for raw in reply.get("lines", [])[-args.tail:]:
+        show(raw)
+    if not args.follow:
+        return 0
+    sub = session.declare_subscriber(program_keys.log(args.realm), lambda s: show(decode(s.payload)))
     try:
         while True:
             time.sleep(1.0)
@@ -972,6 +1004,11 @@ def main(argv=None) -> int:
     p = sub.add_parser("program-state", help="print the unit/program state")
     p.add_argument("--follow", "-f", action="store_true", help="keep printing updates")
     p.set_defaults(fn=cmd_program_state)
+
+    p = sub.add_parser("program-log", help="print the program/runner log")
+    p.add_argument("--tail", type=int, default=50, help="last N lines (default 50)")
+    p.add_argument("--follow", "-f", action="store_true", help="keep printing new lines")
+    p.set_defaults(fn=cmd_program_log)
 
     p = sub.add_parser("dio-state", help="print a dio device's named channels")
     p.add_argument("--dio", default="io0", help="dio resource id (default io0)")

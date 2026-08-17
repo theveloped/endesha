@@ -12,6 +12,7 @@ import { sendExecutePath } from "../lib/actions";
 import { CELL_NAME } from "../lib/config";
 import HmiPage from "../pages/HmiPage";
 import OverviewPage from "../pages/OverviewPage";
+import ProgramEditorPane from "../pages/ProgramEditorPane";
 import { useRuntime } from "../runtime/context";
 import { useProgram } from "../runtime/useProgram";
 import { SceneCreatePanel } from "../scene/SceneCreatePanel";
@@ -105,6 +106,8 @@ function Workspace({
   const [dragMode, setDragMode] = useState<TcpDragMode>("off");
   const [dragPending, setDragPending] = useState(false);
   const [dragError, setDragError] = useState<string | null>(null);
+  // Program editor mode: {open, program to open first}. Takes over the right pane.
+  const [editor, setEditor] = useState<{ open: boolean; name: string | null }>({ open: false, name: null });
   const structure = useSceneStructure(runtime.session, runtime.prefix, configurationRevision);
   const program = useProgram(runtime.session, runtime.prefix);
   const dragAllowed = runtime.commandsEnabled && runtime.driverAlive && runtime.holdsControl;
@@ -115,10 +118,10 @@ function Workspace({
   const [leftWidth, setLeftWidth] = useRememberedWidth("wf.shell.scene-width", LEFT_DEFAULT, 260, maxLeft);
   const navigationWidth = windowWidth >= 1024 ? 256 : 0;
   const dockedSceneWidth = windowWidth >= 1280 ? leftWidth : 0;
-  const maxRight = Math.max(340, Math.min(760, windowWidth - navigationWidth - dockedSceneWidth - 400));
+  const maxRight = Math.max(340, Math.min(editor.open ? 1200 : 760, windowWidth - navigationWidth - dockedSceneWidth - 400));
   const [rightWidth, setRightWidth] = useRememberedWidth(
-    `wf.shell.right-width.${tool}`,
-    RIGHT_DEFAULT_WIDTH[tool],
+    editor.open ? "wf.shell.right-width.editor" : `wf.shell.right-width.${tool}`,
+    editor.open ? 900 : RIGHT_DEFAULT_WIDTH[tool],
     340,
     maxRight,
   );
@@ -168,6 +171,7 @@ function Workspace({
     setSelection(null);
     setCreateRequest(null);
     setDragMode("off");
+    if (next !== "programs") setEditor({ open: false, name: null });
     if (next !== "configuration") setPreview(null);
     navigate(route.kind === "replay" ? { kind: "replay", sid: route.sid, tool: next } : { kind: "cell", tool: next });
   };
@@ -209,6 +213,12 @@ function Workspace({
           preview,
           onPreview: setPreview,
           onConfigurationMutated: mutateConfiguration,
+          onEditProgram: (name: string | null) => {
+            setSelection(null);
+            setCreateRequest(null);
+            setDragMode("off");
+            setEditor({ open: true, name });
+          },
         };
 
   return (
@@ -282,10 +292,19 @@ function Workspace({
             side="right"
             width={rightWidth}
             onWidth={setRightWidth}
-            onReset={() => setRightWidth(RIGHT_DEFAULT_WIDTH[tool])}
+            onReset={() => setRightWidth(editor.open ? 900 : RIGHT_DEFAULT_WIDTH[tool])}
           >
             <aside className="h-full min-h-0 overflow-hidden bg-white dark:bg-zinc-900">
-              {createRequest !== null ? (
+              {editor.open && runtime.prefix !== null ? (
+                <ProgramEditorPane
+                  session={runtime.session}
+                  realm={runtime.prefix}
+                  program={program}
+                  theme={theme}
+                  initialName={editor.name}
+                  onClose={() => setEditor({ open: false, name: null })}
+                />
+              ) : createRequest !== null ? (
                 <SceneCreatePanel
                   key={`${createRequest.parent?.kind ?? "group"}:${createRequest.parent?.name ?? "root"}:${createRequest.kinds.join(",")}`}
                   request={createRequest}

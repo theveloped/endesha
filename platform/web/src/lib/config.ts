@@ -113,6 +113,22 @@ export function programsCmdLoad(realm: string): string {
   return `${realm}/programs/cmd/load`;
 }
 
+export function programsCmdSource(realm: string): string {
+  return `${realm}/programs/cmd/source`;
+}
+
+export function programsCmdSave(realm: string): string {
+  return `${realm}/programs/cmd/save`;
+}
+
+export function programsCmdDelete(realm: string): string {
+  return `${realm}/programs/cmd/delete`;
+}
+
+export function programLog(realm: string): string {
+  return `${realm}/program/log`;
+}
+
 export function programState(realm: string): string {
   return `${realm}/program/state`;
 }

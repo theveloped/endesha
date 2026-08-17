@@ -134,6 +134,12 @@ class ProgramState:
     when nothing is loaded); ``program_states`` the program's active state ids
     (StateChart configuration); ``actions`` the state ids whose action is
     currently running; ``reason`` explains the last Stopped/Aborted.
+
+    Debug aid: ``waiting_for`` lists, for the active states, what would move
+    the program on — ``{"kind": "channel", "role", "channel", "edge",
+    "event"}``, ``{"kind": "timer", "state", "seconds", "event"}``,
+    ``{"kind": "event", "event", "target"}`` (any accepted event, e.g. from
+    an action's ``emit`` or ``cmd/event``).
     """
 
     t: int
@@ -146,6 +152,7 @@ class ProgramState:
     bindings: dict[str, str] = field(default_factory=dict)
     client_id: str | None = None
     cycle: int = 0
+    waiting_for: list[dict] = field(default_factory=list)
 
     def to_wire(self) -> dict:
         return {
@@ -159,6 +166,7 @@ class ProgramState:
             "bindings": dict(self.bindings),
             "client_id": self.client_id,
             "cycle": int(self.cycle),
+            "waiting_for": [dict(w) for w in self.waiting_for],
         }
 
     @classmethod
@@ -174,7 +182,75 @@ class ProgramState:
             bindings=dict(d.get("bindings") or {}),
             client_id=d.get("client_id"),
             cycle=int(d.get("cycle", 0)),
+            waiting_for=[dict(w) for w in d.get("waiting_for") or []],
         )
+
+
+@dataclass
+class LogLine:
+    """One ``program/log`` entry. ``level`` is info|warning|error; ``source``
+    is the program name or ``runner``."""
+
+    t: int
+    level: str
+    source: str
+    message: str
+
+    def to_wire(self) -> dict:
+        return {"t": int(self.t), "level": self.level, "source": self.source, "message": self.message}
+
+    @classmethod
+    def from_wire(cls, d: dict) -> "LogLine":
+        return cls(t=int(d["t"]), level=d.get("level", "info"), source=d.get("source", ""), message=d.get("message", ""))
+
+
+@dataclass
+class SourceReply:
+    ok: bool
+    name: str = ""
+    path: str = ""
+    text: str = ""
+    error: str | None = None
+
+    def to_wire(self) -> dict:
+        return {"ok": bool(self.ok), "name": self.name, "path": self.path, "text": self.text, "error": self.error}
+
+    @classmethod
+    def from_wire(cls, d: dict) -> "SourceReply":
+        return cls(ok=d["ok"], name=d.get("name", ""), path=d.get("path", ""), text=d.get("text", ""), error=d.get("error"))
+
+
+@dataclass
+class SaveRequest:
+    """``programs/cmd/save``: write ``text`` to ``<programs_dir>/<file>`` (a
+    bare module file name like ``demo_pick.py``; created when missing), then
+    rescan. The reply carries the resulting catalog entry so an import error
+    shows up immediately in the editor."""
+
+    file: str
+    text: str
+
+    def to_wire(self) -> dict:
+        return {"file": self.file, "text": self.text}
+
+    @classmethod
+    def from_wire(cls, d: dict) -> "SaveRequest":
+        return cls(file=d["file"], text=d["text"])
+
+
+@dataclass
+class SaveReply:
+    ok: bool
+    entry: CatalogEntry | None = None
+    error: str | None = None
+
+    def to_wire(self) -> dict:
+        return {"ok": bool(self.ok), "entry": None if self.entry is None else self.entry.to_wire(), "error": self.error}
+
+    @classmethod
+    def from_wire(cls, d: dict) -> "SaveReply":
+        e = d.get("entry")
+        return cls(ok=d["ok"], entry=None if e is None else CatalogEntry.from_wire(e), error=d.get("error"))
 
 
 @dataclass

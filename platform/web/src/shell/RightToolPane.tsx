@@ -24,6 +24,7 @@ export interface ToolPaneContext {
   preview: ScenePreview;
   onPreview: (preview: ScenePreview) => void;
   onConfigurationMutated: () => void;
+  onEditProgram: (programName: string | null) => void;
 }
 
 const PANES: Record<WorkspaceTool, (ctx: ToolPaneContext) => ReactNode> = {
@@ -65,7 +66,7 @@ const PANES: Record<WorkspaceTool, (ctx: ToolPaneContext) => ReactNode> = {
       commandsEnabled={runtime.commandsEnabled}
     />
   ),
-  programs: ({ runtime, prefix, structure, program }) => (
+  programs: ({ runtime, prefix, structure, program, onEditProgram }) => (
     <ProgramsPage
       session={runtime.session}
       realm={prefix}
@@ -73,6 +74,7 @@ const PANES: Record<WorkspaceTool, (ctx: ToolPaneContext) => ReactNode> = {
       program={program}
       wsConnected={runtime.wsConnected}
       jointsRef={runtime.jointsRef}
+      onEdit={onEditProgram}
     />
   ),
   io: ({ runtime, prefix, structure }) => (

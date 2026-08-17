@@ -13,7 +13,10 @@ import {
   dioCmdSet,
   programCmd,
   programCmdEvent,
+  programsCmdDelete,
   programsCmdLoad,
+  programsCmdSave,
+  programsCmdSource,
   type UnitCommand,
   cmdClearProtectiveStop,
   controlCmdRelease,
@@ -26,6 +29,8 @@ import {
 } from "./config";
 import type {
   Ack,
+  ProgramSaveReply,
+  ProgramSourceReply,
   CancelReply,
   ControlAck,
   GoalFeedback,
@@ -218,6 +223,33 @@ export async function programCommand(
 ): Promise<Ack> {
   const reply = await query(session, programCmd(realm, command), reason ? { reason } : {});
   if (reply === null) throw new Error(`no reply from program/cmd/${command}`);
+  return reply as Ack;
+}
+
+export async function programSource(
+  session: Session,
+  realm: string,
+  nameOrFile: { name: string } | { file: string },
+): Promise<ProgramSourceReply> {
+  const reply = await query(session, programsCmdSource(realm), nameOrFile);
+  if (reply === null) throw new Error("no reply from programs/cmd/source");
+  return reply as ProgramSourceReply;
+}
+
+export async function programSave(
+  session: Session,
+  realm: string,
+  file: string,
+  text: string,
+): Promise<ProgramSaveReply> {
+  const reply = await query(session, programsCmdSave(realm), { file, text });
+  if (reply === null) throw new Error("no reply from programs/cmd/save");
+  return reply as ProgramSaveReply;
+}
+
+export async function programDeleteFile(session: Session, realm: string, name: string): Promise<Ack> {
+  const reply = await query(session, programsCmdDelete(realm), { name });
+  if (reply === null) throw new Error("no reply from programs/cmd/delete");
   return reply as Ack;
 }
 

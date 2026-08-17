@@ -203,9 +203,20 @@ defining a `wf.program.Program` subclass; see `demo_pick.py`). Drive it with
 pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program-catalog
 pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program-load demo_pick --param cycles=2
 pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program start      # hold|unhold|stop|abort|clear|reset
-pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program-state -f
+pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program-state -f      # incl. what it waits for
+pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 program-log -f        # self.log() + runner notes
 pixi run python -m wf.tools.wfctl --connect tcp/127.0.0.1:7447 dio-force part_present on   # feed the sim a part
 ```
+
+Debugging a program that "does nothing": it is usually waiting. `program-state`
+(and the **Waiting for** card in the Programs tool) lists, for the active
+state, the channel edges, timers and events that would move it on — in sim,
+force the input on the IO page.
+
+Programs can be written in the browser: Programs tool → **new / edit** (or
+**Edit** on a catalog entry) turns the right pane into an editor over
+`deploy/programs/*.py` (Ctrl/Cmd+S saves; import errors show inline; Load
+sends the file to the unit).
 
 In the browser, the **Programs** tool (`http://localhost:5173/#/cell/programs`)
 does the same: load with role bindings and params, Start/Hold/Stop/Reset, live

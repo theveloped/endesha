@@ -5,19 +5,22 @@ import type { Session } from "@eclipse-zenoh/zenoh-ts";
 import { query, subscribeLatest, watchAlive, type Unsubscribe } from "../lib/bus";
 import {
   programAlive,
+  programLog,
   programState,
   programTransitions,
   programsCatalog,
 } from "../lib/config";
-import type { ProgramCatalog, ProgramState, TransitionEvent } from "../lib/messages";
+import type { ProgramCatalog, ProgramLogLine, ProgramState, TransitionEvent } from "../lib/messages";
 
 const TRANSITION_LOG_MAX = 200;
+const LOG_MAX = 300;
 
 export interface ProgramView {
   alive: boolean;
   catalog: ProgramCatalog | null;
   state: ProgramState | null;
   transitions: TransitionEvent[];
+  log: ProgramLogLine[];
   refreshCatalog: () => void;
 }
 
@@ -26,6 +29,7 @@ export function useProgram(session: Session | null, realm: string | null): Progr
   const [catalog, setCatalog] = useState<ProgramCatalog | null>(null);
   const [state, setState] = useState<ProgramState | null>(null);
   const [transitions, setTransitions] = useState<TransitionEvent[]>([]);
+  const [log, setLog] = useState<ProgramLogLine[]>([]);
   const [catalogNonce, setCatalogNonce] = useState(0);
 
   useEffect(() => {
@@ -33,6 +37,7 @@ export function useProgram(session: Session | null, realm: string | null): Progr
     setCatalog(null);
     setState(null);
     setTransitions([]);
+    setLog([]);
     if (session === null || realm === null) return;
     const subs: Unsubscribe[] = [];
     let disposed = false;
@@ -51,17 +56,32 @@ export function useProgram(session: Session | null, realm: string | null): Progr
             }),
           64,
         ),
+        subscribeLatest(
+          session,
+          programLog(realm),
+          (m) =>
+            setLog((current) => {
+              const list = [...current, m as ProgramLogLine];
+              return list.length > LOG_MAX ? list.slice(-LOG_MAX) : list;
+            }),
+          64,
+        ),
       ]);
       if (disposed) next.forEach((u) => u());
       else subs.push(...next);
       // Late joiner: pull the current values once.
-      const [st, cat] = await Promise.all([
+      const [st, cat, lg] = await Promise.all([
         query(session, programState(realm), {}),
         query(session, programsCatalog(realm), {}),
+        query(session, programLog(realm), {}),
       ]);
       if (disposed) return;
       if (st !== null) setState(st as ProgramState);
       if (cat !== null) setCatalog(cat as ProgramCatalog);
+      if (lg !== null) {
+        const lines = ((lg as { lines?: ProgramLogLine[] }).lines ?? []) as ProgramLogLine[];
+        setLog((current) => (current.length === 0 ? lines.slice(-LOG_MAX) : current));
+      }
     })();
     return () => {
       disposed = true;
@@ -81,6 +101,7 @@ export function useProgram(session: Session | null, realm: string | null): Progr
     catalog,
     state,
     transitions,
+    log,
     refreshCatalog: () => setCatalogNonce((n) => n + 1),
   };
 }

@@ -93,6 +93,18 @@ export interface ProgramCatalog {
   programs: CatalogEntry[];
 }
 
+/** What would move the program on from an active state (debug aid). */
+export interface WaitingFor {
+  kind: "channel" | "timer" | "event";
+  event: string;
+  target?: string;
+  role?: string;
+  channel?: string;
+  edge?: string;
+  state?: string;
+  seconds?: number;
+}
+
 export interface ProgramState {
   t: WireTimestamp;
   unit: UnitState;
@@ -104,6 +116,28 @@ export interface ProgramState {
   bindings: Record<string, string>;
   client_id: string | null;
   cycle: number;
+  waiting_for?: WaitingFor[];
+}
+
+export interface ProgramLogLine {
+  t: WireTimestamp;
+  level: "info" | "warning" | "error";
+  source: string;
+  message: string;
+}
+
+export interface ProgramSourceReply {
+  ok: boolean;
+  name: string;
+  path: string;
+  text: string;
+  error: string | null;
+}
+
+export interface ProgramSaveReply {
+  ok: boolean;
+  entry: CatalogEntry | null;
+  error: string | null;
 }
 
 export interface TransitionEvent {
