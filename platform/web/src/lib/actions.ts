@@ -17,6 +17,8 @@ import {
   programsCmdLoad,
   programsCmdSave,
   programsCmdSource,
+  tagsCmdForce,
+  tagsCmdWrite,
   type UnitCommand,
   cmdClearProtectiveStop,
   controlCmdRelease,
@@ -200,6 +202,33 @@ export async function dioForce(
     value,
   });
   if (reply === null) throw new Error("no reply from dio cmd/force");
+  return reply as Ack;
+}
+
+export async function tagsWrite(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  tag: string,
+  value: boolean | number | string,
+): Promise<Ack> {
+  const reply = await query(session, tagsCmdWrite(realm, rid), { client_id: clientId, tag, value });
+  if (reply === null) throw new Error("no reply from tags cmd/write");
+  return reply as Ack;
+}
+
+/** ``value: null`` clears the force. */
+export async function tagsForce(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  tag: string,
+  value: boolean | number | string | null,
+): Promise<Ack> {
+  const reply = await query(session, tagsCmdForce(realm, rid), { client_id: clientId, tag, value });
+  if (reply === null) throw new Error("no reply from tags cmd/force");
   return reply as Ack;
 }
 

@@ -4,3 +4,4 @@
 active_sources:
   r1: sim
   cam0: replay
+  plc0: sim

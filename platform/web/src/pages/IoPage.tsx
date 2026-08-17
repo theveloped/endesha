@@ -21,14 +21,16 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { dioForce, dioSet } from "../lib/actions";
+import { dioForce, dioSet, tagsForce, tagsWrite } from "../lib/actions";
 import { subscribeLatest, type Unsubscribe } from "../lib/bus";
-import { dioStateChannels } from "../lib/config";
+import { dioStateChannels, tagsState as tagsStateKey } from "../lib/config";
 import type {
   ChannelDecl,
   ChannelsState,
   ChannelValue,
   DeviceEntry,
+  TagsState,
+  TagValue,
 } from "../lib/messages";
 
 interface IoPageProps {
@@ -329,6 +331,217 @@ function DioDeviceCard({
   );
 }
 
+// ── tags devices (PLC / controller variables) ────────────────────────────────
+
+function parseTyped(type: string, raw: string): boolean | number | string | null {
+  const t = raw.trim();
+  if (type === "bool") {
+    if (/^(on|true|1)$/i.test(t)) return true;
+    if (/^(off|false|0)$/i.test(t)) return false;
+    return null;
+  }
+  if (type === "int") return /^-?\d+$/.test(t) ? Number(t) : null;
+  if (type === "float") {
+    const n = Number(t);
+    return t !== "" && Number.isFinite(n) ? n : null;
+  }
+  return raw;
+}
+
+function formatTag(tv: TagValue | undefined): string {
+  if (tv === undefined) return "—";
+  if (typeof tv.value === "boolean") return tv.value ? "TRUE" : "false";
+  if (typeof tv.value === "number") return Number.isInteger(tv.value) ? String(tv.value) : tv.value.toFixed(3);
+  return JSON.stringify(tv.value);
+}
+
+function TagsDeviceCard({
+  session,
+  realm,
+  device,
+  canCommand,
+  canForceInputs,
+  clientId,
+}: {
+  session: Session | null;
+  realm: string;
+  device: DeviceEntry;
+  canCommand: boolean;
+  canForceInputs: boolean;
+  clientId: string;
+}) {
+  const [state, setState] = useState<TagsState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [showAuto, setShowAuto] = useState(true);
+
+  useEffect(() => {
+    setState(null);
+    if (session === null || device.active === null || device.active === "off") return;
+    let disposed = false;
+    let unsubscribe: Unsubscribe | null = null;
+    void (async () => {
+      const next = await subscribeLatest(session, tagsStateKey(realm, device.id), (m) => setState(m as TagsState), 4);
+      if (disposed) next();
+      else unsubscribe = next;
+    })();
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, [session, realm, device.id, device.active]);
+
+  const run = async (label: string, fn: () => Promise<{ ok: boolean; error: string | null }>) => {
+    if (session === null) return;
+    setError(null);
+    try {
+      const ack = await fn();
+      if (!ack.ok) setError(`${label}: ${ack.error ?? "failed"}`);
+    } catch (e) {
+      setError(`${label}: ${String(e)}`);
+    }
+  };
+  const write = (name: string, value: boolean | number | string) =>
+    run(`write ${name}`, () => tagsWrite(session!, realm, device.id, clientId, name, value));
+  const force = (name: string, value: boolean | number | string | null) =>
+    run(`force ${name}`, () => tagsForce(session!, realm, device.id, clientId, name, value));
+
+  const alive = state !== null;
+  const entries = Object.entries(state?.tags ?? {});
+  const named = entries.filter(([, tv]) => tv.auto !== true).sort(([a], [b]) => a.localeCompare(b));
+  const auto = entries.filter(([, tv]) => tv.auto === true).sort(([a], [b]) => a.localeCompare(b));
+
+  const row = ([name, tv]: [string, TagValue]) => {
+    const writable = tv.access === "rw";
+    const forced = tv.forced;
+    const controlsOn = (writable ? canCommand : canForceInputs) && alive;
+    const isBool = tv.type === "bool";
+    const on = tv.value === true;
+    const addr = String(tv.address?.node ?? tv.address?.tag ?? "");
+    return (
+      <tr
+        key={name}
+        className={cn("border-t border-border/60 [&>td]:py-1 [&>td]:align-middle", forced && "bg-amber-500/10", tv.auto && "text-muted-foreground")}
+      >
+        <td className="font-mono">{name}</td>
+        <td><span className="text-xs text-muted-foreground">{tv.type} {tv.access}</span></td>
+        <td><span className="font-mono text-xs text-muted-foreground" title={String(tv.address?.tag ?? "")}>{addr}</span></td>
+        <td>
+          <span
+            className={cn(
+              "inline-flex min-w-16 items-center gap-1 rounded-md border px-1.5 font-mono text-xs tabular-nums",
+              isBool && on ? "border-ok bg-ok/20 text-ok" : "border-border text-muted-foreground",
+              forced && "border-amber-500 text-amber-600 dark:text-amber-400",
+            )}
+          >
+            {formatTag(tv)}
+            {forced && <span className="text-[10px] uppercase">forced</span>}
+          </span>
+        </td>
+        <td>
+          {isBool ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="cmd h-7 px-2"
+              disabled={!controlsOn || (writable && forced)}
+              onClick={() => void (writable ? write(name, !on) : force(name, !on))}
+              title={writable ? (forced ? "Forced; clear the force to write" : `Write ${name} ${on ? "false" : "TRUE"}`) : `Force ${name} ${on ? "false" : "TRUE"}`}
+            >
+              {writable ? (on ? "write false" : "write true") : on ? "force false" : "force true"}
+            </Button>
+          ) : (
+            <form
+              className="flex items-center gap-1"
+              onSubmit={(ev) => {
+                ev.preventDefault();
+                const parsed = parseTyped(tv.type, drafts[name] ?? "");
+                if (parsed === null) {
+                  setError(`${name}: not a valid ${tv.type}`);
+                  return;
+                }
+                void (writable && !forced ? write(name, parsed) : force(name, parsed));
+              }}
+            >
+              <Input
+                value={drafts[name] ?? ""}
+                placeholder={writable ? `${tv.type} value` : `force ${tv.type}`}
+                className="h-7 w-28 font-mono text-xs"
+                disabled={!controlsOn}
+                onChange={(ev) => setDrafts((d) => ({ ...d, [name]: ev.target.value }))}
+              />
+              <Button type="submit" variant="outline" size="sm" className="cmd h-7 px-2" disabled={!controlsOn}>
+                {writable && !forced ? "write" : "force"}
+              </Button>
+            </form>
+          )}
+        </td>
+        <td>
+          {forced ? (
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-amber-600 dark:text-amber-400" disabled={!controlsOn} title={`Clear force on ${name}`} onClick={() => void force(name, null)}>
+              <Lock className="size-3.5" />
+            </Button>
+          ) : (
+            <span className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground/40" title="not forced">
+              <LockOpen className="size-3.5" />
+            </span>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <span className="font-mono">{device.id}</span>
+          <span className="text-xs font-normal text-muted-foreground">
+            {device.model ?? "tags"} · {device.active ?? "off"}
+            {device.provided_by !== undefined && ` · via ${device.provided_by}`}
+          </span>
+          <Badge variant={alive ? "secondary" : "outline"} className="ml-auto">
+            {device.active === "off" ? "off" : alive ? "live" : "no state"}
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {entries.length === 0 ? (
+          <p className="text-sm text-muted-foreground">no tags</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr className="[&>th]:py-1 [&>th]:text-left [&>th]:font-medium">
+                <th>Tag</th>
+                <th className="w-16">Type</th>
+                <th className="w-28" title="Controller address (node) / display name">Node</th>
+                <th className="w-28">Value</th>
+                <th>Control</th>
+                <th className="w-8" title="Force (override reported value)" />
+              </tr>
+            </thead>
+            <tbody>
+              {named.map(row)}
+              {auto.length > 0 && (
+                <tr>
+                  <td colSpan={6} className="pt-3 pb-1 text-xs font-medium tracking-wide text-muted-foreground">
+                    <button type="button" className="hover:underline" onClick={() => setShowAuto((v) => !v)}>
+                      {showAuto ? "▾" : "▸"} CONTROLLER VARIABLES
+                    </button>
+                    <span className="ml-2 font-normal">raw inventory without a name in cell.yaml ({auto.length})</span>
+                  </td>
+                </tr>
+              )}
+              {showAuto && auto.map(row)}
+            </tbody>
+          </table>
+        )}
+        {error !== null && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function IoPage({
   session,
   realm,
@@ -342,6 +555,10 @@ export default function IoPage({
     () => devices.filter((device) => device.contract === "dio"),
     [devices],
   );
+  const tagsDevices = useMemo(
+    () => devices.filter((device) => device.contract === "tags"),
+    [devices],
+  );
   const canCommand = wsConnected && commandsEnabled && holdsControl;
   const canForceInputs = wsConnected && commandsEnabled;
 
@@ -352,7 +569,7 @@ export default function IoPage({
           Forcing inputs works without control (test override). Request control to set or force outputs.
         </p>
       )}
-      {dioDevices.length === 0 ? (
+      {dioDevices.length === 0 && tagsDevices.length === 0 ? (
         <Card size="sm">
           <CardContent>
             <p className="text-sm text-muted-foreground">
@@ -362,17 +579,30 @@ export default function IoPage({
           </CardContent>
         </Card>
       ) : (
-        dioDevices.map((device) => (
-          <DioDeviceCard
-            key={device.id}
-            session={session}
-            realm={realm}
-            device={device}
-            canCommand={canCommand}
-            canForceInputs={canForceInputs}
-            clientId={clientId}
-          />
-        ))
+        <>
+          {dioDevices.map((device) => (
+            <DioDeviceCard
+              key={device.id}
+              session={session}
+              realm={realm}
+              device={device}
+              canCommand={canCommand}
+              canForceInputs={canForceInputs}
+              clientId={clientId}
+            />
+          ))}
+          {tagsDevices.map((device) => (
+            <TagsDeviceCard
+              key={device.id}
+              session={session}
+              realm={realm}
+              device={device}
+              canCommand={canCommand}
+              canForceInputs={canForceInputs}
+              clientId={clientId}
+            />
+          ))}
+        </>
       )}
     </div>
   );

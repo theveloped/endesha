@@ -9,6 +9,7 @@ dependencies = [
     "wf-contracts-control",
     "wf-contracts-dio",
     "wf-contracts-program",
+    "wf-contracts-tags",
     "wf-contracts-camera2d",
     "wf-services-recording",
     "wf-services-config",

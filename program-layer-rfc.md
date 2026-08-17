@@ -408,7 +408,14 @@ No XML. Rename in docs/UI, keep keys:
    cell poses, "Program poses" card in the Programs tool (teach current /
    re-teach / delete). Program-scoped *frames* deferred: they would have to be
    merged into the arm's live frame tree at goal accept.
-6. (later) `serial` / `opcua` / `http` contracts, cell-level lease, SRDF export.
+6. **`tags` contract DONE** (2026-08-17): typed named controller variables
+   (`wf.contracts.tags`), generic `wf.hal.channels_core` shared with dio,
+   `wf.hal.tags_core` (inventory resolution: named + auto tags from the
+   controller's own names), providers `sim_tags` and `opcua` (asyncua:
+   subscriptions, typed writes, reconnect, watchdog), `TagsProxy` +
+   `on_channel` for programs, `wfctl tags-*`, IO page card. Next: the ecoclean
+   `washer` HAL (sim + live over opcua) — see the ecoclean plan. Still later:
+   `serial` / `http`, SRDF export.
 
 Each step: pytest + `tsc -b` + `npm run build` + a sim e2e (`start_stack.ps1
 -Runtime deploy/runtime/sim.yaml`).

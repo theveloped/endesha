@@ -149,6 +149,23 @@ export function programAlive(realm: string): string {
   return `${realm}/program/alive`;
 }
 
+// tags contract (wf/contracts/tags/keys.py): named typed controller variables.
+export function tagsState(realm: string, rid: string): string {
+  return `${realm}/tags/${rid}/state/tags`;
+}
+
+export function tagsCmdWrite(realm: string, rid: string): string {
+  return `${realm}/tags/${rid}/cmd/write`;
+}
+
+export function tagsCmdForce(realm: string, rid: string): string {
+  return `${realm}/tags/${rid}/cmd/force`;
+}
+
+export function tagsAlive(realm: string, rid: string): string {
+  return `${realm}/tags/${rid}/alive`;
+}
+
 // Cell-level control lease (wf/contracts/control/keys.py): ONE holder for every
 // device in the cell, granted by the supervisor-hosted authority. No rid.
 export function controlCmdAcquire(realm: string): string {

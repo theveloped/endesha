@@ -22,10 +22,11 @@ from pathlib import Path
 import yaml
 
 from wf.contracts.dio.messages import parse_channels
+from wf.contracts.tags.messages import parse_tags
 
 from .procs import LAUNCH_EXTERNAL, LAUNCH_MODULE
 
-_CONTRACTS = ("arm", "camera2d", "dio")
+_CONTRACTS = ("arm", "camera2d", "dio", "tags")
 # Selectable provider source names. ``off`` is a selection (no provider), never
 # a declared source. The camera exposes two independent simulated providers.
 _MODES = ("live", "sim", "browser_sim", "replay")
@@ -114,6 +115,13 @@ def load_cell(path: str | Path) -> dict:
                     raise ValueError(
                         f"bad_cell:resource {rid}.config.channels must declare at least one channel"
                     )
+            if contract == "tags":
+                # Named tags are optional (the provider inventory alone is a
+                # valid device); validate the schema when present.
+                try:
+                    parse_tags(config.get("tags"))
+                except ValueError as exc:
+                    raise ValueError(f"bad_cell:resource {rid}.{exc}") from exc
             sources_in = decl["sources"]
             if not isinstance(sources_in, dict) or not sources_in:
                 raise ValueError(

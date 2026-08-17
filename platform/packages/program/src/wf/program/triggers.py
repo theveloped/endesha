@@ -19,8 +19,9 @@ class Trigger:
 
 
 def on_channel(role: str, channel: str, *, edge: str = "rising", event: str) -> Trigger:
-    """Emit ``event`` when ``role``'s dio channel ``channel`` shows ``edge``
-    (``rising`` False->True, ``falling`` True->False, ``change`` any)."""
+    """Emit ``event`` when ``role``'s channel/tag ``channel`` shows ``edge``
+    (``rising`` False->True, ``falling`` True->False, ``change`` any). Works for
+    dio channels and PLC tags alike (any table-shaped device)."""
     if edge not in EDGES:
         raise ValueError(f"edge must be one of {EDGES}")
     return Trigger("channel", event, {"role": role, "channel": channel, "edge": edge})

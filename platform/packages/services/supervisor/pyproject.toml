@@ -8,6 +8,7 @@ dependencies = [
     "wf-contracts-supervisor",
     "wf-contracts-control",
     "wf-contracts-dio",
+    "wf-contracts-tags",
     "pyyaml",
 ]
 

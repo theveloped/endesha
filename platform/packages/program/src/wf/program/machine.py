@@ -71,6 +71,12 @@ class Machine:
             raise ProgramError(f"not_a_dio:{rid}")
         return proxy
 
+    def tags(self, rid: str):
+        proxy = self.device(rid)
+        if proxy.contract != "tags":
+            raise ProgramError(f"not_a_tags_device:{rid}")
+        return proxy
+
     def pose(self, name: str) -> list[float]:
         return self._pose_resolver(name)
 

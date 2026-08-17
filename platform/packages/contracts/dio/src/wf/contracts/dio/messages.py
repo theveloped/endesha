@@ -49,11 +49,26 @@ class ChannelDef:
         return self.kind in INPUT_KINDS
 
     @property
+    def writable(self) -> bool:
+        return not self.is_input
+
+    @property
     def is_digital(self) -> bool:
         return self.kind in DIGITAL_KINDS
 
     def default_value(self):
         return False if self.is_digital else 0.0
+
+    def to_engineering(self, raw):
+        """Raw backend value -> engineering units (``raw * scale + offset``)."""
+        if self.is_digital:
+            return bool(raw)
+        return float(raw) * self.scale + self.offset
+
+    def to_raw(self, value):
+        if self.is_digital:
+            return bool(value)
+        return (float(value) - self.offset) / self.scale
 
     def coerce(self, value):
         """Validate/normalize a value for this channel; raises ValueError."""

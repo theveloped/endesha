@@ -26,6 +26,9 @@ from wf.contracts.arm.messages import (
 from wf.contracts.dio import keys as dio_keys
 from wf.contracts.dio.messages import Ack as DioAck
 from wf.contracts.dio.messages import ChannelsState, ForceChannel, SetChannel
+from wf.contracts.tags import keys as tags_keys
+from wf.contracts.tags.messages import Ack as TagsAck
+from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
 from wf.core.action import ActionClient, ActionRejected
 from wf.core.codec import decode, encode
 from wf.core.log import get_logger
@@ -251,15 +254,42 @@ class ArmProxy(DeviceProxy):
 # ── dio ────────────────────────────────────────────────────────────────────
 
 
-class DioProxy(DeviceProxy):
-    """``self.m.io`` — named channels of one dio device."""
+class _TableProxy(DeviceProxy):
+    """Shared behaviour of table-shaped devices (dio channels, PLC tags): a
+    latest-wins state subscription, ``get``/``wait``/``snapshot``/``watch``,
+    and lease-gated ``set``/``force`` through the contract's queryables.
+    Subclasses bind the keys and messages."""
 
-    contract = "dio"
+    contract = ""
+    _label = "channel"
+
+    # hooks ---------------------------------------------------------------
+    def _state_key(self) -> str:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def _set_key(self) -> str:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def _force_key(self) -> str:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def _parse_state(self, payload: dict) -> dict:
+        """-> ``{name: value_object_with_.value}``."""  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def _set_wire(self, name: str, value) -> dict:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def _force_wire(self, name: str, value) -> dict:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def _parse_ack(self, payload: dict):  # pragma: no cover - abstract
+        raise NotImplementedError
 
     def __init__(self, session, realm, rid, client_id):
         super().__init__(session, realm, rid, client_id)
         self._lock = threading.Lock()
-        self._state: ChannelsState | None = None
+        self._state: dict | None = None  # name -> value object (.value)
         self._changed = threading.Condition(self._lock)
         self._sub = None
         self._watchers: list[Callable[[str, object, object], None]] = []
@@ -280,16 +310,15 @@ class DioProxy(DeviceProxy):
         return unregister
 
     def start(self) -> None:
-        self._sub = self.session.declare_subscriber(
-            dio_keys.state_channels(self.realm, self.rid), self._on_state
-        )
+        self._sub = self.session.declare_subscriber(self._state_key(), self._on_state)
         # Late joiner: pull once.
         try:
-            reply = _query(self.session, dio_keys.state_channels(self.realm, self.rid), {}, timeout_s=1.0)
+            reply = _query(self.session, self._state_key(), {}, timeout_s=1.0)
             if reply is not None:
+                parsed = self._parse_state(reply)
                 with self._lock:
                     if self._state is None:
-                        self._state = ChannelsState.from_wire(reply)
+                        self._state = parsed
                     self._changed.notify_all()
         except Exception:
             pass
@@ -304,7 +333,7 @@ class DioProxy(DeviceProxy):
 
     def _on_state(self, sample) -> None:
         try:
-            st = ChannelsState.from_wire(decode(sample.payload))
+            st = self._parse_state(decode(sample.payload))
         except Exception:
             return
         with self._lock:
@@ -313,14 +342,14 @@ class DioProxy(DeviceProxy):
             self._changed.notify_all()
             watchers = list(self._watchers)
         if watchers and prev is not None:
-            for name, cv in st.channels.items():
-                old = prev.channels.get(name)
+            for name, cv in st.items():
+                old = prev.get(name)
                 if old is not None and old.value != cv.value:
                     for fn in watchers:
                         try:
                             fn(name, old.value, cv.value)
                         except Exception:
-                            _log.debug("dio watcher failed", exc_info=True)
+                            _log.debug("%s watcher failed", self.contract, exc_info=True)
 
     # ── reads ────────────────────────────────────────────────────────────
 
@@ -328,16 +357,16 @@ class DioProxy(DeviceProxy):
         with self._lock:
             st = self._state
         if st is None:
-            raise ProgramError(f"dio_no_state:{self.rid}")
-        cv = st.channels.get(name)
+            raise ProgramError(f"{self.contract}_no_state:{self.rid}")
+        cv = st.get(name)
         if cv is None:
-            raise ProgramError(f"unknown_channel:{self.rid}.{name}")
+            raise ProgramError(f"unknown_{self._label}:{self.rid}.{name}")
         return cv.value
 
     def snapshot(self) -> dict:
         with self._lock:
             st = self._state
-        return {} if st is None else {n: cv.value for n, cv in st.channels.items()}
+        return {} if st is None else {n: cv.value for n, cv in st.items()}
 
     def wait(self, name: str, value=True, *, timeout_s: float | None = None) -> bool:
         """Block until channel ``name`` equals ``value`` (or, when ``value`` is
@@ -351,9 +380,9 @@ class DioProxy(DeviceProxy):
                 ctx.check()
             with self._lock:
                 st = self._state
-                cv = None if st is None else st.channels.get(name)
+                cv = None if st is None else st.get(name)
                 if st is not None and cv is None:
-                    raise ProgramError(f"unknown_channel:{self.rid}.{name}")
+                    raise ProgramError(f"unknown_{self._label}:{self.rid}.{name}")
                 if cv is not None and pred(cv.value):
                     return True
                 remaining = None if deadline is None else deadline - time.monotonic()
@@ -365,31 +394,23 @@ class DioProxy(DeviceProxy):
 
     def set(self, name: str, value) -> None:
         _check()
-        reply = _query(
-            self.session,
-            dio_keys.cmd_set(self.realm, self.rid),
-            SetChannel(self.client_id, name, value).to_wire(),
-        )
+        reply = _query(self.session, self._set_key(), self._set_wire(name, value))
         if reply is None:
-            raise ProgramError(f"dio_set:{self.rid}.{name}:no_reply")
-        ack = DioAck.from_wire(reply)
+            raise ProgramError(f"{self.contract}_set:{self.rid}.{name}:no_reply")
+        ack = self._parse_ack(reply)
         if not ack.ok:
-            raise ProgramError(f"dio_set:{self.rid}.{name}:{ack.error}")
+            raise ProgramError(f"{self.contract}_set:{self.rid}.{name}:{ack.error}")
 
     def force(self, name: str, value) -> None:
-        """Override a channel's reported value (``None`` clears). Meant for
-        simulation scenarios / tests, not production logic."""
+        """Override a reported value (``None`` clears). Meant for simulation
+        scenarios / tests, not production logic."""
         _check()
-        reply = _query(
-            self.session,
-            dio_keys.cmd_force(self.realm, self.rid),
-            ForceChannel(self.client_id, name, value).to_wire(),
-        )
+        reply = _query(self.session, self._force_key(), self._force_wire(name, value))
         if reply is None:
-            raise ProgramError(f"dio_force:{self.rid}.{name}:no_reply")
-        ack = DioAck.from_wire(reply)
+            raise ProgramError(f"{self.contract}_force:{self.rid}.{name}:no_reply")
+        ack = self._parse_ack(reply)
         if not ack.ok:
-            raise ProgramError(f"dio_force:{self.rid}.{name}:{ack.error}")
+            raise ProgramError(f"{self.contract}_force:{self.rid}.{name}:{ack.error}")
 
     def pulse(self, name: str, seconds: float = 0.2) -> None:
         self.set(name, True)
@@ -401,6 +422,66 @@ class DioProxy(DeviceProxy):
                 time.sleep(seconds)
         finally:
             self.set(name, False)
+
+
+class DioProxy(_TableProxy):
+    """``self.m.io`` — named channels of one dio device."""
+
+    contract = "dio"
+    _label = "channel"
+
+    def _state_key(self) -> str:
+        return dio_keys.state_channels(self.realm, self.rid)
+
+    def _set_key(self) -> str:
+        return dio_keys.cmd_set(self.realm, self.rid)
+
+    def _force_key(self) -> str:
+        return dio_keys.cmd_force(self.realm, self.rid)
+
+    def _parse_state(self, payload: dict) -> dict:
+        return ChannelsState.from_wire(payload).channels
+
+    def _set_wire(self, name: str, value) -> dict:
+        return SetChannel(self.client_id, name, value).to_wire()
+
+    def _force_wire(self, name: str, value) -> dict:
+        return ForceChannel(self.client_id, name, value).to_wire()
+
+    def _parse_ack(self, payload: dict):
+        return DioAck.from_wire(payload)
+
+
+class TagsProxy(_TableProxy):
+    """``self.m.plc`` — named typed variables of one controller (tags device).
+    ``write`` is the natural verb; ``set`` is an alias."""
+
+    contract = "tags"
+    _label = "tag"
+
+    def _state_key(self) -> str:
+        return tags_keys.state_tags(self.realm, self.rid)
+
+    def _set_key(self) -> str:
+        return tags_keys.cmd_write(self.realm, self.rid)
+
+    def _force_key(self) -> str:
+        return tags_keys.cmd_force(self.realm, self.rid)
+
+    def _parse_state(self, payload: dict) -> dict:
+        return TagsState.from_wire(payload).tags
+
+    def _set_wire(self, name: str, value) -> dict:
+        return WriteTag(self.client_id, name, value).to_wire()
+
+    def _force_wire(self, name: str, value) -> dict:
+        return ForceTag(self.client_id, name, value).to_wire()
+
+    def _parse_ack(self, payload: dict):
+        return TagsAck.from_wire(payload)
+
+    def write(self, name: str, value) -> None:
+        self.set(name, value)
 
 
 # ── pose resolution (cell-scoped config store; program-scoped is RFC §3.7) ─
@@ -422,4 +503,4 @@ def make_pose_resolver(session, program_name: str | None = None) -> Callable[[st
     return resolve
 
 
-PROXIES: dict[str, type[DeviceProxy]] = {"arm": ArmProxy, "dio": DioProxy}
+PROXIES: dict[str, type[DeviceProxy]] = {"arm": ArmProxy, "dio": DioProxy, "tags": TagsProxy}

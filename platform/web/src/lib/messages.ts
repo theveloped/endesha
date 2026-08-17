@@ -149,6 +149,24 @@ export interface TransitionEvent {
   detail: string | null;
 }
 
+// ── tags contract (wf/contracts/tags/messages.py) ───────────────────────────
+
+export type TagType = "bool" | "int" | "float" | "string";
+
+export interface TagValue {
+  type: TagType;
+  value: boolean | number | string;
+  access: "r" | "rw";
+  forced: boolean;
+  address?: Record<string, unknown>;
+  auto?: boolean;
+}
+
+export interface TagsState {
+  t: WireTimestamp;
+  tags: Record<string, TagValue>;
+}
+
 export interface ArmStatus {
   t: WireTimestamp;
   mode: string;

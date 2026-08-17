@@ -32,6 +32,9 @@ from wf.contracts.camera2d import keys as cam_keys
 from wf.contracts.control import keys as control_keys
 from wf.contracts.dio import keys as dio_keys
 from wf.contracts.program import keys as program_keys
+from wf.contracts.tags import keys as tags_keys
+from wf.contracts.tags.messages import Ack as TagsAck
+from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
 from wf.contracts.program.messages import Ack as ProgramAck
 from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, LogLine, ProgramState
 from wf.contracts.dio.messages import ForceChannel, SetChannel
@@ -445,6 +448,82 @@ def cmd_program_log(session, args) -> int:
     finally:
         sub.undeclare()
     return 0
+
+
+def _parse_tag_value(text: str):
+    """on/off/true/false -> bool; int -> int; float -> float; else string.
+    ``--string`` keeps the text as-is."""
+    low = text.strip().lower()
+    if low in ("on", "true"):
+        return True
+    if low in ("off", "false"):
+        return False
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
+def cmd_tags_state(session, args) -> int:
+    reply = _query(session, tags_keys.state_tags(args.realm, args.tags), {})
+    if reply is None:
+        print("no reply from tags state/tags (device down?)", file=sys.stderr)
+        return 1
+    st = TagsState.from_wire(reply)
+    for name, tv in sorted(st.tags.items()):
+        flag = "  FORCED" if tv.forced else ""
+        auto = "  (auto)" if tv.auto else ""
+        addr = tv.address.get("node") or tv.address.get("tag") or ""
+        print(f"{name:28s} {tv.type:6s} {tv.access:2s} {tv.value!s:>12}  {addr}{flag}{auto}")
+    return 0
+
+
+def _tags_cmd(session, args, key, msg_ok):
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    try:
+        reply = _query(session, key, msg_ok(cid))
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+    if reply is None:
+        print(f"no reply from {key}", file=sys.stderr)
+        return 1
+    ack = TagsAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_tags_write(session, args) -> int:
+    value = args.value if args.string else _parse_tag_value(args.value)
+    return _tags_cmd(session, args, tags_keys.cmd_write(args.realm, args.tags),
+                     lambda cid: WriteTag(cid, args.tag, value).to_wire())
+
+
+def cmd_tags_force(session, args) -> int:
+    if not args.clear and args.value is None:
+        print("tags-force needs a value or --clear", file=sys.stderr)
+        return 2
+    value = None if args.clear else (args.value if args.string else _parse_tag_value(args.value))
+    # read-only tags need no lease: try lease-free first
+    reply = _query(session, tags_keys.cmd_force(args.realm, args.tags), ForceTag(args.client_id or "wfctl", args.tag, value).to_wire())
+    if reply is not None and reply.get("ok"):
+        print("ok")
+        return 0
+    if reply is not None and reply.get("error") != "no_control":
+        print(f"error: {reply.get('error')}")
+        return 1
+    return _tags_cmd(session, args, tags_keys.cmd_force(args.realm, args.tags),
+                     lambda cid: ForceTag(cid, args.tag, value).to_wire())
 
 
 def cmd_dio_state(session, args) -> int:
@@ -1009,6 +1088,27 @@ def main(argv=None) -> int:
     p.add_argument("--tail", type=int, default=50, help="last N lines (default 50)")
     p.add_argument("--follow", "-f", action="store_true", help="keep printing new lines")
     p.set_defaults(fn=cmd_program_log)
+
+    p = sub.add_parser("tags-state", help="print a tags device's variables")
+    p.add_argument("--tags", default="plc0", help="tags resource id (default plc0)")
+    p.set_defaults(fn=cmd_tags_state)
+
+    p = sub.add_parser("tags-write", help="write a rw tag (auto-acquires the lease)")
+    p.add_argument("tag")
+    p.add_argument("value")
+    p.add_argument("--string", action="store_true", help="keep the value as a string")
+    p.add_argument("--tags", default="plc0", help="tags resource id (default plc0)")
+    p.add_argument("--client-id", default=None, help="reuse an external lease")
+    p.set_defaults(fn=cmd_tags_write)
+
+    p = sub.add_parser("tags-force", help="force a tag's reported value (read-only tags need no lease)")
+    p.add_argument("tag")
+    p.add_argument("value", nargs="?", default=None)
+    p.add_argument("--clear", action="store_true")
+    p.add_argument("--string", action="store_true")
+    p.add_argument("--tags", default="plc0", help="tags resource id (default plc0)")
+    p.add_argument("--client-id", default=None)
+    p.set_defaults(fn=cmd_tags_force)
 
     p = sub.add_parser("dio-state", help="print a dio device's named channels")
     p.add_argument("--dio", default="io0", help="dio resource id (default io0)")

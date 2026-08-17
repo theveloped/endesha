@@ -114,3 +114,25 @@ resources:
         kind: replay_camera
         params:
           recording: deploy/recordings/demo.mcap
+
+  # Example controller device: named typed variables (`tags` contract). The
+  # inventory is what a PLC exposes (OPC-UA nodes here); `tags:` gives the ones
+  # we use our own names, the rest stay visible under their controller names.
+  # `live` would be the opcua provider (endpoint + inventory + watchdog).
+  plc0:
+    contract: tags
+    model: example_plc
+    config:
+      tags:
+        machine_ready: { tag: ReadyToLoad }
+        start_request: { tag: LoadRequest }
+    sources:
+      sim:
+        kind: sim_tags
+        params:
+          inventory:
+            ReadyToLoad: { node: "ns=4;i=85",  type: bool,   access: r }
+            DoorOpen:    { node: "ns=4;i=88",  type: bool,   access: r }
+            LoadRequest: { node: "ns=4;i=118", type: bool,   access: rw }
+            WashProgram: { node: "ns=4;i=134", type: int,    access: rw }
+            Kommentar:   { node: "ns=4;i=77",  type: string, access: rw }

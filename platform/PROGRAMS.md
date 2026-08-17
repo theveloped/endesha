@@ -53,7 +53,7 @@ PROGRAM = PickAndPlace   # optional when the file has exactly one Program subcla
 | attribute | meaning |
 |---|---|
 | `program_name` | catalog name. **Not** `name` — python-statemachine owns that. Default: file stem. |
-| `roles` | `{role: contract}`. Contracts today: `arm`, `dio`. Bound to device ids at Load (default: the sole device of that contract; else pick in the UI / `--bind role=rid`). |
+| `roles` | `{role: contract}`. Contracts today: `arm`, `dio`, `tags`. Bound to device ids at Load (default: the sole device of that contract; else pick in the UI / `--bind role=rid`). |
 | `params` | defaults; overridden at Load (`--param k=v`, JSON values). Available as `self.p[...]`. Unknown keys are rejected at Load. |
 | `triggers` | declarative event sources evaluated by the runner (see below). |
 
@@ -132,6 +132,23 @@ refuses (no lease, protective stop, `target_outside_limits`, collision, …).
 
 Channel names come from `cell.yaml` (`channels:` / `provides:`); unmapped
 physical pins are also addressable by their auto names (`di3`, `tool_do0`).
+
+### tags (PLC / controller variables — OPC-UA etc.)
+
+Same shape as `dio` but typed (`bool`/`int`/`float`/`string`) with access
+`r`/`rw`:
+
+| call | notes |
+|---|---|
+| `get(name)` / `snapshot()` | current value(s). |
+| `wait(name, value=True, *, timeout_s=None)` | as for dio (also `value` callable). |
+| `write(name, value)` (alias `set`) | write an `rw` tag; typed (an `int` tag rejects `2.5`). Needs the lease. |
+| `force(name, value)` / `force(name, None)` | override / clear; `r` tags need no lease. |
+
+Names: the ones you gave in `cell.yaml` `tags:` (`load_request: {tag: LoadRequest}`)
+plus the controller's own inventory as auto tags named after their display
+names (`ReadyToLoad` → `ready_to_load`, `Programmfolgen[2].BEH` →
+`programmfolgen_2_beh`). `on_channel(...)` triggers work on tags too.
 
 ### other (`self.m` helpers)
 
