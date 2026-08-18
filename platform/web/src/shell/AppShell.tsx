@@ -9,7 +9,6 @@ import { SidebarLayout } from "../catalyst/sidebar-layout";
 import ReplayDrawer from "../components/ReplayDrawer";
 import { TcpDragPanel } from "../components/TcpDragPanel";
 import { sendExecutePath } from "../lib/actions";
-import { CELL_NAME } from "../lib/config";
 import HmiPage from "../pages/HmiPage";
 import OverviewPage from "../pages/OverviewPage";
 import ProgramEditorPane from "../pages/ProgramEditorPane";
@@ -262,7 +261,7 @@ function Workspace({
   return (
     <SidebarLayout
       sidebar={<AppSidebar route={route} tool={tool} onNavigate={navigate} theme={theme} onToggleTheme={onToggleTheme} />}
-      navbar={<Navbar><NavbarLabel>{CELL_NAME}</NavbarLabel></Navbar>}
+      navbar={<Navbar><NavbarLabel>{runtime.cellName}</NavbarLabel></Navbar>}
     >
       <div
         data-realm={runtime.realm.kind}

@@ -110,6 +110,8 @@ class SupervisorService:
     def run_forever(self) -> None:
         signal.signal(signal.SIGTERM, lambda *_: self._stop_event.set())
         signal.signal(signal.SIGINT, lambda *_: self._stop_event.set())
+        if hasattr(signal, "SIGBREAK"):  # Windows: the host API stops us with Ctrl-Break
+            signal.signal(signal.SIGBREAK, lambda *_: self._stop_event.set())
         try:
             self._stop_event.wait()
         except KeyboardInterrupt:
@@ -195,6 +197,11 @@ class SupervisorService:
         return {
             "t": now_ns(),
             "node": self.node,
+            # Cell identity for multi-cell UIs: the realm is the id, ``name`` is
+            # the display name (cell.yaml ``name:``, default the realm).
+            "realm": self.realm,
+            "cell_name": self.cell.get("name") or self.realm,
+            "cell_type": self.cell.get("cell_type"),
             "is_master": True,
             "owns_resources": sorted(self.cell["resources"]),
             "always_on": always_on,

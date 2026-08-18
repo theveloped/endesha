@@ -172,8 +172,13 @@ def load_cell(path: str | Path) -> dict:
     ):
         raise ValueError("bad_cell:master_node must be a non-empty string")
 
+    name = raw.get("name")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ValueError("bad_cell:name must be a non-empty string")
+
     return {
         "cell_type": raw.get("cell_type"),
+        "name": name,
         "master_node": master_node,
         "control": _parse_control(raw.get("control")),
         "resources": resources,

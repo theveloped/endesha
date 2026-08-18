@@ -4,6 +4,7 @@
 # into the concrete inventory. Replaces the duplicated cell.dev.yaml /
 # cell.sim.yaml (retired at the end of the migration).
 cell_type: manual-cell@0.1
+name: dev-cell
 platform: 0.1.0
 
 # Distributed seams: single node is its own master this slice.

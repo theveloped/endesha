@@ -17,7 +17,9 @@ import {
   type Unsubscribe,
 } from "../lib/bus";
 import { useBrowserCameraProducer } from "../lib/camera2d/producer";
+import { activateCell as activateCellApi, fetchCells, type HostCells } from "../lib/host";
 import {
+  CELL_NAME,
   DEFAULT_WS_URL,
   alive,
   realmPrefix,
@@ -76,6 +78,8 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
     value: null,
   });
   const [devices, setDevices] = useState<DevicesList | null>(null);
+  const [hostCells, setHostCells] = useState<HostCells | null>(null);
+  const [hostError, setHostError] = useState<string | null>(null);
   const [clientId] = useState(() => crypto.randomUUID());
   const [user] = useState(() => localStorage.getItem("wf.user") ?? "operator");
   const jointsRef = useRef<JointState | null>(null);
@@ -234,6 +238,38 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
     browserCameraActive,
   );
 
+  // Host API: poll the cell registry (cheap; the active cell rarely changes).
+  useEffect(() => {
+    let disposed = false;
+    const tick = () => {
+      fetchCells()
+        .then((cells) => {
+          if (disposed) return;
+          setHostCells(cells);
+          setHostError(null);
+        })
+        .catch((error: unknown) => {
+          if (disposed) return;
+          setHostCells(null);
+          setHostError(error instanceof Error ? error.message : String(error));
+        });
+    };
+    tick();
+    const timer = setInterval(tick, 3000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const activateCell = useCallback(async (id: string, runtime: string | null) => {
+    const next = await activateCellApi(id, runtime);
+    setHostCells(next);
+  }, []);
+
+  const activeHostCell = hostCells?.cells.find((c) => c.id === hostCells.active?.cell) ?? null;
+  const cellName = activeHostCell?.name ?? CELL_NAME;
+
   const wsConnected = session !== null && !wsClosed;
   const driverAlive = wsConnected && !stale && aliveToken;
   // Commands need a live driver in an arm cell; a cell without an arm (e.g. a
@@ -281,6 +317,10 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
         replaySessions,
         io,
         devices,
+        hostCells,
+        hostError,
+        cellName,
+        activateCell,
         status,
         wsConnected,
         driverAlive,

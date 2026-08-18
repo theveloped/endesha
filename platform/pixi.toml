@@ -29,6 +29,9 @@ mcap = ">=1.1,<2"
 ruckig = "==0.19.4"
 python-statemachine = ">=2.5"
 asyncua = ">=1.1"
+fastapi = ">=0.110"
+uvicorn = ">=0.29"
+httpx = "*"
 wf-core = { path = "packages/core", editable = true }
 wf-world-model = { path = "packages/world_model", editable = true }
 wf-contracts-control = { path = "packages/contracts/control", editable = true }
@@ -58,6 +61,7 @@ wf-services-recording = { path = "packages/services/recording", editable = true 
 wf-services-config = { path = "packages/services/config", editable = true }
 wf-contracts-supervisor = { path = "packages/contracts/supervisor", editable = true }
 wf-services-supervisor = { path = "packages/services/supervisor", editable = true }
+wf-services-host-api = { path = "packages/services/host_api", editable = true }
 
 [target.osx-64.dependencies]
 # Ruckig 0.19.4 has no Intel macOS wheel. Keep its source-build toolchain scoped

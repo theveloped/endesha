@@ -5,7 +5,6 @@ import { Badge } from "../catalyst/badge";
 import { Button } from "../catalyst/button";
 import { Input } from "../catalyst/input";
 import { stop } from "../lib/actions";
-import { CELL_NAME } from "../lib/config";
 import { useRuntime } from "../runtime/context";
 import { TOOL_META, type WorkspaceTool } from "./ToolRibbon";
 
@@ -20,7 +19,7 @@ export function WorkspaceHeader({
   const owner = runtime.controlOwner?.owner ?? null;
   const resourceName =
     runtime.realm.kind === "cell"
-      ? CELL_NAME
+      ? runtime.cellName
       : runtime.realm.replaySession ?? "Select recording";
   const toolLabel = TOOL_META.find((item) => item.id === tool)?.label ?? tool;
 

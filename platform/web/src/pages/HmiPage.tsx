@@ -6,7 +6,6 @@ import { Badge } from "../catalyst/badge";
 import { Button } from "../catalyst/button";
 import { WasherCard } from "../components/WasherCard";
 import { programEvent } from "../lib/actions";
-import { CELL_NAME } from "../lib/config";
 import { useProgram } from "../runtime/useProgram";
 import { useRuntime } from "../runtime/context";
 import { CommandBar, UnitBadge } from "./ProgramsPage";
@@ -83,7 +82,7 @@ export default function HmiPage({ onExit }: { onExit: () => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-zinc-100 dark:bg-zinc-950">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-950/5 bg-white px-4 dark:border-white/10 dark:bg-zinc-900">
-        <span className="text-sm font-semibold text-zinc-950 dark:text-white">{CELL_NAME}</span>
+        <span className="text-sm font-semibold text-zinc-950 dark:text-white">{runtime.cellName}</span>
         <Badge color="zinc">Operator</Badge>
         <span className="ml-auto flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
           <span>Bridge</span>

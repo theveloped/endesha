@@ -10,6 +10,7 @@
 #   plc0     the raw `tags` contract — every PLC variable under its own
 #            (German) name plus the cell names given below (the transport)
 cell_type: ecoclean-cell@0.1
+name: ecoclean
 platform: 0.1.0
 master_node: main
 

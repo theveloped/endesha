@@ -37,49 +37,35 @@ services:
       - "127.0.0.1:10000:10000"
 
   # ── the simulated cell ──────────────────────────────────────────────────
-  # The supervisor realizes cell.yaml + runtime/sim.yaml, spawns the simulated
-  # arm, and publishes the device inventory. The simulated camera is the
-  # separate camera2d-headless service because its source is external.
-  config:
+  # The host API is the machine-level control plane (http://localhost:8080):
+  # it runs the realm-less config store and the ACTIVE cell's supervisor tree
+  # (supervisor -> providers + program runner). Cells are the cell.yaml files
+  # under deploy/ (deploy/cell.yaml = "default", deploy/<dir>/cell.yaml =
+  # "<dir>") with their runtime/*.yaml overlays; switch from the UI navbar,
+  # `wfctl cell activate <id> --runtime <overlay>` or POST /cells/<id>/activate.
+  # WF_CELL / WF_RUNTIME pick the cell at start (default: last active, else
+  # "default" with the "sim" overlay). The simulated camera is the separate
+  # camera2d-headless service because its source is external.
+  host-api:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.sim
     image: wf-sim:latest
     depends_on: [zenoh-router]
-    # Persist the config store on the HOST so UI edits (frames/poses/TCPs)
-    # survive `docker compose --build`/recreate — the container fs is otherwise
-    # ephemeral and reverts to the image's baked store.yaml on every rebuild.
-    # This is the SAME deploy/config the host tooling uses: one source of truth.
-    volumes:
-      - *code
-      - ./config:/platform/deploy/config
-    command: ["python", "-m", "wf.services.config",
-              "--dir", "deploy/config",
-              "--zenoh-config", "deploy/zenoh/sim-container.json5"]
-
-  supervisor:
-    image: wf-sim:latest
     environment:
       WF_REALM: cell
-    depends_on: [zenoh-router, config]
+      WF_CELL: ${WF_CELL:-}
+      WF_RUNTIME: ${WF_RUNTIME:-}
+    ports:
+      - "127.0.0.1:8080:8080"
     volumes:
       - *code
-      # Hot-reload the canonical cell + overlays like packages/: they live in
-      # deploy/ (NOT under the packages mount), so bind them explicitly or the
-      # supervisor reads the STALE copies baked into the wf-sim image at build.
-      # WF_CELL / WF_RUNTIME / WF_PROGRAMS pick another cell, e.g. the Ecoclean:
-      #   WF_CELL=./ecoclean/cell.yaml WF_RUNTIME=./ecoclean/runtime/sim.yaml WF_PROGRAMS=./ecoclean/programs docker compose -f deploy/compose.yaml up -d
-      - ${WF_CELL:-./cell.yaml}:/platform/deploy/cell.yaml:ro
-      - ${WF_RUNTIME:-./runtime/sim.yaml}:/platform/deploy/runtime/active.yaml:ro
-      # Programs are edited in place (in-app editor / your IDE): read-write.
-      - ${WF_PROGRAMS:-./programs}:/platform/deploy/programs
-    command: ["python", "-m", "wf.services.supervisor",
-              "--realm", "cell",
-              "--cell", "deploy/cell.yaml",
-              "--runtime", "deploy/runtime/active.yaml",
-              "--programs", "deploy/programs",
-              "--zenoh-config", "deploy/zenoh/sim-container.json5"]
-
+      # deploy/ is bind-mounted (cells, overlays, programs, config store,
+      # host.yaml) so edits hot-reload and UI edits (frames/poses/TCPs, program
+      # files, the active cell) survive `docker compose --build`/recreate.
+      - ./:/platform/deploy
+    command: ["sh", "-c",
+              "python -m wf.services.host_api --deploy deploy --port 8080 --with-config --zenoh-config deploy/zenoh/sim-container.json5 $${WF_CELL:+--activate $$WF_CELL} $${WF_RUNTIME:+--runtime $$WF_RUNTIME}"]
 
   # The headless-browser camera2d HAL: serves the camera2d contract for cid=cam0
   # by rendering the shared Three.js twin scene under headless Chromium
@@ -93,7 +79,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.headless
     image: wf-camera2d-headless:latest
-    depends_on: [bridge, supervisor]
+    depends_on: [bridge, host-api]
     environment:
       WS_URL: ws/bridge:10000
       REALM: cell

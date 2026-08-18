@@ -2,6 +2,7 @@ import { createContext, useContext, type RefObject } from "react";
 import type { Session } from "@eclipse-zenoh/zenoh-ts";
 import type { BrowserProducerState } from "../lib/camera2d/producer";
 import type { Realm } from "../lib/config";
+import type { HostCells } from "../lib/host";
 import type {
   ArmStatus,
   ControlOwnerState,
@@ -23,6 +24,12 @@ export interface RuntimeState {
   prefix: string | null;
   replaySessions: string[];
   io: IoState | null;
+  /** Host API view: the cells this host can run and the active one (null while unreachable). */
+  hostCells: HostCells | null;
+  hostError: string | null;
+  /** Display name of the active cell (host API), else the default label. */
+  cellName: string;
+  activateCell: (id: string, runtime: string | null) => Promise<void>;
   /** The supervisor's device inventory (cell realms only). */
   devices: DevicesList | null;
   status: ArmStatus | null;

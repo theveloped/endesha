@@ -10,8 +10,9 @@ The recommended Windows workflow keeps the standard Zenoh router and remote-api 
 | --- | --- | --- |
 | Zenoh router | Docker `eclipse/zenoh:1.9.0` image | Leave running |
 | Browser bridge | Docker `wf-bridge:latest` image | Leave running |
-| Supervisor and Python providers | Pixi editable workspace | Restart after Python or cell/runtime YAML changes |
-| Config service | Spawned by the supervisor | UI config edits are applied live |
+| Host API (`wf.services.host_api`, http://localhost:8080) | Pixi editable workspace | Cell registry + supervisor lifecycle; restart after Python changes |
+| Supervisor and Python providers | Spawned by the host API for the ACTIVE cell | Re-activate the cell (navbar / `wfctl cell activate`) after Python or cell/runtime YAML changes |
+| Config service | Spawned by the host API (realm-less, survives cell switches) | UI config edits are applied live |
 | Operator UI | Local Vite | React/TypeScript/CSS HMR |
 | Browser camera producer | Operator UI tab | Renderer changes follow Vite HMR |
 | Headless camera | Local Puppeteer process, optional | Page follows Vite HMR; restart after launcher changes |
@@ -63,17 +64,26 @@ Start the host application services with the interactive browser-camera simulati
 
 ```powershell
 .\deploy\start_stack.ps1 `
-  -Runtime deploy/runtime/sim.yaml `
+  -Cell default -Runtime sim `
   -BridgeInDocker
 ```
 
 The PowerShell script is only a convenience process launcher. With `-BridgeInDocker`, it starts:
 
-- the supervisor;
-- simulated arm and browser-camera backend;
-- config service;
+- the host API (`wf.services.host_api`, <http://localhost:8080>): the cell
+  registry (every `cell.yaml` under `deploy/`: `deploy/cell.yaml` is cell
+  `default`, `deploy/<dir>/cell.yaml` is cell `<dir>`; overlays are the
+  `runtime/*.yaml` next to it, `-Runtime` takes the overlay id) and the
+  lifecycle of the ACTIVE cell's supervisor tree — the supervisor spawns the
+  providers (simulated arm, browser-camera backend, …) and the program runner;
+- the config service (owned by the host API, so it survives cell switches);
 - recorder;
 - Vite development server.
+
+Without `-Cell` the host API restores the last active cell (`deploy/host.yaml`).
+Switch cells from the navbar ("Cells" lists the registry; click one, pick the
+overlay, Switch) or with `pixi run python -m wf.tools.wfctl cell list|activate <id> --runtime <overlay>|stop`.
+Only one cell runs at a time: one bus, realm `cell`.
 
 It does not build anything and does not start another bridge. The two Docker containers provide native Zenoh on port `7447` and the browser WebSocket endpoint on port `10000`.
 
@@ -89,6 +99,7 @@ cam0: browser_sim
 The detached launcher writes application logs under `deploy/logs/`:
 
 ```powershell
+Get-Content -Wait deploy/logs/host_api.log
 Get-Content -Wait deploy/logs/supervisor.log
 Get-Content -Wait deploy/logs/vite.log
 Get-Content -Wait deploy/logs/recorder.log
@@ -127,16 +138,18 @@ Use the following restart loop:
 
 The script is optional. Keep `zenoh-router` and `bridge` running in Docker and run the application processes in foreground terminals instead.
 
-### Terminal 1: supervisor, config service, and providers
+### Terminal 1: host API (config service + the active cell's supervisor and providers)
 
 ```powershell
-pixi run python -m wf.services.supervisor `
-  --cell deploy/cell.yaml `
-  --runtime deploy/runtime/sim.yaml `
-  --realm cell `
-  --with-config `
+pixi run python -m wf.services.host_api `
+  --deploy deploy --port 8080 --with-config `
+  --activate default --runtime sim `
   --zenoh-config deploy/zenoh/driver-router.dev.json5
 ```
+
+(To run a supervisor by hand instead, without the host API:
+`pixi run python -m wf.services.supervisor --cell deploy/cell.yaml --runtime deploy/runtime/sim.yaml --realm cell --with-config --zenoh-config deploy/zenoh/driver-router.dev.json5`
+— the navbar then shows a single cell.)
 
 ### Terminal 2: Vite development server
 
@@ -249,12 +262,15 @@ arm) whose HAL also provides the raw PLC as a `tags` device. It replaces the
 `ecoclean-controller` repo. Host stack:
 
 ```powershell
-.\deploy\start_stack.ps1 -Cell deploy/ecoclean/cell.yaml -Runtime deploy/ecoclean/runtime/sim.yaml -Programs deploy/ecoclean/programs -BridgeInDocker
+.\deploy\start_stack.ps1 -Cell ecoclean -Runtime sim -BridgeInDocker
+# or, with the stack already running: switch in the navbar, or
+pixi run python -m wf.tools.wfctl cell activate ecoclean --runtime sim
 ```
 
 `runtime/sim.yaml` runs the PLC emulation at 10x speed; `runtime/live.yaml`
 talks OPC-UA to `opc.tcp://192.168.0.1:4840`. Full Docker stack:
-`WF_CELL=./ecoclean/cell.yaml WF_RUNTIME=./ecoclean/runtime/sim.yaml WF_PROGRAMS=./ecoclean/programs docker compose -f deploy/compose.yaml up -d`.
+`WF_CELL=ecoclean WF_RUNTIME=sim docker compose -f deploy/compose.yaml up -d`
+(or switch from the navbar / `wfctl cell activate` once it is up).
 Try it: `wfctl washer-status`, `wfctl washer open_door`, `wfctl washer-recipe`,
 load `ecoclean_cycle` and confirm the operator steps on the HMI page.
 
@@ -275,10 +291,11 @@ docker compose -f deploy/compose.yaml config --quiet
 
 ## Full Docker stack (no host processes)
 
-The compose stack runs everything in containers (router, bridge, config,
-supervisor with providers and the program runner, Vite). It shares the host
-`deploy/config` and `deploy/programs` directories, so config edits and
-programs written in the in-app editor land in the repo either way.
+The compose stack runs everything in containers (router, bridge, the host API
+on <http://localhost:8080> with the config service and the active cell's
+supervisor + providers + program runner, Vite). It bind-mounts the host
+`deploy/` directory, so config edits, programs written in the in-app editor and
+the active cell (`deploy/host.yaml`) land in the repo either way.
 
 ```powershell
 .\deploy\stop_stack.ps1                                   # never run both modes at once (ports 5173/10000)
@@ -288,8 +305,7 @@ docker compose -f deploy/compose.yaml up -d
 Rebuild rules (the images bake dependencies, the code is bind-mounted):
 
 - `pixi.toml` / `pixi.lock` or a NEW package under `packages/` →
-  `docker compose -f deploy/compose.yaml build config` (builds `wf-sim`, used by
-  config + supervisor), then `up -d`.
+  `docker compose -f deploy/compose.yaml build host-api` (builds `wf-sim`), then `up -d`.
 - `web/package.json` changed → `docker compose -f deploy/compose.yaml up -d --build
   --force-recreate --renew-anon-volumes web`. The `--renew-anon-volumes` matters:
   the container masks the host `node_modules` with an anonymous volume, and a plain

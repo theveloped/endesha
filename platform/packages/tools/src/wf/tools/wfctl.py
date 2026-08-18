@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import math
 import sys
 import time
@@ -471,6 +472,59 @@ def _parse_tag_value(text: str):
         return float(text)
     except ValueError:
         return text
+
+
+# ── host API (cells) — HTTP, no zenoh session needed ─────────────────────
+
+
+def _http(method: str, url: str, body: dict | None = None) -> dict:
+    import json as _json  # noqa: PLC0415
+    import urllib.error  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    data = None if body is None else _json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+            return _json.loads(resp.read().decode() or "{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = _json.loads(exc.read().decode()).get("detail")
+        except Exception:
+            detail = exc.reason
+        raise SystemExit(f"host api {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"host api unreachable at {url}: {exc.reason}") from exc
+
+
+def cmd_cell(args) -> int:
+    base = args.host_api.rstrip("/")
+    if args.action == "list":
+        body = _http("GET", f"{base}/cells")
+        active = (body.get("active") or {}).get("cell")
+        for c in body["cells"]:
+            mark = "*" if c["id"] == active else " "
+            state = ""
+            if c["id"] == active:
+                state = f"  ACTIVE ({(body.get('active') or {}).get('runtime')}) {'alive' if body.get('alive') else 'DOWN'}"
+            err = f"  ERROR {c['error']}" if c.get("error") else ""
+            print(f"{mark} {c['id']:12s} {c['name']:20s} {c.get('cell_type') or '':22s} runtimes={','.join(c['runtimes'])}{state}{err}")
+        return 0
+    if args.action == "activate":
+        if not args.cell:
+            print("cell activate needs a cell id", file=sys.stderr)
+            return 2
+        body = _http("POST", f"{base}/cells/{args.cell}/activate", {"runtime": args.runtime})
+        print(f"active: {body['active']}  alive={body['alive']}")
+        return 0
+    if args.action == "stop":
+        body = _http("POST", f"{base}/cells/stop")
+        print(f"active: {body['active']}")
+        return 0
+    if args.action == "health":
+        print(json.dumps(_http("GET", f"{base}/health"), indent=2))
+        return 0
+    return 2
 
 
 def cmd_washer_status(session, args) -> int:
@@ -1208,6 +1262,13 @@ def main(argv=None) -> int:
     p.add_argument("--follow", "-f", action="store_true", help="keep printing new lines")
     p.set_defaults(fn=cmd_program_log)
 
+    p = sub.add_parser("cell", help="host API: list / activate / stop the cell running on this host")
+    p.add_argument("action", choices=("list", "activate", "stop", "health"))
+    p.add_argument("cell", nargs="?", default=None, help="cell id (activate)")
+    p.add_argument("--runtime", default=None, help="overlay id (activate; default: 'default' or the first)")
+    p.add_argument("--host-api", default=os.environ.get("WF_HOST_API", "http://127.0.0.1:8080"))
+    p.set_defaults(fn=cmd_cell, no_session=True)
+
     p = sub.add_parser("washer-status", help="print a washer's phase/door/program")
     p.add_argument("--washer", default="washer0", help="washer resource id (default washer0)")
     p.set_defaults(fn=cmd_washer_status)
@@ -1312,6 +1373,8 @@ def main(argv=None) -> int:
     p.set_defaults(fn=cmd_cam_stream)
 
     args = parser.parse_args(argv)
+    if getattr(args, "no_session", False):
+        return args.fn(args)
     session = _open_session(args)
     try:
         return args.fn(session, args)

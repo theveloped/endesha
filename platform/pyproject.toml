@@ -27,6 +27,7 @@ testpaths = [
     "packages/hal/sim_tags/tests",
     "packages/hal/opcua/tests",
     "packages/hal/ecoclean/tests",
+    "packages/services/host_api/tests",
     "packages/hal/camera2d_core/tests",
     "packages/hal/replay/tests",
     "packages/hal/genicam/tests",
