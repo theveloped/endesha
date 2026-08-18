@@ -79,7 +79,8 @@ def discover(programs_dir: str | Path) -> list[Discovered]:
             out.append(
                 Discovered(
                     CatalogEntry(name=name, roles=info["roles"], params=info["params"],
-                                 doc=info["doc"], path=str(path), hmi=info.get("hmi") or {}),
+                                 doc=info["doc"], path=str(path), hmi=info.get("hmi") or {},
+                                 graph=info.get("graph") or {}),
                     cls,
                 )
             )

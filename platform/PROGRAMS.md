@@ -196,6 +196,27 @@ themselves are unit-level and never appear in the program's states.
   aborts too (`lease_lost:*`).
 - Programs are recorded (`program/state|transitions|log`) like every realm topic.
 
+## Graph view
+
+Every program's state machine is exported as data at import
+(`Program.describe()["graph"]`, see `wf.program.graph`): states, transitions
+(event / `cond` / `unless`), triggers and source anchors (line of each
+`State(...)`, `a.to(b)`, `run_<state>`, guard). The UI draws it with React Flow:
+
+- **Programs tool** — "Program graph" card: the loaded program with the live
+  overlay (green = active state, pulsing dot = action running, dashed blue edge =
+  a transition that could fire now (`waiting_for`, with a *send* button on plain
+  events), green edge = the last taken transition). With nothing loaded, pick a
+  program to see its design.
+- **Program editor** — the graph above the code (toggle with the branch icon);
+  click a state to jump to its `run_` action (or its `State(...)` line), click an
+  edge to jump to the transition line.
+- **HMI** — a compact live graph of the running program.
+
+Drag nodes to arrange; positions are saved per program in the config store
+(`config/programs/<name>/layout`), unplaced states are auto-laid out (dagre).
+The code stays the only source of truth: the graph is read-only.
+
 ## Debugging
 
 - Programs tool: **Waiting for** (armed triggers / accepted events of the

@@ -42,10 +42,12 @@ threads, lease and bus; a program never sees them.
 
 from __future__ import annotations
 
+import sys
 from typing import Any, Callable, Protocol
 
 from statemachine import State, StateChart
 
+from .graph import build_graph
 from .machine import Roles
 from .triggers import Trigger
 
@@ -75,6 +77,17 @@ class Program(StateChart):
     #: (``{"start": "Start wash"}``); an event the program is waiting for
     #: shows up on the HMI page as a button with this label.
     hmi: dict[str, str] = {}
+    #: file the class was defined in (for graph source anchors), set at class creation.
+    __source_path__: str | None = None
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        frame = sys._getframe(1)
+        # python-statemachine's metaclass may sit between us and the class body.
+        while frame is not None and frame.f_code.co_filename.replace("\\", "/").endswith(("/statemachine/factory.py", "/wf/program/program.py")):
+            frame = frame.f_back
+        if frame is not None:
+            cls.__source_path__ = frame.f_code.co_filename
 
     def __init__(self, roles: Roles, params: dict, runtime: ProgramRuntime):
         self.m = roles
@@ -138,6 +151,7 @@ class Program(StateChart):
             "states": [s.id for s in cls.states],
             "events": sorted({e.id for e in cls.events}),
             "hmi": {str(k): str(v) for k, v in dict(cls.hmi).items()},
+            "graph": build_graph(cls),
         }
 
 

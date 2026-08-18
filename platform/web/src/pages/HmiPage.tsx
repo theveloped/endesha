@@ -4,6 +4,7 @@
 import { useMemo, useState } from "react";
 import { Badge } from "../catalyst/badge";
 import { Button } from "../catalyst/button";
+import { ProgramGraphCard } from "../components/ProgramGraphCard";
 import { WasherCard } from "../components/WasherCard";
 import { programEvent } from "../lib/actions";
 import { useProgram } from "../runtime/useProgram";
@@ -120,6 +121,19 @@ export default function HmiPage({ onExit }: { onExit: () => void }) {
             </div>
           )}
         </section>
+
+        {state?.program && program.catalog && (
+          <ProgramGraphCard
+            session={runtime.session}
+            realm={runtime.prefix ?? "cell"}
+            entries={program.catalog.programs}
+            state={alive ? state : null}
+            transitions={program.transitions}
+            compact
+            height={220}
+            onError={setError}
+          />
+        )}
 
         <OperatorEvents
           session={runtime.session}

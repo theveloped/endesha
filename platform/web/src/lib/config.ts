@@ -265,6 +265,11 @@ export function configProgramPose(program: string, name: string): string {
   return `config/programs/${program}/poses/${name}`;
 }
 
+/** Hand-placed node positions of a program's graph view: {positions: {state: [x, y]}}. */
+export function configProgramLayout(program: string): string {
+  return `config/programs/${program}/layout`;
+}
+
 export function configPose(name: string): string {
   return `config/poses/${name}`;
 }

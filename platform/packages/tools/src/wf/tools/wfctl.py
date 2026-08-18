@@ -59,7 +59,8 @@ from wf.services.recording import keys as recording_keys
 def _open_session(args) -> zenoh.Session:
     if args.connect:
         config = zenoh.Config()
-        config.insert_json5("mode", json.dumps("peer"))
+        # client mode: a peer would gossip host locators unreachable from Docker
+        config.insert_json5("mode", json.dumps("client"))
         config.insert_json5("scouting/multicast/enabled", "false")
         config.insert_json5("connect/endpoints", json.dumps([args.connect]))
     else:

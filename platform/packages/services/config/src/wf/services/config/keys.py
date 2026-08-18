@@ -64,6 +64,12 @@ def program_poses_glob(program: str) -> str:
     return key(CONFIG_PREFIX, "programs", program, "poses", "**")
 
 
+def program_layout(program: str) -> str:
+    """``config/programs/{program}/layout`` — node positions of the program's
+    state-machine graph view (``{"positions": {state: [x, y]}}``)."""
+    return key(CONFIG_PREFIX, "programs", program, "layout")
+
+
 def programs_glob() -> str:
     return key(CONFIG_PREFIX, "programs", "**")
 

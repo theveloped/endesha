@@ -79,6 +79,48 @@ export type UnitState =
   | "holding" | "held" | "unholding" | "suspending" | "suspended" | "unsuspending"
   | "stopping" | "stopped" | "aborting" | "aborted" | "clearing" | "resetting";
 
+// ── program graph (wf/program/graph.py): the state machine as data ──────────
+
+export interface GraphState {
+  id: string;
+  initial: boolean;
+  final: boolean;
+  parent: string | null;
+  kind: "atomic" | "compound" | "parallel" | string;
+}
+
+export interface GraphTransition {
+  id: string;
+  source: string;
+  target: string;
+  event: string | null;
+  cond: string[];
+  unless: string[];
+  internal: boolean;
+}
+
+export interface GraphTrigger {
+  kind: "channel" | "timer" | string;
+  event: string;
+  params: Record<string, unknown>;
+}
+
+export interface GraphSource {
+  class: number | null;
+  states: Record<string, number>;
+  transitions: Record<string, number>; // event -> line
+  actions: Record<string, number>; // state -> line of run_<state>
+  guards: Record<string, number>;
+  hooks: Record<string, number>;
+}
+
+export interface ProgramGraph {
+  states: GraphState[];
+  transitions: GraphTransition[];
+  triggers: GraphTrigger[];
+  source?: GraphSource;
+}
+
 export interface CatalogEntry {
   name: string;
   roles: Record<string, string>; // role -> contract
@@ -87,6 +129,7 @@ export interface CatalogEntry {
   path: string;
   error: string | null;
   hmi?: Record<string, string>; // event -> operator button label
+  graph?: ProgramGraph;
 }
 
 export interface ProgramCatalog {

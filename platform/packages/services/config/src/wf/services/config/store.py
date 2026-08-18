@@ -48,6 +48,9 @@ _COLLISION_RE = re.compile(r"^config/arm/[^/]+/collision/disabled_pairs$")
 # Program-scoped assets (RFC §3.7): poses that travel with a program. Same
 # validator as cell poses; the program facade resolves these first.
 _PROGRAM_POSE_RE = re.compile(r"^config/programs/[^/]+/poses/.+")
+# Program graph layout: hand-placed node positions of the state-machine view
+# (``{"positions": {state_id: [x, y]}}``); states without a position auto-layout.
+_PROGRAM_LAYOUT_RE = re.compile(r"^config/programs/[^/]+/layout$")
 _TCP_ROLES = ("tool", "sensor", "virtual")
 RESERVED_TCP_NAME = "flange"
 
@@ -181,6 +184,8 @@ class ConfigStore:
             return "collision"
         if _PROGRAM_POSE_RE.match(key):
             return "pose"
+        if _PROGRAM_LAYOUT_RE.match(key):
+            return "layout"
         return None
 
     # ── normalization ────────────────────────────────────────────────────
@@ -231,8 +236,21 @@ class ConfigStore:
             self._validate_tcp(key.rsplit("/", 1)[-1], value)
         elif family == "collision":
             self._validate_collision(value)
+        elif family == "layout":
+            self._validate_layout(value)
         else:
             raise ValueError(f"invalid_key:{key}")
+
+    @staticmethod
+    def _validate_layout(value: dict) -> None:
+        positions = value.get("positions")
+        if not isinstance(positions, dict):
+            raise ValueError("bad_value:layout.positions must be a mapping state_id -> [x, y]")
+        for sid, pos in positions.items():
+            if not isinstance(sid, str) or not sid:
+                raise ValueError("bad_value:layout.positions keys must be state ids")
+            if not _is_numbers(pos, 2):
+                raise ValueError(f"bad_value:layout.positions[{sid}] must be [x, y]")
 
     def _validate_frame(self, name: str, value: dict) -> None:
         if not isinstance(value.get("parent"), str):

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { ProgramGraphCard } from "../components/ProgramGraphCard";
 import { configDelete, configSet, programCommand, programEvent, programLoad } from "../lib/actions";
 import { subscribeConfigList, type Unsubscribe } from "../lib/bus";
 import { configProgramPose, configProgramPosesGlob, type UnitCommand } from "../lib/config";
@@ -650,6 +651,14 @@ export default function ProgramsPage({ session, realm, devices, program, wsConne
           {error !== null && <p className="text-sm text-destructive">{error}</p>}
         </CardContent>
       </Card>
+      <ProgramGraphCard
+        session={session}
+        realm={realm}
+        entries={program.catalog?.programs ?? []}
+        state={alive ? program.state : null}
+        transitions={program.transitions}
+        onError={setError}
+      />
       <WaitingForCard state={program.state} alive={alive} />
       <StateCard state={program.state} alive={alive} />
       <LogCard log={program.log} />

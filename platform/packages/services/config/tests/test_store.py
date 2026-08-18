@@ -334,6 +334,20 @@ def test_program_pose_family(tmp_path):
     assert store.get_matching("config/programs/**") == {}
 
 
+def test_program_layout_family(tmp_path):
+    store = ConfigStore(str(tmp_path))
+    key = "config/programs/demo_pick/layout"
+    assert store.set(key, {"positions": {"homing": [0, 0], "waiting": [200.5, 40]}}) == 1
+    assert store.get_matching("config/programs/demo_pick/**")[key]["positions"]["waiting"] == [200.5, 40]
+    with pytest.raises(ValueError, match="^bad_value"):
+        store.set(key, {"positions": {"homing": [1]}})
+    with pytest.raises(ValueError, match="^bad_value"):
+        store.set(key, {"nope": 1})
+    with pytest.raises(ValueError, match="^invalid_key"):
+        store.set("config/programs/demo_pick/layout/extra", {"positions": {}})
+    store.delete(key)
+
+
 # ── collision exceptions ──────────────────────────────────────────────────
 
 

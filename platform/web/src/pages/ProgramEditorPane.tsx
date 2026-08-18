@@ -3,13 +3,15 @@
 // CodeMirror (Python) editor; Save (Ctrl/Cmd-S) writes through the runner
 // (programs/cmd/save), which rescans and reports an import error inline.
 // The loaded program cannot be deleted while the unit runs it.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@eclipse-zenoh/zenoh-ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { python } from "@codemirror/lang-python";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { keymap } from "@codemirror/view";
-import { FilePlus, Save, Trash2, X } from "lucide-react";
+import { EditorView, keymap } from "@codemirror/view";
+import { FilePlus, GitBranch, Save, Trash2, X } from "lucide-react";
+import { ProgramGraph } from "../components/ProgramGraph";
+import { useProgramLayout } from "../runtime/useProgramLayout";
 import { Badge } from "../catalyst/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +70,20 @@ export default function ProgramEditorPane({ session, realm, program, theme, init
   const entry = entries.find((e) => e.path.endsWith(`/${file}`) || e.path.endsWith(`\\${file}`)) ?? null;
   const state: ProgramState | null = program.state;
   const canLoad = state !== null && (state.unit === "idle" || state.unit === "stopped");
+  // Graph view (design + live overlay when this program is the loaded one).
+  const [showGraph, setShowGraph] = useState(true);
+  const graph = entry?.graph;
+  const { layout, save: saveLayout } = useProgramLayout(session, entry?.name ?? null);
+  const viewRef = useRef<EditorView | null>(null);
+  const jumpTo = useCallback((line: number | undefined) => {
+    const view = viewRef.current;
+    if (view === null || line === undefined || line < 1) return;
+    const doc = view.state.doc;
+    if (line > doc.lines) return;
+    const pos = doc.line(line).from;
+    view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "center" }), scrollIntoView: true });
+    view.focus();
+  }, []);
 
   const open = useCallback(
     async (target: CatalogEntry | string) => {
@@ -246,6 +262,16 @@ export default function ProgramEditorPane({ session, realm, program, theme, init
             {entry?.error && !dirty && <Badge color="red">import error</Badge>}
             <div className="ml-auto flex items-center gap-1">
               <Button
+                variant={showGraph ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 w-7 p-0"
+                disabled={file === null || graph === undefined}
+                onClick={() => setShowGraph((v) => !v)}
+                title={showGraph ? "Hide the state-machine graph" : "Show the state-machine graph"}
+              >
+                <GitBranch className="size-4" />
+              </Button>
+              <Button
                 variant="default"
                 size="sm"
                 className="cmd h-7"
@@ -277,6 +303,23 @@ export default function ProgramEditorPane({ session, realm, program, theme, init
               </Button>
             </div>
           </div>
+          {file !== null && graph !== undefined && graph.states.length > 0 && showGraph && (
+            <div className="relative h-64 shrink-0 border-b border-zinc-950/5 dark:border-white/10">
+              <ProgramGraph
+                graph={graph}
+                live={state?.program === entry?.name ? { state, transitions: program.transitions } : undefined}
+                layout={layout}
+                onLayoutChange={(l) => void saveLayout(l).catch((e) => setStatus({ kind: "err", text: `layout: ${String(e)}` }))}
+                onSelectState={(sid) => jumpTo(graph.source?.actions[sid] ?? graph.source?.states[sid])}
+                onSelectTransition={(event) => jumpTo(event ? graph.source?.transitions[event] : undefined)}
+              />
+              {dirty && (
+                <span className="absolute right-2 top-2 rounded bg-amber-500/15 px-1.5 text-[10px] text-amber-700 dark:text-amber-300">
+                  graph shows the last saved version
+                </span>
+              )}
+            </div>
+          )}
           <div className="min-h-0 flex-1 overflow-auto text-[13px]">
             {file === null ? (
               <div className="p-4 text-sm text-zinc-500 dark:text-zinc-400">
@@ -290,6 +333,9 @@ export default function ProgramEditorPane({ session, realm, program, theme, init
                 height="100%"
                 theme={theme === "dark" ? oneDark : "light"}
                 extensions={[python(), saveKeymap]}
+                onCreateEditor={(view) => {
+                  viewRef.current = view;
+                }}
                 basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, indentOnInput: true }}
                 onChange={(value) => setText(value)}
                 className="h-full"

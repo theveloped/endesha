@@ -52,6 +52,7 @@ class CatalogEntry:
     path: str = ""
     error: str | None = None
     hmi: dict[str, str] = field(default_factory=dict)  # event -> operator label
+    graph: dict = field(default_factory=dict)  # states/transitions/triggers/source (wf.program.graph)
 
     def to_wire(self) -> dict:
         return {
@@ -62,6 +63,7 @@ class CatalogEntry:
             "path": self.path,
             "error": self.error,
             "hmi": dict(self.hmi),
+            "graph": dict(self.graph),
         }
 
     @classmethod
@@ -74,6 +76,7 @@ class CatalogEntry:
             path=d.get("path", ""),
             error=d.get("error"),
             hmi=dict(d.get("hmi") or {}),
+            graph=dict(d.get("graph") or {}),
         )
 
 
