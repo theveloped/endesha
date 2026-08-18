@@ -155,3 +155,7 @@
 {"t": 1786526731724427097, "key": "config/frames/catalyst_smoke", "old": {"parent": "world", "xyz": [0, 0, 0], "quat": [0, 0, 0, 1], "source": "manual", "meta": {}}, "new": null, "revision": null}
 {"t": 1786608580633230340, "key": "config/frames/ui_smoke_frame_20260806", "old": null, "new": {"parent": "world", "xyz": [0, 0, 0], "quat": [0, 0, 0, 1], "source": "manual", "meta": {}}, "revision": 1}
 {"t": 1786608600429154503, "key": "config/frames/ui_smoke_frame_20260806", "old": {"parent": "world", "xyz": [0, 0, 0], "quat": [0, 0, 0, 1], "source": "manual", "meta": {}}, "new": null, "revision": null}
+{"t": 1786956061212133900, "key": "config/programs/demo_pick/poses/ui_taught_63", "old": null, "new": {"q": [0, -0.5236, 2.0944, -0.6981, 1.5708, 0]}, "revision": 1}
+{"t": 1786956131590467700, "key": "config/programs/demo_pick/poses/dbg_pose", "old": null, "new": {"q": [-0.8726646259971649, -0.5235987755982988, 2.0943951023931953, -0.6981317007977319, 1.5707963267948968, 9.540979117872439e-18]}, "revision": 1}
+{"t": 1786956175827970900, "key": "config/programs/demo_pick/poses/dbg_pose", "old": {"q": [-0.8726646259971649, -0.5235987755982988, 2.0943951023931953, -0.6981317007977319, 1.5707963267948968, 9.540979117872439e-18]}, "new": null, "revision": null}
+{"t": 1786956175846970500, "key": "config/programs/demo_pick/poses/ui_taught_63", "old": {"q": [0, -0.5236, 2.0944, -0.6981, 1.5708, 0]}, "new": null, "revision": null}

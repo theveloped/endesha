@@ -26,7 +26,7 @@ class DemoPick(Program):
         "place": "inspect_a",
     }
     triggers = [
-        on_channel("io", "part_present", edge="rising", event="part_arrived"),
+        on_channel("io", "part_present", event="part_arrived"),
         # Nothing arrived for a while: go home and idle instead of hovering.
         after(20.0, state="waiting", event="feeder_quiet"),
     ]

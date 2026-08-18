@@ -271,12 +271,30 @@ config/intrinsics/cam0:
   revision: 1
   t: 0
   value:
-    cx: 639.5
-    cy: 399.5
-    fx: 900.0
-    fy: 900.0
-    h: 800
-    w: 1280
+    D: []
+    K:
+    - 900.0
+    - 0.0
+    - 639.5
+    - 0.0
+    - 900.0
+    - 399.5
+    - 0.0
+    - 0.0
+    - 1.0
+    R:
+    - 1.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    distortion_model: plumb_bob
+    height: 800
+    width: 1280
 config/poses/belt_above:
   revision: 2
   t: 1781710996927258600
