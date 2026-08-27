@@ -1,6 +1,7 @@
-// Main navigation: cells, recordings, operator HMI, theme. Selection is a
-// route change (the URL is the source of truth, see router.ts).
-import { Cpu, Database, MonitorSmartphone, Moon, Sun } from "lucide-react";
+// Main navigation: cells (with the active cell's pages as sub-items),
+// recordings, theme. Selection is a route change (the URL is the source of
+// truth, see router.ts).
+import { Box, Cpu, Database, FileCode2, MonitorSmartphone, Moon, RadioTower, Sun } from "lucide-react";
 import { useState, type MouseEvent as ReactMouseEvent } from "react";
 import { Badge } from "../catalyst/badge";
 import { Button } from "../catalyst/button";
@@ -103,6 +104,27 @@ export function AppSidebar({
       onNavigate(target);
     },
   });
+  // The active cell's pages, indented under the cell item.
+  const cellPages = (
+    <div className="ml-3 border-l border-zinc-950/5 pl-2 dark:border-white/5">
+      <SidebarItem current={route.kind === "cell"} {...link({ kind: "cell", tool })}>
+        <Box data-slot="icon" />
+        <SidebarLabel>Workspace</SidebarLabel>
+      </SidebarItem>
+      <SidebarItem current={route.kind === "program"} {...link({ kind: "program", name: null })}>
+        <FileCode2 data-slot="icon" />
+        <SidebarLabel>Programs</SidebarLabel>
+      </SidebarItem>
+      <SidebarItem current={route.kind === "topics"} {...link({ kind: "topics" })}>
+        <RadioTower data-slot="icon" />
+        <SidebarLabel>Topics</SidebarLabel>
+      </SidebarItem>
+      <SidebarItem current={route.kind === "hmi"} {...link({ kind: "hmi" })}>
+        <MonitorSmartphone data-slot="icon" />
+        <SidebarLabel>Operator HMI</SidebarLabel>
+      </SidebarItem>
+    </div>
+  );
   return (
     <Sidebar>
       <SidebarHeader>
@@ -116,19 +138,22 @@ export function AppSidebar({
         <SidebarSection>
           <SidebarHeading>Cells</SidebarHeading>
           {host === null ? (
-            <SidebarItem current={route.kind === "cell"} {...link({ kind: "cell", tool })}>
-              <Cpu data-slot="icon" />
-              <SidebarLabel>{runtime.cellName}</SidebarLabel>
-              <span
-                className={`ml-auto size-2 rounded-full ${runtime.driverAlive ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"}`}
-                title={runtime.hostError ? `Host API unreachable: ${runtime.hostError}` : "Driver down"}
-              />
-            </SidebarItem>
+            <>
+              <SidebarItem {...link({ kind: "cell", tool })}>
+                <Cpu data-slot="icon" />
+                <SidebarLabel>{runtime.cellName}</SidebarLabel>
+                <span
+                  className={`ml-auto size-2 rounded-full ${runtime.driverAlive ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"}`}
+                  title={runtime.hostError ? `Host API unreachable: ${runtime.hostError}` : "Driver down"}
+                />
+              </SidebarItem>
+              {cellPages}
+            </>
           ) : (
             host.cells.map((cell) => {
               const isActive = cell.id === activeId;
               const item = isActive ? (
-                <SidebarItem key={cell.id} current={route.kind === "cell"} {...link({ kind: "cell", tool })}>
+                <SidebarItem key={cell.id} {...link({ kind: "cell", tool })}>
                   <Cpu data-slot="icon" />
                   <SidebarLabel>{cell.name}</SidebarLabel>
                   <span
@@ -150,6 +175,7 @@ export function AppSidebar({
               return (
                 <div key={cell.id}>
                   {item}
+                  {isActive && cellPages}
                   {switching === cell.id && cell.error === null && (
                     <SwitchCellPanel
                       cell={cell}
@@ -165,10 +191,6 @@ export function AppSidebar({
               );
             })
           )}
-          <SidebarItem current={route.kind === "hmi"} {...link({ kind: "hmi" })}>
-            <MonitorSmartphone data-slot="icon" />
-            <SidebarLabel>Operator HMI</SidebarLabel>
-          </SidebarItem>
         </SidebarSection>
         <SidebarSection>
           <SidebarHeading>Recordings</SidebarHeading>

@@ -12,8 +12,8 @@ export function WorkspaceHeader({
   tool,
   onOpenScene,
 }: {
-  tool: WorkspaceTool;
-  onOpenScene: () => void;
+  tool: WorkspaceTool | "topics" | "program";
+  onOpenScene?: () => void;
 }) {
   const runtime = useRuntime();
   const owner = runtime.controlOwner?.owner ?? null;
@@ -21,13 +21,20 @@ export function WorkspaceHeader({
     runtime.realm.kind === "cell"
       ? runtime.cellName
       : runtime.realm.replaySession ?? "Select recording";
-  const toolLabel = TOOL_META.find((item) => item.id === tool)?.label ?? tool;
+  const toolLabel =
+    tool === "topics"
+      ? "Topics"
+      : tool === "program"
+        ? "Programs"
+        : (TOOL_META.find((item) => item.id === tool)?.label ?? tool);
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-zinc-950/5 px-3 dark:border-white/10">
-      <Button plain className="xl:hidden" onClick={onOpenScene} title="Open scene structure">
-        <GitBranch data-slot="icon" />
-      </Button>
+      {onOpenScene !== undefined && (
+        <Button plain className="xl:hidden" onClick={onOpenScene} title="Open scene structure">
+          <GitBranch data-slot="icon" />
+        </Button>
+      )}
       <div className="flex min-w-0 items-center gap-1.5 text-sm/6 text-zinc-500 dark:text-zinc-400">
         <span className="max-sm:hidden">
           {runtime.realm.kind === "cell" ? "Cells" : "Recordings"}

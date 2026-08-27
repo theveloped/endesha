@@ -11,7 +11,6 @@ export const RIGHT_DEFAULT_WIDTH: Record<WorkspaceTool, number> = {
   io: 560,
   cameras: 620,
   configuration: 620,
-  topics: 720,
 };
 
 export function useWindowWidth(): number {

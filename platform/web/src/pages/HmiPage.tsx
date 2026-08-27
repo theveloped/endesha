@@ -1,6 +1,6 @@
-// Operator page (`#/hmi`, program-layer RFC §7.2): the unit state, big
+// Operator page (`#/cell/hmi`, program-layer RFC §7.2): the unit state, big
 // PackML buttons, e-stop status, the loaded program's state and last error.
-// No scene editing, no jogging — the engineering workspace lives at #/cell.
+// No scene editing, no jogging — the engineering workspace lives at #/cell/<tool>.
 import { useMemo, useState } from "react";
 import { Badge } from "../catalyst/badge";
 import { Button } from "../catalyst/button";

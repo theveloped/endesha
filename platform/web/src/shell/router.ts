@@ -2,9 +2,11 @@
 // realm and the active tool, so views are deep-linkable and the back button
 // works.
 //
-//   #/cell/<tool>            operate the live cell
+//   #/cell/<tool>            the engineering workspace of the active cell
+//   #/cell/program/<name?>   full-page program studio (files, graph, editor)
+//   #/cell/topics            full-page topic inspector for the active cell
+//   #/cell/hmi               the operator page (legacy #/hmi still parses)
 //   #/replay/<sid>/<tool>    a recording
-//   #/hmi                    the operator page
 //
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { WorkspaceTool } from "./ToolRibbon";
@@ -12,8 +14,10 @@ import { TOOL_META } from "./ToolRibbon";
 
 export type Route =
   | { kind: "cell"; tool: WorkspaceTool }
-  | { kind: "replay"; sid: string | null; tool: WorkspaceTool }
-  | { kind: "hmi" };
+  | { kind: "program"; name: string | null }
+  | { kind: "topics" }
+  | { kind: "hmi" }
+  | { kind: "replay"; sid: string | null; tool: WorkspaceTool };
 
 const DEFAULT_TOOL: WorkspaceTool = "overview";
 
@@ -28,13 +32,20 @@ export function parseRoute(hash: string): Route {
     const sid = parts[1] ?? null;
     return { kind: "replay", sid, tool: isTool(parts[2]) ? parts[2] : DEFAULT_TOOL };
   }
+  if (parts[0] === "cell" && parts[1] === "hmi") return { kind: "hmi" };
+  if (parts[0] === "cell" && parts[1] === "topics") return { kind: "topics" };
+  if (parts[0] === "cell" && parts[1] === "program") return { kind: "program", name: parts[2] ?? null };
   return { kind: "cell", tool: isTool(parts[1]) ? parts[1] : DEFAULT_TOOL };
 }
 
 export function routeToHash(route: Route): string {
   switch (route.kind) {
     case "hmi":
-      return "#/hmi";
+      return "#/cell/hmi";
+    case "topics":
+      return "#/cell/topics";
+    case "program":
+      return route.name === null ? "#/cell/program" : `#/cell/program/${encodeURIComponent(route.name)}`;
     case "replay":
       return route.sid === null
         ? `#/replay`

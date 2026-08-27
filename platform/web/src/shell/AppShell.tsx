@@ -1,17 +1,19 @@
 // The engineering workspace shell. The URL (hash router) is the source of truth
-// for realm + tool; the sidebar, header, panes and per-tool right pane live in
-// their own modules. `#/hmi` renders the operator page instead.
-import { useCallback, useEffect, useRef, useState } from "react";
+// for realm + page/tool; the sidebar, header, panes and per-tool right pane live
+// in their own modules. `#/cell/topics` and `#/cell/program` swap the pane trio
+// for a full-page topic inspector / program studio; `#/cell/hmi` renders the
+// operator page instead.
+import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "../catalyst/button";
 import { Navbar, NavbarLabel } from "../catalyst/navbar";
 import { SidebarLayout } from "../catalyst/sidebar-layout";
 import ReplayDrawer from "../components/ReplayDrawer";
-import { TcpDragPanel } from "../components/TcpDragPanel";
 import { sendExecutePath } from "../lib/actions";
 import HmiPage from "../pages/HmiPage";
 import OverviewPage from "../pages/OverviewPage";
-import ProgramEditorPane from "../pages/ProgramEditorPane";
+import ProgramStudioPage from "../pages/ProgramStudioPage";
+import TopicsPage from "../pages/TopicsPage";
 import { useRuntime } from "../runtime/context";
 import { useProgram } from "../runtime/useProgram";
 import { SceneCreatePanel } from "../scene/SceneCreatePanel";
@@ -143,8 +145,8 @@ function Workspace({
   const [dragMode, setDragMode] = useState<TcpDragMode>("off");
   const [dragPending, setDragPending] = useState(false);
   const [dragError, setDragError] = useState<string | null>(null);
-  // Program editor mode: {open, program to open first}. Takes over the right pane.
-  const [editor, setEditor] = useState<{ open: boolean; name: string | null }>({ open: false, name: null });
+  const isTopics = route.kind === "topics";
+  const isProgram = route.kind === "program";
   const structure = useSceneStructure(runtime.session, runtime.prefix, configurationRevision);
   const program = useProgram(runtime.session, runtime.prefix);
   const dragAllowed = runtime.commandsEnabled && runtime.driverAlive && runtime.holdsControl;
@@ -155,10 +157,10 @@ function Workspace({
   const [leftWidth, setLeftWidth] = useRememberedWidth("wf.shell.scene-width", LEFT_DEFAULT, 260, maxLeft);
   const navigationWidth = windowWidth >= 1024 ? 256 : 0;
   const dockedSceneWidth = windowWidth >= 1280 ? leftWidth : 0;
-  const maxRight = Math.max(340, Math.min(editor.open ? 1200 : 760, windowWidth - navigationWidth - dockedSceneWidth - 400));
+  const maxRight = Math.max(340, Math.min(760, windowWidth - navigationWidth - dockedSceneWidth - 400));
   const [rightWidth, setRightWidth] = useRememberedWidth(
-    editor.open ? "wf.shell.right-width.editor" : `wf.shell.right-width.${tool}`,
-    editor.open ? 900 : RIGHT_DEFAULT_WIDTH[tool],
+    `wf.shell.right-width.${tool}`,
+    RIGHT_DEFAULT_WIDTH[tool],
     340,
     maxRight,
   );
@@ -207,8 +209,6 @@ function Workspace({
   const chooseTool = (next: WorkspaceTool) => {
     setSelection(null);
     setCreateRequest(null);
-    setDragMode("off");
-    if (next !== "programs") setEditor({ open: false, name: null });
     if (next !== "configuration") setPreview(null);
     navigate(route.kind === "replay" ? { kind: "replay", sid: route.sid, tool: next } : { kind: "cell", tool: next });
   };
@@ -216,12 +216,10 @@ function Workspace({
   const groupForCreateKind = (kind: SceneCreateKind): SceneGroupKind =>
     kind === "frame" ? "frames" : kind === "tcp" ? "tcps" : kind === "pose" ? "poses" : "objects";
   const openCreate = (request: SceneCreateRequest) => {
-    setDragMode("off");
     setCreateRequest(request);
     setSceneOpen(false);
   };
   const selectSceneItem = (next: SceneSelection) => {
-    setDragMode("off");
     setCreateRequest(null);
     setSelection(next);
     setSceneOpen(false);
@@ -250,12 +248,8 @@ function Workspace({
           preview,
           onPreview: setPreview,
           onConfigurationMutated: mutateConfiguration,
-          onEditProgram: (name: string | null) => {
-            setSelection(null);
-            setCreateRequest(null);
-            setDragMode("off");
-            setEditor({ open: true, name });
-          },
+          // Editing happens on the full program studio page.
+          onEditProgram: (name: string | null) => navigate({ kind: "program", name }),
         };
 
   return (
@@ -267,14 +261,38 @@ function Workspace({
         data-realm={runtime.realm.kind}
         className={`flex h-full min-h-0 flex-col ${runtime.safetyActive ? "safety-active" : ""}`}
       >
-        <WorkspaceHeader tool={tool} onOpenScene={() => setSceneOpen(true)} />
+        <WorkspaceHeader
+          tool={isTopics ? "topics" : isProgram ? "program" : tool}
+          onOpenScene={isTopics || isProgram ? undefined : () => setSceneOpen(true)}
+        />
+        {isTopics ? (
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <TopicsPage session={runtime.session} wsConnected={runtime.wsConnected} />
+          </main>
+        ) : isProgram ? (
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            {runtime.prefix === null ? (
+              <div className="flex h-full items-center justify-center text-sm/6 text-zinc-500 dark:text-zinc-400">
+                Connect to a cell to edit its programs.
+              </div>
+            ) : (
+              <ProgramStudioPage
+                session={runtime.session}
+                realm={runtime.prefix}
+                program={program}
+                theme={theme}
+                initialName={route.kind === "program" ? route.name : null}
+              />
+            )}
+          </main>
+        ) : (
         <div className="workspace flex min-h-0 flex-1">
           <ResizablePane
             side="left"
             width={leftWidth}
             onWidth={setLeftWidth}
             onReset={() => setLeftWidth(LEFT_DEFAULT)}
-            className="hidden xl:flex"
+            className="hidden xl:block"
           >
             {hierarchy}
           </ResizablePane>
@@ -282,17 +300,28 @@ function Workspace({
           <main className="relative min-w-0 flex-1 bg-zinc-100 dark:bg-zinc-950">
             <ToolRibbon
               active={tool}
-              dragActive={effectiveDragMode !== "off"}
+              dragMode={effectiveDragMode}
               dragAllowed={dragAllowed}
               dragPending={dragPending}
               onSelect={chooseTool}
-              onToggleDrag={() => {
-                setSelection(null);
-                setCreateRequest(null);
+              onDragMode={(mode) => {
                 setDragError(null);
-                setDragMode((current) => (current === "off" ? "translate" : "off"));
+                setDragMode(mode);
               }}
             />
+            {dragError !== null && (
+              <div className="absolute top-14 left-1/2 z-20 flex max-w-md -translate-x-1/2 items-start gap-2 rounded-lg bg-red-50/95 px-3 py-2 text-xs/5 text-red-700 shadow-lg ring-1 ring-red-500/20 backdrop-blur dark:bg-red-950/80 dark:text-red-300">
+                <p className="min-w-0 break-words">{dragError}</p>
+                <button
+                  type="button"
+                  aria-label="Dismiss drag error"
+                  className="shrink-0 rounded p-0.5 hover:bg-red-500/10"
+                  onClick={() => setDragError(null)}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            )}
             {runtime.prefix === null ? (
               <div className="flex h-full items-center justify-center text-sm/6 text-zinc-500 dark:text-zinc-400">
                 Select a recording from the main navigation.
@@ -335,19 +364,10 @@ function Workspace({
             side="right"
             width={rightWidth}
             onWidth={setRightWidth}
-            onReset={() => setRightWidth(editor.open ? 900 : RIGHT_DEFAULT_WIDTH[tool])}
+            onReset={() => setRightWidth(RIGHT_DEFAULT_WIDTH[tool])}
           >
             <aside className="h-full min-h-0 overflow-hidden bg-white dark:bg-zinc-900">
-              {editor.open && runtime.prefix !== null ? (
-                <ProgramEditorPane
-                  session={runtime.session}
-                  realm={runtime.prefix}
-                  program={program}
-                  theme={theme}
-                  initialName={editor.name}
-                  onClose={() => setEditor({ open: false, name: null })}
-                />
-              ) : createRequest !== null ? (
+              {createRequest !== null ? (
                 <SceneCreatePanel
                   key={`${createRequest.parent?.kind ?? "group"}:${createRequest.parent?.name ?? "root"}:${createRequest.kinds.join(",")}`}
                   request={createRequest}
@@ -371,22 +391,13 @@ function Workspace({
                 />
               ) : selection !== null ? (
                 <SceneDetails selection={selection} onClose={() => setSelection(null)} />
-              ) : effectiveDragMode !== "off" ? (
-                <TcpDragPanel
-                  mode={effectiveDragMode}
-                  allowed={dragAllowed}
-                  pending={dragPending}
-                  error={dragError}
-                  activeTcp={runtime.status?.active_tcp ?? null}
-                  onMode={setDragMode}
-                  onClose={() => setDragMode("off")}
-                />
               ) : (
                 <RightToolPane tool={tool} ctx={paneCtx} />
               )}
             </aside>
           </ResizablePane>
         </div>
+        )}
 
         {runtime.realm.kind === "replay" && (
           <ReplayDrawer
@@ -423,36 +434,37 @@ export default function AppShell() {
   const runtime = useRuntime();
   const [route, navigate] = useRoute();
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("wf.theme") === "dark" ? "dark" : "light"));
-  // Last workspace tool, so the HMI can hand back to it (a ref: no re-render).
-  const lastTool = useRef<WorkspaceTool>("overview");
+  // Last workspace tool, so the full-page views (HMI, Topics) hand back to it.
+  // Adjusted during render (not in an effect): it derives from the route.
+  const [lastTool, setLastTool] = useState<WorkspaceTool>("overview");
+  if ((route.kind === "cell" || route.kind === "replay") && route.tool !== lastTool) {
+    setLastTool(route.tool);
+  }
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
     localStorage.setItem("wf.theme", theme);
   }, [theme]);
 
-  // The route drives the realm; the workspace remembers the last tool so the
-  // HMI can hand back to it.
+  // The route drives the realm; Topics and the HMI belong to the active cell.
   const { setRealm } = runtime;
   useEffect(() => {
-    if (route.kind === "cell") {
-      lastTool.current = route.tool;
-      setRealm({ kind: "cell", replaySession: null });
-    } else if (route.kind === "replay") {
-      lastTool.current = route.tool;
+    if (route.kind === "replay") {
       setRealm({ kind: "replay", replaySession: route.sid });
+    } else {
+      setRealm({ kind: "cell", replaySession: null });
     }
   }, [route, setRealm]);
 
   const toggleTheme = () => setTheme((current) => (current === "dark" ? "light" : "dark"));
 
   if (route.kind === "hmi") {
-    return <HmiPage onExit={() => navigate({ kind: "cell", tool: lastTool.current })} />;
+    return <HmiPage onExit={() => navigate({ kind: "cell", tool: lastTool })} />;
   }
   return (
     <Workspace
       route={route}
-      tool={route.tool}
+      tool={route.kind === "cell" || route.kind === "replay" ? route.tool : lastTool}
       navigate={navigate}
       theme={theme}
       onToggleTheme={toggleTheme}

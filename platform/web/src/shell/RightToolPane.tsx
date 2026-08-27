@@ -9,7 +9,6 @@ import FramesPage from "../pages/FramesPage";
 import IoPage from "../pages/IoPage";
 import OperatePage from "../pages/OperatePage";
 import ProgramsPage from "../pages/ProgramsPage";
-import TopicsPage from "../pages/TopicsPage";
 import type { RuntimeState } from "../runtime/context";
 import type { ProgramView } from "../runtime/useProgram";
 import type { ScenePreview } from "../scene/types";
@@ -96,9 +95,6 @@ const PANES: Record<WorkspaceTool, (ctx: ToolPaneContext) => ReactNode> = {
       commandsEnabled={runtime.commandsEnabled}
       producer={runtime.cameraProducer}
     />
-  ),
-  topics: ({ runtime }) => (
-    <TopicsPage session={runtime.session} wsConnected={runtime.wsConnected} compact />
   ),
   configuration: ({ runtime, prefix, structure, preview, onPreview, onConfigurationMutated }) => (
     <div className="flex h-full min-h-0 flex-col">

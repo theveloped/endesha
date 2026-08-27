@@ -4,10 +4,11 @@ import {
   Hand,
   ListChecks,
   Move3d,
-  RadioTower,
+  Rotate3d,
   Settings2,
   SlidersHorizontal,
 } from "lucide-react";
+import type { TcpDragMode } from "../scene/viewerControls";
 
 export type WorkspaceTool =
   | "overview"
@@ -15,8 +16,7 @@ export type WorkspaceTool =
   | "programs"
   | "io"
   | "cameras"
-  | "configuration"
-  | "topics";
+  | "configuration";
 
 const TOOLS: Array<{
   id: WorkspaceTool;
@@ -29,26 +29,35 @@ const TOOLS: Array<{
   { id: "programs", label: "Programs", hint: "Load and run programs (PackML unit)", icon: ListChecks },
   { id: "io", label: "IO", hint: "Digital and analog signals", icon: SlidersHorizontal },
   { id: "cameras", label: "Cameras", hint: "Images and acquisition", icon: Camera },
-  { id: "topics", label: "Topics", hint: "Raw Zenoh samples and metadata", icon: RadioTower },
   { id: "configuration", label: "Configure", hint: "Frames, TCPs, poses and device sources", icon: Settings2 },
 ];
 
 export const TOOL_META = TOOLS;
 
+const DRAG_MODES: Array<{
+  mode: Exclude<TcpDragMode, "off">;
+  label: string;
+  hint: string;
+  icon: typeof Move3d;
+}> = [
+  { mode: "translate", label: "Drag TCP (translate)", hint: "Drag the active TCP with translation handles", icon: Move3d },
+  { mode: "rotate", label: "Drag TCP (rotate)", hint: "Drag the active TCP with rotation handles", icon: Rotate3d },
+];
+
 export function ToolRibbon({
   active,
-  dragActive,
+  dragMode,
   dragAllowed,
   dragPending,
   onSelect,
-  onToggleDrag,
+  onDragMode,
 }: {
   active: WorkspaceTool;
-  dragActive: boolean;
+  dragMode: TcpDragMode;
   dragAllowed: boolean;
   dragPending: boolean;
   onSelect: (tool: WorkspaceTool) => void;
-  onToggleDrag: () => void;
+  onDragMode: (mode: TcpDragMode) => void;
 }) {
   return (
     <div className="pointer-events-none absolute top-3 left-1/2 z-20 -translate-x-1/2">
@@ -78,27 +87,24 @@ export function ToolRibbon({
           );
         })}
         <span className="mx-0.5 h-5 w-px bg-zinc-950/10 dark:bg-white/10" />
-        <button
-          type="button"
-          disabled={!dragAllowed || dragPending}
-          title={
-            dragAllowed
-              ? dragActive
-                ? "Disable TCP drag handles"
-                : "Drag active TCP — enable interactive Cartesian positioning"
-              : "TCP drag requires live control and an alive driver"
-          }
-          aria-label="Drag active TCP"
-          aria-pressed={dragActive}
-          onClick={onToggleDrag}
-          className={`flex size-8 items-center justify-center rounded-lg transition disabled:cursor-not-allowed disabled:text-zinc-300 dark:disabled:text-zinc-600 ${
-            dragActive
-              ? "bg-blue-600 text-white dark:bg-blue-500"
-              : "text-zinc-500 hover:bg-zinc-950/5 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
-          }`}
-        >
-          <Move3d className={`size-4 ${dragPending ? "animate-pulse" : ""}`} />
-        </button>
+        {DRAG_MODES.map(({ mode, label, hint, icon: Icon }) => (
+          <button
+            key={mode}
+            type="button"
+            disabled={!dragAllowed || dragPending}
+            title={dragAllowed ? `${label} — ${hint}` : `${label} — requires live control and an alive driver`}
+            aria-label={label}
+            aria-pressed={dragMode === mode}
+            onClick={() => onDragMode(dragMode === mode ? "off" : mode)}
+            className={`flex size-8 items-center justify-center rounded-lg transition disabled:cursor-not-allowed disabled:text-zinc-300 dark:disabled:text-zinc-600 ${
+              dragMode === mode
+                ? "bg-blue-600 text-white dark:bg-blue-500"
+                : "text-zinc-500 hover:bg-zinc-950/5 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white"
+            }`}
+          >
+            <Icon className={`size-4 ${dragPending && dragMode === mode ? "animate-pulse" : ""}`} />
+          </button>
+        ))}
       </div>
     </div>
   );
