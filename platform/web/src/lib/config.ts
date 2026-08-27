@@ -353,3 +353,20 @@ export function supervisorDevices(realm: string, node = "main"): string {
 export function supervisorCmdSetSource(realm: string, node = "main"): string {
   return `${realm}/supervisor/${node}/cmd/set_source`;
 }
+
+/** Captured stdout/stderr of every supervised child; each key is one service.
+ * Subscribe live and query the same glob for the per-service ring buffers. */
+export function supervisorLogGlob(realm: string, node = "main"): string {
+  return `${realm}/supervisor/${node}/log/*`;
+}
+
+/** Supervisor lifecycle events (started/exited/stopped/source_switched/...);
+ * queryable for the ring: `{events: [...]}`. */
+export function supervisorEvents(realm: string, node = "main"): string {
+  return `${realm}/supervisor/${node}/events`;
+}
+
+/** Query/reply audit echoes: one key per service (`{realm}/audit/<service>`). */
+export function auditGlob(realm: string): string {
+  return `${realm}/audit/*`;
+}

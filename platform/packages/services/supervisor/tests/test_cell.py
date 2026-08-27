@@ -317,6 +317,14 @@ class _FakePub:
         pass
 
 
+class _FakeEvents:
+    def __init__(self):
+        self.records = []
+
+    def emit(self, kind, service=None, **detail):
+        self.records.append({"kind": kind, "service": service, **detail})
+
+
 def _switchable_service(tmp_path) -> SupervisorService:
     cell = load_cell(_write(tmp_path, _SOURCES_CELL))
     svc = object.__new__(SupervisorService)
@@ -332,6 +340,7 @@ def _switchable_service(tmp_path) -> SupervisorService:
     svc._procs = _FakeProcs()
     svc._devices_pub = _FakePub()
     svc._descriptor_pub = _FakePub()
+    svc._events = _FakeEvents()
     return svc
 
 

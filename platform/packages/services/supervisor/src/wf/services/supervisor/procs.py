@@ -53,11 +53,18 @@ _SPAWN_SETTLE_S = 0.5
 
 
 class ProcManager:
-    """Owns ``subprocess.Popen`` children keyed by a logical name."""
+    """Owns ``subprocess.Popen`` children keyed by a logical name.
 
-    def __init__(self) -> None:
+    ``on_line(name, stream, line)`` — when given — receives every captured
+    stdout/stderr line of every child (called from per-child reader threads);
+    lines are additionally mirrored to the supervisor's own stderr so the
+    terminal keeps showing child output.
+    """
+
+    def __init__(self, on_line=None) -> None:
         self._procs: dict[str, subprocess.Popen] = {}
         self._lock = threading.Lock()
+        self._on_line = on_line
 
     def spawn(self, name: str, argv: list[str], *, env=None) -> None:
         """Spawn ``[sys.executable, "-m", *argv]`` under ``name``.
@@ -69,11 +76,21 @@ class ProcManager:
             if name in self._procs and self._procs[name].poll() is None:
                 raise RuntimeError(f"spawn_failed:{name}")  # already running
             try:
-                proc = subprocess.Popen([sys.executable, "-m", *argv], env=env)
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", *argv],
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                )
             except Exception as exc:  # noqa: BLE001
                 _log.error("spawn %s failed: %r", name, exc)
                 raise RuntimeError(f"spawn_failed:{name}") from exc
             self._procs[name] = proc
+        self._start_readers(name, proc)
         time.sleep(_SPAWN_SETTLE_S)
         if proc.poll() is not None:
             _log.error("spawn %s exited immediately rc=%s", name, proc.returncode)
@@ -81,6 +98,31 @@ class ProcManager:
                 self._procs.pop(name, None)
             raise RuntimeError(f"spawn_failed:{name}")
         _log.info("spawned %s pid=%s", name, proc.pid)
+
+    def _start_readers(self, name: str, proc: subprocess.Popen) -> None:
+        for stream_name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr)):
+            if stream is None:
+                continue
+            threading.Thread(
+                target=self._read_stream,
+                args=(name, stream_name, stream),
+                name=f"log-{name}-{stream_name}",
+                daemon=True,
+            ).start()
+
+    def _read_stream(self, name: str, stream_name: str, stream) -> None:
+        try:
+            for line in stream:
+                # Mirror to the supervisor's console: pipes replaced the
+                # inherited console, keep the terminal experience intact.
+                sys.stderr.write(f"[{name}] {line}")
+                if self._on_line is not None:
+                    try:
+                        self._on_line(name, stream_name, line)
+                    except Exception:  # noqa: BLE001
+                        _log.debug("on_line failed", exc_info=True)
+        except (ValueError, OSError):
+            pass  # stream closed while reading (child reaped)
 
     def alive(self, name: str) -> bool:
         with self._lock:
@@ -103,16 +145,17 @@ class ProcManager:
         for name, proc in items:
             self._reap(name, proc, timeout)
 
-    def reap_dead(self) -> list[str]:
-        """Drop children that have exited on their own; return their names."""
-        dead: list[str] = []
+    def reap_dead(self) -> list[tuple[str, int | None]]:
+        """Drop children that have exited on their own; return
+        ``(name, returncode)`` pairs."""
+        dead: list[tuple[str, int | None]] = []
         with self._lock:
             for name, proc in list(self._procs.items()):
                 if proc.poll() is not None:
-                    dead.append(name)
+                    dead.append((name, proc.returncode))
                     del self._procs[name]
-        for name in dead:
-            _log.warning("child %s exited unexpectedly", name)
+        for name, rc in dead:
+            _log.warning("child %s exited unexpectedly rc=%s", name, rc)
         return dead
 
     def names(self) -> list[str]:

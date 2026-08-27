@@ -64,6 +64,7 @@ from wf.contracts.program.messages import (
     TransitionEvent,
 )
 from wf.contracts.supervisor import keys as sup_keys
+from wf.core.audit import QueryAudit
 from wf.core.codec import decode, encode
 from wf.core.log import get_logger
 from wf.core.session import open_session
@@ -116,6 +117,7 @@ class ProgramRunner:
     ) -> None:
         self.session = session
         self.realm = realm
+        self._audit = QueryAudit(session, realm, "program_runner")
         self.programs_dir = programs_dir
         self.node = node
 
@@ -173,15 +175,15 @@ class ProgramRunner:
             self._fetch_devices()
         self._queryables = [
             self.session.declare_queryable(keys.catalog(self.realm), self._on_catalog_query),
-            self.session.declare_queryable(keys.cmd_load(self.realm), self._on_load),
+            self.session.declare_queryable(keys.cmd_load(self.realm), self._audit.wrap(self._on_load)),
             self.session.declare_queryable(keys.state(self.realm), self._on_state_query),
-            self.session.declare_queryable(keys.cmd_event(self.realm), self._on_event),
+            self.session.declare_queryable(keys.cmd_event(self.realm), self._audit.wrap(self._on_event)),
             self.session.declare_queryable(keys.cmd_source(self.realm), self._on_source),
-            self.session.declare_queryable(keys.cmd_save(self.realm), self._on_save),
-            self.session.declare_queryable(keys.cmd_delete(self.realm), self._on_delete),
+            self.session.declare_queryable(keys.cmd_save(self.realm), self._audit.wrap(self._on_save)),
+            self.session.declare_queryable(keys.cmd_delete(self.realm), self._audit.wrap(self._on_delete)),
             self.session.declare_queryable(keys.log(self.realm), self._on_log_query),
         ] + [
-            self.session.declare_queryable(keys.cmd(self.realm, c), self._make_cmd_handler(c))
+            self.session.declare_queryable(keys.cmd(self.realm, c), self._audit.wrap(self._make_cmd_handler(c)))
             for c in UNIT_COMMANDS
         ]
         self._alive_token = self.session.liveliness().declare_token(keys.alive(self.realm))

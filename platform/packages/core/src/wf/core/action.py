@@ -153,10 +153,13 @@ class GoalHandle:
 
 
 class ActionServer:
-    def __init__(self, session, prefix: str, *, result_ttl_s: float = 60.0):
+    def __init__(self, session, prefix: str, *, result_ttl_s: float = 60.0, audit=None):
         self._session = session
         self._prefix = prefix
         self._result_ttl_s = result_ttl_s
+        # Optional wf.core.audit.QueryAudit: echoes goal/cancel queries (not
+        # the result polls) onto the realm's audit stream.
+        self._audit = audit
         self._lock = threading.RLock()
         self._records: dict[str, _GoalRecord] = {}
         self._active: _GoalRecord | None = None
@@ -171,7 +174,7 @@ class ActionServer:
         self._worker.start()
 
         self._queryables.append(
-            session.declare_queryable(f"{prefix}/cancel", self._on_cancel_query)
+            session.declare_queryable(f"{prefix}/cancel", self._wrap(self._on_cancel_query))
         )
         self._queryables.append(
             session.declare_queryable(f"{prefix}/*/result", self._on_result_query)
@@ -200,9 +203,12 @@ class ActionServer:
         self._queryables.append(
             self._session.declare_queryable(
                 f"{self._prefix}/{name}",
-                lambda query, _name=name: self._on_goal_query(_name, query),
+                self._wrap(lambda query, _name=name: self._on_goal_query(_name, query)),
             )
         )
+
+    def _wrap(self, handler):
+        return handler if self._audit is None else self._audit.wrap(handler)
 
     def close(self) -> None:
         if self._closed:

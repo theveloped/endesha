@@ -5,6 +5,8 @@
 //   #/cell/<tool>            the engineering workspace of the active cell
 //   #/cell/program/<name?>   full-page program studio (files, graph, editor)
 //   #/cell/topics            full-page topic inspector for the active cell
+//   #/cell/logs              service logs + supervisor events
+//   #/cell/queries           query/reply audit stream
 //   #/cell/hmi               the operator page (legacy #/hmi still parses)
 //   #/replay/<sid>/<tool>    a recording
 //
@@ -16,6 +18,8 @@ export type Route =
   | { kind: "cell"; tool: WorkspaceTool }
   | { kind: "program"; name: string | null }
   | { kind: "topics" }
+  | { kind: "logs" }
+  | { kind: "queries" }
   | { kind: "hmi" }
   | { kind: "replay"; sid: string | null; tool: WorkspaceTool };
 
@@ -34,6 +38,8 @@ export function parseRoute(hash: string): Route {
   }
   if (parts[0] === "cell" && parts[1] === "hmi") return { kind: "hmi" };
   if (parts[0] === "cell" && parts[1] === "topics") return { kind: "topics" };
+  if (parts[0] === "cell" && parts[1] === "logs") return { kind: "logs" };
+  if (parts[0] === "cell" && parts[1] === "queries") return { kind: "queries" };
   if (parts[0] === "cell" && parts[1] === "program") return { kind: "program", name: parts[2] ?? null };
   return { kind: "cell", tool: isTool(parts[1]) ? parts[1] : DEFAULT_TOOL };
 }
@@ -44,6 +50,10 @@ export function routeToHash(route: Route): string {
       return "#/cell/hmi";
     case "topics":
       return "#/cell/topics";
+    case "logs":
+      return "#/cell/logs";
+    case "queries":
+      return "#/cell/queries";
     case "program":
       return route.name === null ? "#/cell/program" : `#/cell/program/${encodeURIComponent(route.name)}`;
     case "replay":

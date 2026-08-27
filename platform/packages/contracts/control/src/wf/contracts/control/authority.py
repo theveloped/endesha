@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 
+from wf.core.audit import QueryAudit
 from wf.core.codec import decode, encode
 from wf.core.lease import ControlLease
 from wf.core.log import get_logger
@@ -31,6 +32,7 @@ class ControlAuthority:
     def __init__(self, session, realm: str, *, ttl_s: float = 30.0):
         self.session = session
         self.realm = realm
+        self._audit = QueryAudit(session, realm, "control")
         self._lease = ControlLease(ttl_s)
         self._pub = session.declare_publisher(keys.state_owner(realm))
         self._queryables: list = []
@@ -43,8 +45,8 @@ class ControlAuthority:
 
     def start(self) -> None:
         self._queryables = [
-            self.session.declare_queryable(keys.cmd_acquire(self.realm), self._on_acquire),
-            self.session.declare_queryable(keys.cmd_release(self.realm), self._on_release),
+            self.session.declare_queryable(keys.cmd_acquire(self.realm), self._audit.wrap(self._on_acquire)),
+            self.session.declare_queryable(keys.cmd_release(self.realm), self._audit.wrap(self._on_release)),
             self.session.declare_queryable(keys.state_owner(self.realm), self._on_owner_query),
         ]
         self._alive_token = self.session.liveliness().declare_token(keys.alive(self.realm))

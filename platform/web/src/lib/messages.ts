@@ -79,6 +79,12 @@ export type UnitState =
   | "holding" | "held" | "unholding" | "suspending" | "suspended" | "unsuspending"
   | "stopping" | "stopped" | "aborting" | "aborted" | "clearing" | "resetting";
 
+/** A catalog entry's graph is `{}` (no states) when the module does not
+ * import; only a graph with a non-empty states array is drawable. */
+export function drawableGraph(graph: ProgramGraph | undefined): ProgramGraph | undefined {
+  return graph !== undefined && Array.isArray(graph.states) && graph.states.length > 0 ? graph : undefined;
+}
+
 // ── program graph (wf/program/graph.py): the state machine as data ──────────
 
 export interface GraphState {
@@ -168,6 +174,43 @@ export interface ProgramLogLine {
   level: "info" | "warning" | "error";
   source: string;
   message: string;
+}
+
+/** One captured stdout/stderr line of a supervised child
+ * (`{realm}/supervisor/{node}/log/{service}`). */
+export interface ServiceLogLine {
+  t: WireTimestamp;
+  level: "debug" | "info" | "warning" | "error";
+  stream: "stdout" | "stderr";
+  source: string; // service name, e.g. hal.r1, program_runner
+  message: string;
+}
+
+/** Supervisor lifecycle event (`{realm}/supervisor/{node}/events`). */
+export interface SupervisorEvent {
+  t: WireTimestamp;
+  kind: string; // service_started | service_exited | service_stopped | spawn_failed | source_switched | supervisor_started
+  service: string | null;
+  exit_code?: number | null;
+  device_id?: string;
+  source?: string;
+  provider?: string;
+  error?: string;
+  ok?: boolean;
+  cell?: string;
+}
+
+/** Query/reply audit echo (`{realm}/audit/{service}`). */
+export interface AuditRecord {
+  t: WireTimestamp;
+  service: string;
+  key: string;
+  params: string | null;
+  request: unknown;
+  reply: unknown;
+  ok: boolean | null;
+  error: string | null;
+  duration_ms: number;
 }
 
 export interface ProgramSourceReply {
