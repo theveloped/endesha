@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { programDeleteFile, programEvent, programLoad, programSave, programSource } from "../lib/actions";
-import type { CatalogEntry, ProgramState } from "../lib/messages";
+import { drawableGraph, type CatalogEntry, type ProgramState } from "../lib/messages";
 import type { ProgramView } from "../runtime/useProgram";
 import { navigate } from "../shell/router";
 import { useRememberedWidth, useWindowWidth } from "../shell/layout";
@@ -76,7 +76,7 @@ export default function ProgramStudioPage({ session, realm, program, theme, init
   const entry = entries.find((e) => e.path.endsWith(`/${file}`) || e.path.endsWith(`\\${file}`)) ?? null;
   const state: ProgramState | null = program.state;
   const canLoad = state !== null && (state.unit === "idle" || state.unit === "stopped");
-  const graph = entry?.graph;
+  const graph = drawableGraph(entry?.graph);
   const live = entry !== null && state?.program === entry.name;
   const { layout, save: saveLayout } = useProgramLayout(session, entry?.name ?? null);
 
@@ -326,7 +326,7 @@ export default function ProgramStudioPage({ session, realm, program, theme, init
           </div>
         </div>
         <div className="relative min-h-0 flex-1">
-          {file !== null && graph !== undefined && graph.states.length > 0 ? (
+          {file !== null && graph !== undefined ? (
             <>
               <ProgramGraph
                 graph={graph}

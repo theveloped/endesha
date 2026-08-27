@@ -12,7 +12,9 @@ import ReplayDrawer from "../components/ReplayDrawer";
 import { sendExecutePath } from "../lib/actions";
 import HmiPage from "../pages/HmiPage";
 import OverviewPage from "../pages/OverviewPage";
+import LogsPage from "../pages/LogsPage";
 import ProgramStudioPage from "../pages/ProgramStudioPage";
+import QueriesPage from "../pages/QueriesPage";
 import TopicsPage from "../pages/TopicsPage";
 import { useRuntime } from "../runtime/context";
 import { useProgram } from "../runtime/useProgram";
@@ -147,6 +149,9 @@ function Workspace({
   const [dragError, setDragError] = useState<string | null>(null);
   const isTopics = route.kind === "topics";
   const isProgram = route.kind === "program";
+  // Full pages replace the workspace pane trio entirely.
+  const fullPage =
+    isTopics || isProgram || route.kind === "logs" || route.kind === "queries" ? route.kind : null;
   const structure = useSceneStructure(runtime.session, runtime.prefix, configurationRevision);
   const program = useProgram(runtime.session, runtime.prefix);
   const dragAllowed = runtime.commandsEnabled && runtime.driverAlive && runtime.holdsControl;
@@ -262,12 +267,24 @@ function Workspace({
         className={`flex h-full min-h-0 flex-col ${runtime.safetyActive ? "safety-active" : ""}`}
       >
         <WorkspaceHeader
-          tool={isTopics ? "topics" : isProgram ? "program" : tool}
-          onOpenScene={isTopics || isProgram ? undefined : () => setSceneOpen(true)}
+          tool={fullPage ?? tool}
+          onOpenScene={fullPage !== null ? undefined : () => setSceneOpen(true)}
         />
         {isTopics ? (
           <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
             <TopicsPage session={runtime.session} wsConnected={runtime.wsConnected} />
+          </main>
+        ) : fullPage === "logs" || fullPage === "queries" ? (
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            {runtime.prefix === null ? (
+              <div className="flex h-full items-center justify-center text-sm/6 text-zinc-500 dark:text-zinc-400">
+                Connect to a cell first.
+              </div>
+            ) : fullPage === "logs" ? (
+              <LogsPage session={runtime.session} realm={runtime.prefix} wsConnected={runtime.wsConnected} />
+            ) : (
+              <QueriesPage session={runtime.session} realm={runtime.prefix} wsConnected={runtime.wsConnected} />
+            )}
           </main>
         ) : isProgram ? (
           <main className="min-h-0 min-w-0 flex-1 overflow-hidden">

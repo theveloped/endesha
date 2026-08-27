@@ -1,7 +1,7 @@
 // Main navigation: cells (with the active cell's pages as sub-items),
 // recordings, theme. Selection is a route change (the URL is the source of
 // truth, see router.ts).
-import { Box, Cpu, Database, FileCode2, MonitorSmartphone, Moon, RadioTower, Sun } from "lucide-react";
+import { ArrowLeftRight, Box, Cpu, Database, FileCode2, MonitorSmartphone, Moon, RadioTower, ScrollText, Sun } from "lucide-react";
 import { useState, type MouseEvent as ReactMouseEvent } from "react";
 import { Badge } from "../catalyst/badge";
 import { Button } from "../catalyst/button";
@@ -118,6 +118,14 @@ export function AppSidebar({
       <SidebarItem current={route.kind === "topics"} {...link({ kind: "topics" })}>
         <RadioTower data-slot="icon" />
         <SidebarLabel>Topics</SidebarLabel>
+      </SidebarItem>
+      <SidebarItem current={route.kind === "logs"} {...link({ kind: "logs" })}>
+        <ScrollText data-slot="icon" />
+        <SidebarLabel>Logs</SidebarLabel>
+      </SidebarItem>
+      <SidebarItem current={route.kind === "queries"} {...link({ kind: "queries" })}>
+        <ArrowLeftRight data-slot="icon" />
+        <SidebarLabel>Queries</SidebarLabel>
       </SidebarItem>
       <SidebarItem current={route.kind === "hmi"} {...link({ kind: "hmi" })}>
         <MonitorSmartphone data-slot="icon" />

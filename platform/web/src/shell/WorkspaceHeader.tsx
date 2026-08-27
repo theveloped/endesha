@@ -12,7 +12,7 @@ export function WorkspaceHeader({
   tool,
   onOpenScene,
 }: {
-  tool: WorkspaceTool | "topics" | "program";
+  tool: WorkspaceTool | "topics" | "program" | "logs" | "queries";
   onOpenScene?: () => void;
 }) {
   const runtime = useRuntime();
@@ -21,12 +21,8 @@ export function WorkspaceHeader({
     runtime.realm.kind === "cell"
       ? runtime.cellName
       : runtime.realm.replaySession ?? "Select recording";
-  const toolLabel =
-    tool === "topics"
-      ? "Topics"
-      : tool === "program"
-        ? "Programs"
-        : (TOOL_META.find((item) => item.id === tool)?.label ?? tool);
+  const pageLabels: Record<string, string> = { topics: "Topics", program: "Programs", logs: "Logs", queries: "Queries" };
+  const toolLabel = pageLabels[tool] ?? TOOL_META.find((item) => item.id === tool)?.label ?? tool;
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-zinc-950/5 px-3 dark:border-white/10">

@@ -33,6 +33,7 @@ from wf.contracts.arm.messages import (
     SetDo,
     TcpState,
 )
+from wf.core.audit import QueryAudit
 from wf.core.action import ActionServer, GoalHandle
 from wf.core.codec import decode, encode
 from wf.core.frames import (
@@ -138,7 +139,9 @@ class ArmCore:
         self._pub_io = session.declare_publisher(keys.state_io(realm, rid))
         self._pub_status = session.declare_publisher(keys.state_status(realm, rid))
 
-        self.action_server = ActionServer(session, keys.action_prefix(realm, rid))
+        self.action_server = ActionServer(
+            session, keys.action_prefix(realm, rid), audit=QueryAudit(session, realm, f"arm:{rid}")
+        )
         self._queryables: list = []
         self._jog_sub = None
 

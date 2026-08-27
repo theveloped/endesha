@@ -20,6 +20,7 @@ from typing import Any, Callable, Protocol
 import yaml
 
 from wf.contracts.control.watcher import LeaseWatcher
+from wf.core.audit import QueryAudit
 from wf.core.codec import decode, encode
 from wf.core.log import get_logger
 from wf.core.time import now_ns
@@ -110,6 +111,7 @@ class ChannelsCore:
         self.params = params
         self.backend = backend
         self.schema = schema
+        self._audit = QueryAudit(session, realm, f"{schema.contract}:{rid}")
         self._on_change = on_change
         self._poll_s = 1.0 / float(params.get("poll_hz", _DEFAULT_POLL_HZ))
         # Named channels first (cell.yaml order), then one auto channel per raw
@@ -146,8 +148,8 @@ class ChannelsCore:
     def start(self) -> None:
         s = self.schema
         self._queryables = [
-            self.session.declare_queryable(s.key_set(self.realm, self.rid), self._on_set),
-            self.session.declare_queryable(s.key_force(self.realm, self.rid), self._on_force),
+            self.session.declare_queryable(s.key_set(self.realm, self.rid), self._audit.wrap(self._on_set)),
+            self.session.declare_queryable(s.key_force(self.realm, self.rid), self._audit.wrap(self._on_force)),
             self.session.declare_queryable(s.key_state(self.realm, self.rid), self._on_state_query),
         ]
         if self._owns_lease:

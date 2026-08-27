@@ -6,7 +6,7 @@ import type { Session } from "@eclipse-zenoh/zenoh-ts";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { programEvent } from "../lib/actions";
-import type { CatalogEntry, ProgramState, TransitionEvent } from "../lib/messages";
+import { drawableGraph, type CatalogEntry, type ProgramState, type TransitionEvent } from "../lib/messages";
 import { useProgramLayout } from "../runtime/useProgramLayout";
 import { ProgramGraph } from "./ProgramGraph";
 
@@ -31,10 +31,10 @@ export function ProgramGraphCard({
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   const loadedName = state?.program ?? null;
-  const name = loadedName ?? picked ?? entries.find((e) => e.graph !== undefined)?.name ?? null;
+  const name = loadedName ?? picked ?? entries.find((e) => drawableGraph(e.graph) !== undefined)?.name ?? null;
   const entry = useMemo(() => entries.find((e) => e.name === name) ?? null, [entries, name]);
   const { layout, save } = useProgramLayout(session, entry?.name ?? null);
-  const graph = entry?.graph;
+  const graph = drawableGraph(entry?.graph);
   const live = loadedName !== null && loadedName === entry?.name;
 
   const sendEvent = useCallback(
@@ -63,7 +63,7 @@ export function ProgramGraphCard({
               title="No program loaded: pick one to view its design"
             >
               {entries
-                .filter((e) => e.graph !== undefined)
+                .filter((e) => drawableGraph(e.graph) !== undefined)
                 .map((e) => (
                   <option key={e.name} value={e.name}>
                     {e.name}
@@ -79,7 +79,7 @@ export function ProgramGraphCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {graph === undefined || graph.states.length === 0 ? (
+        {graph === undefined ? (
           <p className="text-sm text-muted-foreground">
             {entry?.error ? `no graph: ${entry.error.split("\n").pop()}` : "no graph exported for this program"}
           </p>

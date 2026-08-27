@@ -23,6 +23,7 @@ import zenoh
 
 from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.supervisor import keys as sup_keys
+from wf.core.audit import QueryAudit
 from wf.core.codec import decode, encode
 from wf.core.log import get_logger
 from wf.core.session import declare_alive, open_session
@@ -30,6 +31,7 @@ from wf.core.time import now_ns
 
 from .cell import devices_inventory, load_cell, load_runtime, realize_cell
 from .procs import LAUNCH_EXTERNAL, ProcManager, provider_module
+from .telemetry import EventLog, LogHub
 
 _log = get_logger("wf.services.supervisor.service")
 _REAP_PERIOD_S = 1.0
@@ -61,7 +63,10 @@ class SupervisorService:
         self.zenoh_config = zenoh_config
         self.node = node
 
-        self._procs = ProcManager()
+        self._logs = LogHub(session, realm, node)
+        self._events = EventLog(session, realm, node)
+        self._audit = QueryAudit(session, realm, "supervisor")
+        self._procs = ProcManager(on_line=self._logs.line)
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._reaper: threading.Thread | None = None
@@ -96,7 +101,15 @@ class SupervisorService:
             ),
             self.session.declare_queryable(
                 sup_keys.supervisor_cmd_set_source(self.realm, self.node),
-                self._on_set_source,
+                self._audit.wrap(self._on_set_source),
+            ),
+            self.session.declare_queryable(
+                sup_keys.supervisor_log_glob(self.realm, self.node),
+                self._logs.on_log_query,
+            ),
+            self.session.declare_queryable(
+                sup_keys.supervisor_events(self.realm, self.node),
+                self._events.on_events_query,
             ),
         ]
         self._alive_token = declare_alive(
@@ -105,6 +118,7 @@ class SupervisorService:
         self._publish_descriptor()
         self._publish_devices()
         self._start_reaper()
+        self._events.emit("supervisor_started", cell=self.cell.get("name") or self.realm)
         _log.info("supervisor up: realm=%s node=%s", self.realm, self.node)
 
     def run_forever(self) -> None:
@@ -142,21 +156,24 @@ class SupervisorService:
 
     def _spawn_always_on(self) -> None:
         if self.with_config:
-            argv = ["wf.services.config", "--dir", self.config_dir]
+            argv = ["wf.services.config", "--dir", self.config_dir, "--realm", self.realm]
             if self.zenoh_config:
                 argv += ["--zenoh-config", self.zenoh_config]
             self._procs.spawn("config", argv)
+            self._events.emit("service_started", "config")
         if self.programs_dir:
             argv = ["wf.services.program_runner", "--programs", self.programs_dir,
                     "--realm", self.realm, "--node", self.node]
             if self.zenoh_config:
                 argv += ["--zenoh-config", self.zenoh_config]
             self._procs.spawn("program_runner", argv)
+            self._events.emit("service_started", "program_runner")
 
         for resource_id in self.realized["resources"]:
             try:
                 self._spawn_provider(resource_id)
             except RuntimeError as exc:
+                self._events.emit("spawn_failed", f"hal:{resource_id}", error=str(exc))
                 _log.error(
                     "provider %s failed to start: %s; left down",
                     resource_id,
@@ -188,6 +205,7 @@ class SupervisorService:
         if self.zenoh_config:
             argv += ["--zenoh-config", self.zenoh_config]
         self._procs.spawn(f"hal:{resource_id}", argv)
+        self._events.emit("service_started", f"hal:{resource_id}", provider=resource["kind"])
 
     def _descriptor_payload(self) -> dict:
         always_on = [
@@ -254,7 +272,8 @@ class SupervisorService:
 
         error = None
         with self._lock:
-            self._procs.stop(f"hal:{device_id}")
+            if self._procs.stop(f"hal:{device_id}"):
+                self._events.emit("service_stopped", f"hal:{device_id}")
             self.active_sources[device_id] = source
             self.realized = realize_cell(self.cell, self.active_sources)
             _dump_realized(self.realized, self.cell_path)
@@ -262,7 +281,9 @@ class SupervisorService:
                 self._spawn_provider(device_id)
             except RuntimeError as exc:
                 error = str(exc)
+                self._events.emit("spawn_failed", f"hal:{device_id}", error=error)
 
+        self._events.emit("source_switched", f"hal:{device_id}", device_id=device_id, source=source, ok=error is None)
         self._publish_devices()
         self._publish_descriptor()
         if error:
@@ -284,7 +305,10 @@ class SupervisorService:
 
     def _reap_loop(self) -> None:
         while not self._stop_event.wait(_REAP_PERIOD_S):
-            if self._procs.reap_dead():
+            dead = self._procs.reap_dead()
+            if dead:
+                for name, rc in dead:
+                    self._events.emit("service_exited", name, exit_code=rc)
                 self._publish_descriptor()
 
     @staticmethod
