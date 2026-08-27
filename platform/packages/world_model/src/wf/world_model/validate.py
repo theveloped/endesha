@@ -128,6 +128,26 @@ def fetch_tcp(session, rid: str, name: str, timeout_s: float = 2.0) -> dict | No
     return None
 
 
+def fetch_disabled_pairs(session, rid: str, timeout_s: float = 2.0) -> list[tuple[str, str]]:
+    """Declared collision exceptions from
+    ``config/arm/{rid}/collision/disabled_pairs``; ``[]`` on none / no service.
+    Malformed entries are skipped (never blocks acceptance)."""
+    replies = session.get(f"config/arm/{rid}/collision/disabled_pairs", timeout=timeout_s)
+    for reply in replies:
+        if reply.ok is None:
+            continue
+        try:
+            value = decode(reply.ok.payload)
+            return [
+                (str(p["a"]), str(p["b"]))
+                for p in value.get("pairs", [])
+                if isinstance(p, dict) and p.get("a") and p.get("b")
+            ]
+        except Exception:
+            return []
+    return []
+
+
 def tcp_transform(tcp_def: dict) -> np.ndarray:
     """``T_flange<-tcp`` from a TCP def's xyz/quat."""
     return make_transform(

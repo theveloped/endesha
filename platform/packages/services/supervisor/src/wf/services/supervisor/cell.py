@@ -1,27 +1,18 @@
-"""Cell file loader + runtime overlay + role->resource resolution (RFC §3).
+"""Cell definition and runtime source selection.
 
-A cell is the design-time truth: ``resources`` (each a contract-typed logical
-device with shared ``config`` and a ``sources`` map of selectable provider
-modes), optional ``bindings`` (``{flow: {role: resource_id}}`` — the role
-indirection), and the reserved distributed seams ``master_node`` / per-resource
-``node``.
+A cell is the design-time truth: contract-typed logical resources with shared
+configuration and selectable provider sources. A runtime overlay selects one
+live, simulated, replay, or off source per resource. ``realize_cell`` collapses
+both documents into the concrete provider inventory consumed by the supervisor.
 
-The selected source mode per resource is NOT in the cell — it comes from a thin
-runtime overlay (``active_sources: {rid: mode}``, loaded by ``load_runtime``).
-``realize_cell`` collapses cell + overlay into the realized inventory the rest
-of the supervisor consumes: one concrete provider per resource (``hal`` + merged
-``params``), exactly the legacy single-hal shape.
+A resource may additionally ``provide`` devices of another contract that are
+served by the SAME provider process (one HAL, several contracts) — e.g. an
+arm providing its onboard IO bank as a ``dio`` device. A provided device is a
+first-class device in the inventory but has no sources of its own: it follows
+its host's source mode and cannot be switched independently.
 
-``resolve_roles`` is the supervisor's core duty: for a flow's contract-typed
-roles, bind each to a concrete resource id — explicit ``bindings`` win,
-otherwise the first resource of the role's contract.
-
-Legacy single-``hal`` resources are still accepted (normalized into a synthetic
-single source under mode ``"default"``) so existing cell files keep working
-through the migration.
-
-Violations raise ``ValueError("bad_cell:<reason>")`` / ``("bad_runtime:...")``
-(mirrors the config store's ``bad_*:`` convention).
+Legacy single-``hal`` resources remain accepted and are normalized into one
+synthetic ``default`` source.
 """
 
 from __future__ import annotations
@@ -30,15 +21,20 @@ from pathlib import Path
 
 import yaml
 
+from wf.contracts.dio.messages import parse_channels
+from wf.contracts.tags.messages import parse_tags
+
 from .procs import LAUNCH_EXTERNAL, LAUNCH_MODULE
 
-_CONTRACTS = ("arm", "camera2d")
-# Selectable provider modes. ``off`` is a selection (no provider), never a
-# declared source, so it is not in this tuple.
-_MODES = ("live", "sim", "replay")
+_CONTRACTS = ("arm", "camera2d", "dio", "tags", "washer")
+# Selectable provider source names. ``off`` is a selection (no provider), never
+# a declared source. The camera exposes two independent simulated providers.
+_MODES = ("live", "sim", "browser_sim", "replay")
 _LAUNCHES = (LAUNCH_MODULE, LAUNCH_EXTERNAL)
 # Synthetic mode under which a legacy single-``hal`` resource is normalized.
 _LEGACY_MODE = "default"
+# Cell-level control lease TTL when cell.yaml has no ``control:`` block.
+DEFAULT_LEASE_TTL_S = 30.0
 
 
 def _parse_source(rid: str, mode: str, sdecl: object) -> dict:
@@ -65,21 +61,9 @@ def _parse_source(rid: str, mode: str, sdecl: object) -> dict:
 def load_cell(path: str | Path) -> dict:
     """Load and validate a cell.yaml into a normalized dict.
 
-    Returned shape::
-
-        {
-          "cell_type": str | None,
-          "master_node": str | None,
-          "resources": {rid: {"contract": str, "node": str, "model": str | None,
-                              "config": dict,
-                              "sources": {mode: {"kind": str, "params": dict,
-                                                 "launch": "module"|"external"}}}},
-          "bindings": {flow: {role: resource_id}},
-        }
-
-    Each resource declares either a new-schema ``sources`` map (with shared
-    ``config``) or a legacy single ``hal`` (normalized to one source under mode
-    ``"default"``) — not both.
+    Returned resources contain their contract, node, model, shared config, and
+    selectable provider sources. Each resource declares either a ``sources``
+    map or a legacy single ``hal``.
     """
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
@@ -105,7 +89,9 @@ def load_cell(path: str | Path) -> dict:
             raise ValueError(f"bad_cell:resource {rid}.node must be a non-empty string")
         model = decl.get("model")
         if model is not None and (not isinstance(model, str) or not model):
-            raise ValueError(f"bad_cell:resource {rid}.model must be a non-empty string")
+            raise ValueError(
+                f"bad_cell:resource {rid}.model must be a non-empty string"
+            )
 
         has_sources = "sources" in decl
         has_hal = "hal" in decl
@@ -118,6 +104,24 @@ def load_cell(path: str | Path) -> dict:
             config = decl.get("config") or {}
             if not isinstance(config, dict):
                 raise ValueError(f"bad_cell:resource {rid}.config must be a mapping")
+            if contract == "dio":
+                # Named channels are the program-facing surface of a dio device;
+                # validate the schema at load so a typo fails the cell, not a run.
+                try:
+                    channels = parse_channels(config.get("channels"))
+                except ValueError as exc:
+                    raise ValueError(f"bad_cell:resource {rid}.{exc}") from exc
+                if not channels:
+                    raise ValueError(
+                        f"bad_cell:resource {rid}.config.channels must declare at least one channel"
+                    )
+            if contract == "tags":
+                # Named tags are optional (the provider inventory alone is a
+                # valid device); validate the schema when present.
+                try:
+                    parse_tags(config.get("tags"))
+                except ValueError as exc:
+                    raise ValueError(f"bad_cell:resource {rid}.{exc}") from exc
             sources_in = decl["sources"]
             if not isinstance(sources_in, dict) or not sources_in:
                 raise ValueError(
@@ -151,29 +155,16 @@ def load_cell(path: str | Path) -> dict:
             "model": model,
             "config": config,
             "sources": sources,
+            "provides": _parse_provides(rid, decl.get("provides")),
         }
 
-    bindings_in = raw.get("bindings") or {}
-    if not isinstance(bindings_in, dict):
-        raise ValueError("bad_cell:bindings must be a mapping")
-    bindings: dict[str, dict] = {}
-    for flow_name, role_map in bindings_in.items():
-        if not isinstance(flow_name, str) or not flow_name:
-            raise ValueError("bad_cell:binding flow must be a non-empty string")
-        if not isinstance(role_map, dict):
-            raise ValueError(f"bad_cell:binding {flow_name} must be a mapping")
-        resolved: dict[str, str] = {}
-        for role, resource_id in role_map.items():
-            if not isinstance(role, str) or not role:
-                raise ValueError(
-                    f"bad_cell:binding {flow_name} role must be a non-empty string"
-                )
-            if resource_id not in resources:
-                raise ValueError(
-                    f"bad_cell:unknown_binding:{flow_name}.{role}={resource_id}"
-                )
-            resolved[role] = resource_id
-        bindings[flow_name] = resolved
+    # Provided device ids share the resource namespace.
+    seen: set[str] = set(resources)
+    for rid, res in resources.items():
+        for pid in res["provides"]:
+            if pid in seen:
+                raise ValueError(f"bad_cell:resource {rid} provides duplicate device id {pid!r}")
+            seen.add(pid)
 
     master_node = raw.get("master_node")
     if master_node is not None and (
@@ -181,12 +172,68 @@ def load_cell(path: str | Path) -> dict:
     ):
         raise ValueError("bad_cell:master_node must be a non-empty string")
 
+    name = raw.get("name")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ValueError("bad_cell:name must be a non-empty string")
+
     return {
         "cell_type": raw.get("cell_type"),
+        "name": name,
         "master_node": master_node,
+        "control": _parse_control(raw.get("control")),
         "resources": resources,
-        "bindings": bindings,
     }
+
+
+# Contracts a resource may provide in-process. Only dio for now (arm IO bank).
+_PROVIDABLE = ("dio", "tags")
+
+
+def _parse_provides(rid: str, raw: object) -> dict[str, dict]:
+    """``provides: {device_id: {contract: dio, channels: {...}, layout?: {...}}}``
+    or ``{contract: tags, tags: {...}}`` — devices hosted by this resource's
+    provider process (arm -> its io pins, washer -> its PLC tags)."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"bad_cell:resource {rid}.provides must be a mapping")
+    out: dict[str, dict] = {}
+    for pid, spec in raw.items():
+        if not isinstance(pid, str) or not pid:
+            raise ValueError(f"bad_cell:resource {rid}.provides id must be a non-empty string")
+        if not isinstance(spec, dict):
+            raise ValueError(f"bad_cell:resource {rid}.provides.{pid} must be a mapping")
+        contract = spec.get("contract")
+        if contract not in _PROVIDABLE:
+            raise ValueError(
+                f"bad_cell:resource {rid}.provides.{pid}.contract must be one of {_PROVIDABLE}"
+            )
+        try:
+            if contract == "dio":
+                parse_channels(spec.get("channels"))
+            else:
+                parse_tags(spec.get("tags"))
+        except ValueError as exc:
+            raise ValueError(f"bad_cell:resource {rid}.provides.{pid}.{exc}") from exc
+        model = spec.get("model")
+        if model is not None and (not isinstance(model, str) or not model):
+            raise ValueError(f"bad_cell:resource {rid}.provides.{pid}.model must be a string")
+        entry = {k: v for k, v in spec.items() if k != "model"}
+        entry["model"] = model
+        out[pid] = entry
+    return out
+
+
+def _parse_control(decl: object) -> dict:
+    """Cell-level control lease settings (``control: {lease_ttl_s}``)."""
+    if decl is None:
+        return {"lease_ttl_s": DEFAULT_LEASE_TTL_S}
+    if not isinstance(decl, dict):
+        raise ValueError("bad_cell:control must be a mapping")
+    ttl = decl.get("lease_ttl_s", DEFAULT_LEASE_TTL_S)
+    if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or ttl <= 0:
+        raise ValueError("bad_cell:control.lease_ttl_s must be a positive number")
+    return {"lease_ttl_s": float(ttl)}
 
 
 def load_runtime(path: str | Path) -> dict:
@@ -208,7 +255,9 @@ def load_runtime(path: str | Path) -> dict:
     active: dict[str, str] = {}
     for rid, mode in active_in.items():
         if not isinstance(rid, str) or not rid:
-            raise ValueError("bad_runtime:active_sources key must be a non-empty string")
+            raise ValueError(
+                "bad_runtime:active_sources key must be a non-empty string"
+            )
         # YAML 1.1 parses bare ``off``/``no``/``false`` as boolean False; accept
         # that as the explicit "off" selection so overlays needn't quote it.
         if mode is False:
@@ -247,18 +296,25 @@ def realize_cell(cell: dict, active_sources: dict[str, str] | None = None) -> di
         elif mode not in sources:
             raise ValueError(f"bad_runtime:no_source:{rid}:{mode}")
         chosen = sources[mode]
+        params = {**res["config"], **chosen["params"]}
+        if res.get("provides"):
+            # The provider process hosts these; hand the specs down as params.
+            params["provides"] = {
+                pid: {k: v for k, v in spec.items() if k != "model"}
+                for pid, spec in res["provides"].items()
+            }
         realized[rid] = {
             "contract": res["contract"],
             "kind": chosen["kind"],
             "launch": chosen["launch"],
             "node": res["node"],
-            "params": {**res["config"], **chosen["params"]},
+            "params": params,
         }
     return {
         "cell_type": cell["cell_type"],
         "master_node": cell["master_node"],
+        "control": cell.get("control", {"lease_ttl_s": DEFAULT_LEASE_TTL_S}),
         "resources": realized,
-        "bindings": cell["bindings"],
     }
 
 
@@ -288,34 +344,21 @@ def devices_inventory(cell: dict, active_sources: dict[str, str]) -> list[dict]:
                 "contract": res["contract"],
                 "model": res.get("model"),
                 "active": active,
+                "config": res.get("config", {}),
                 "sources": sources,
             }
         )
+        # Provided devices: first-class in the tree, source follows the host.
+        for pid, spec in (res.get("provides") or {}).items():
+            devices.append(
+                {
+                    "id": pid,
+                    "contract": spec["contract"],
+                    "model": spec.get("model"),
+                    "active": active,
+                    "config": {k: v for k, v in spec.items() if k not in ("contract", "model")},
+                    "sources": [],
+                    "provided_by": rid,
+                }
+            )
     return devices
-
-
-def resolve_roles(cell: dict, flow_spec: dict, flow_name: str) -> dict[str, str]:
-    """Bind each of a flow's roles to a concrete resource id.
-
-    Explicit ``bindings[flow_name][role]`` wins; otherwise the first resource
-    whose ``contract`` matches the role's declared contract. Raises
-    ``KeyError("unresolved_role:<role>")`` when no resource of the role's
-    contract exists in the cell. Operates on either a normalized or a realized
-    cell (both carry ``resources[rid]["contract"]`` + ``bindings``).
-    """
-    resources = cell["resources"]
-    explicit = cell["bindings"].get(flow_name, {})
-    out: dict[str, str] = {}
-    for role, decl in flow_spec["roles"].items():
-        if role in explicit:
-            out[role] = explicit[role]
-            continue
-        contract = decl["contract"]
-        match = next(
-            (rid for rid, r in resources.items() if r["contract"] == contract),
-            None,
-        )
-        if match is None:
-            raise KeyError(f"unresolved_role:{role}")
-        out[role] = match
-    return out

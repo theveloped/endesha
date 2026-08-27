@@ -7,6 +7,9 @@ dependencies = [
     "wf-core",
     "wf-world-model",
     "wf-contracts-arm",
+    "wf-contracts-control",
+    "wf-contracts-dio",
+    "wf-hal-dio-core",
     "numpy",
 ]
 

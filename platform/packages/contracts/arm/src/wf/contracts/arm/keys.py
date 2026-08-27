@@ -1,4 +1,9 @@
-"""The `arm` contract key space (design §4.1/§4.2)."""
+"""The `arm` contract key space (design §4.1/§4.2).
+
+The control lease is NOT part of this contract: it is cell-level
+(``wf.contracts.control``). Guarded arm commands (jog, execute_path) name the
+``client_id`` that must hold that lease.
+"""
 
 from __future__ import annotations
 
@@ -48,18 +53,6 @@ def cmd_set_tcp(realm: str, rid: str) -> str:
 def cmd_jog(realm: str, rid: str) -> str:
     """``.../cmd/jog`` — pub/sub hold-to-jog stream (NOT a queryable)."""
     return key(prefix(realm, rid), "cmd", "jog")
-
-
-def cmd_acquire_control(realm: str, rid: str) -> str:
-    return key(prefix(realm, rid), "cmd", "acquire_control")
-
-
-def cmd_release_control(realm: str, rid: str) -> str:
-    return key(prefix(realm, rid), "cmd", "release_control")
-
-
-def state_control_owner(realm: str, rid: str) -> str:
-    return key(prefix(realm, rid), "state", "control_owner")
 
 
 def action_prefix(realm: str, rid: str) -> str:

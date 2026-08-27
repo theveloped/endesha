@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import math
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import yaml
 import zenoh
@@ -22,15 +24,28 @@ from wf.core.cad_object import ObjectDef, instantiate
 from wf.contracts.arm import keys
 from wf.contracts.arm.messages import (
     Ack,
-    AcquireControl,
     ArmStatus,
-    ControlAck,
     ExecutePathGoal,
     JogCommand,
     SetDo,
     Waypoint,
 )
 from wf.contracts.camera2d import keys as cam_keys
+from wf.contracts.control import keys as control_keys
+from wf.contracts.dio import keys as dio_keys
+from wf.contracts.program import keys as program_keys
+from wf.contracts.tags import keys as tags_keys
+from wf.contracts.washer import keys as washer_keys
+from wf.contracts.washer.messages import Ack as WasherAck
+from wf.contracts.washer.messages import Recipe, RecipeReply, SetRecipe, WasherStatus
+from wf.core.action import ActionClient, ActionRejected
+from wf.contracts.tags.messages import Ack as TagsAck
+from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
+from wf.contracts.program.messages import Ack as ProgramAck
+from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, LogLine, ProgramState
+from wf.contracts.dio.messages import ForceChannel, SetChannel
+from wf.contracts.dio.messages import Ack as DioAck
+from wf.contracts.control.messages import AcquireControl, ControlAck
 from wf.contracts.camera2d.messages import Ack as CamAck
 from wf.contracts.camera2d.messages import GrabReply
 from wf.core.action import ActionClient, ActionRejected
@@ -44,7 +59,8 @@ from wf.services.recording import keys as recording_keys
 def _open_session(args) -> zenoh.Session:
     if args.connect:
         config = zenoh.Config()
-        config.insert_json5("mode", json.dumps("peer"))
+        # client mode: a peer would gossip host locators unreachable from Docker
+        config.insert_json5("mode", json.dumps("client"))
         config.insert_json5("scouting/multicast/enabled", "false")
         config.insert_json5("connect/endpoints", json.dumps([args.connect]))
     else:
@@ -185,9 +201,10 @@ def _pose_args_to_quat(args) -> list[float]:
 
 
 def _acquire_lease(session, args, client_id: str, user: str = "wfctl") -> ControlAck:
+    # Cell-level lease (one holder for every device), served by the supervisor.
     reply = _query(
         session,
-        keys.cmd_acquire_control(args.realm, args.rid),
+        control_keys.cmd_acquire(args.realm),
         AcquireControl(client_id=client_id, user=user).to_wire(),
     )
     if reply is None:
@@ -198,7 +215,7 @@ def _acquire_lease(session, args, client_id: str, user: str = "wfctl") -> Contro
 def _release_lease(session, args, client_id: str) -> None:
     _query(
         session,
-        keys.cmd_release_control(args.realm, args.rid),
+        control_keys.cmd_release(args.realm),
         {"client_id": client_id},
     )
 
@@ -303,6 +320,452 @@ def cmd_clear_pstop(session, args) -> int:
 _CART_AXES = {"x": 0, "y": 1, "z": 2, "rx": 3, "ry": 4, "rz": 5}
 
 
+def _parse_channel_value(text: str):
+    """``on``/``off``/``true``/``false``/``1``/``0`` -> bool; else float."""
+    low = text.strip().lower()
+    if low in ("on", "true", "1"):
+        return True
+    if low in ("off", "false", "0"):
+        return False
+    return float(text)
+
+
+def _kv_pairs(items) -> dict:
+    """``["k=v", ...]`` -> dict; values parsed as JSON when possible."""
+    import json as _json
+
+    out: dict = {}
+    for item in items or []:
+        if "=" not in item:
+            raise SystemExit(f"expected key=value, got {item!r}")
+        k, v = item.split("=", 1)
+        try:
+            out[k] = _json.loads(v)
+        except ValueError:
+            out[k] = v
+    return out
+
+
+def cmd_program_catalog(session, args) -> int:
+    reply = _query(session, program_keys.catalog(args.realm), {})
+    if reply is None:
+        print("no reply from programs/catalog (runner down?)", file=sys.stderr)
+        return 1
+    cat = Catalog.from_wire(reply)
+    for entry in cat.programs:
+        if entry.error:
+            print(f"{entry.name:20s} BROKEN  {entry.error.splitlines()[-1]}")
+        else:
+            roles = ", ".join(f"{r}:{c}" for r, c in entry.roles.items())
+            print(f"{entry.name:20s} roles[{roles}] params={entry.params}")
+            if entry.doc:
+                print(f"{'':20s} {entry.doc.splitlines()[0]}")
+    return 0
+
+
+def cmd_program_load(session, args) -> int:
+    req = LoadRequest(name=args.name, bindings=_kv_pairs(args.bind), params=_kv_pairs(args.param))
+    reply = _query(session, program_keys.cmd_load(args.realm), req.to_wire())
+    if reply is None:
+        print("no reply from programs/cmd/load", file=sys.stderr)
+        return 1
+    ack = ProgramAck.from_wire(reply)
+    print("loaded" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_program(session, args) -> int:
+    payload = {"reason": args.reason} if args.reason else {}
+    reply = _query(session, program_keys.cmd(args.realm, args.command), payload)
+    if reply is None:
+        print(f"no reply from program/cmd/{args.command}", file=sys.stderr)
+        return 1
+    ack = ProgramAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_program_event(session, args) -> int:
+    reply = _query(
+        session,
+        program_keys.cmd_event(args.realm),
+        EventRequest(event=args.event, data=_kv_pairs(args.data)).to_wire(),
+    )
+    if reply is None:
+        print("no reply from program/cmd/event", file=sys.stderr)
+        return 1
+    ack = ProgramAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_program_state(session, args) -> int:
+    def show(raw):
+        st = ProgramState.from_wire(raw)
+        line = f"unit={st.unit:12s} program={st.program or '-':16s} states={st.program_states} actions={st.actions}"
+        if st.reason:
+            line += f" reason={st.reason}"
+        print(line)
+        for w in st.waiting_for:
+            if w.get("kind") == "channel":
+                print(f"  waiting: {w.get('role')}.{w.get('channel')} {w.get('edge')} -> {w.get('event')} (-> {w.get('target')})")
+            elif w.get("kind") == "timer":
+                print(f"  waiting: after {w.get('seconds')}s in {w.get('state')} -> {w.get('event')} (-> {w.get('target')})")
+            else:
+                print(f"  accepts: event {w.get('event')!r} (-> {w.get('target')})")
+
+    reply = _query(session, program_keys.state(args.realm), {})
+    if reply is None:
+        print("no reply from program/state (runner down?)", file=sys.stderr)
+        return 1
+    show(reply)
+    if not args.follow:
+        return 0
+    sub = session.declare_subscriber(program_keys.state(args.realm), lambda s: show(decode(s.payload)))
+    try:
+        while True:
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sub.undeclare()
+    return 0
+
+
+def cmd_program_log(session, args) -> int:
+    def show(raw):
+        ln = LogLine.from_wire(raw)
+        stamp = time.strftime("%H:%M:%S", time.localtime(ln.t / 1e9))
+        print(f"{stamp} {ln.level:7s} {ln.source:12s} {ln.message}")
+
+    reply = _query(session, program_keys.log(args.realm), {})
+    if reply is None:
+        print("no reply from program/log (runner down?)", file=sys.stderr)
+        return 1
+    for raw in reply.get("lines", [])[-args.tail:]:
+        show(raw)
+    if not args.follow:
+        return 0
+    sub = session.declare_subscriber(program_keys.log(args.realm), lambda s: show(decode(s.payload)))
+    try:
+        while True:
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sub.undeclare()
+    return 0
+
+
+def _parse_tag_value(text: str):
+    """on/off/true/false -> bool; int -> int; float -> float; else string.
+    ``--string`` keeps the text as-is."""
+    low = text.strip().lower()
+    if low in ("on", "true"):
+        return True
+    if low in ("off", "false"):
+        return False
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
+# ── host API (cells) — HTTP, no zenoh session needed ─────────────────────
+
+
+def _http(method: str, url: str, body: dict | None = None) -> dict:
+    import json as _json  # noqa: PLC0415
+    import urllib.error  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    data = None if body is None else _json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+            return _json.loads(resp.read().decode() or "{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = _json.loads(exc.read().decode()).get("detail")
+        except Exception:
+            detail = exc.reason
+        raise SystemExit(f"host api {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"host api unreachable at {url}: {exc.reason}") from exc
+
+
+def cmd_cell(args) -> int:
+    base = args.host_api.rstrip("/")
+    if args.action == "list":
+        body = _http("GET", f"{base}/cells")
+        active = (body.get("active") or {}).get("cell")
+        for c in body["cells"]:
+            mark = "*" if c["id"] == active else " "
+            state = ""
+            if c["id"] == active:
+                state = f"  ACTIVE ({(body.get('active') or {}).get('runtime')}) {'alive' if body.get('alive') else 'DOWN'}"
+            err = f"  ERROR {c['error']}" if c.get("error") else ""
+            print(f"{mark} {c['id']:12s} {c['name']:20s} {c.get('cell_type') or '':22s} runtimes={','.join(c['runtimes'])}{state}{err}")
+        return 0
+    if args.action == "activate":
+        if not args.cell:
+            print("cell activate needs a cell id", file=sys.stderr)
+            return 2
+        body = _http("POST", f"{base}/cells/{args.cell}/activate", {"runtime": args.runtime})
+        print(f"active: {body['active']}  alive={body['alive']}")
+        return 0
+    if args.action == "stop":
+        body = _http("POST", f"{base}/cells/stop")
+        print(f"active: {body['active']}")
+        return 0
+    if args.action == "health":
+        print(json.dumps(_http("GET", f"{base}/health"), indent=2))
+        return 0
+    return 2
+
+
+def cmd_washer_status(session, args) -> int:
+    reply = _query(session, washer_keys.state_status(args.realm, args.washer), {})
+    if reply is None:
+        print("no reply from washer state/status (device down?)", file=sys.stderr)
+        return 1
+    st = WasherStatus.from_wire(reply)
+    print(f"phase      {st.phase}")
+    print(f"door       {st.door}")
+    print(f"connected  {st.connected}   auto {st.auto}   fault {st.fault} (#{st.fault_code})")
+    print(f"program    {st.program!r} #{st.program_no}")
+    print(f"flags      ready_to_load={st.ready_to_load} ready_to_unload={st.ready_to_unload} washing={st.washing}")
+    if st.sequence:
+        print(f"sequence   {st.sequence}  {st.detail}")
+    return 0
+
+
+def cmd_washer_action(session, args) -> int:
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    try:
+        goal = {"client_id": cid}
+        if args.action == "start_wash" and args.program is not None:
+            goal["program"] = int(args.program)
+        client = ActionClient(session, washer_keys.action_prefix(args.realm, args.washer), args.action)
+        try:
+            g = client.send(goal, on_feedback=lambda fb: print(f"  … {fb.get('data', {}).get('step', '')} {fb.get('progress', 0):.0%}"))
+        except ActionRejected as exc:
+            print(f"rejected: {exc.reason}", file=sys.stderr)
+            return 1
+        print(f"goal {g.goal_id} accepted; waiting (Ctrl-C cancels = stop door)")
+        try:
+            result = g.result(timeout_s=float(args.timeout))
+        except KeyboardInterrupt:
+            g.cancel()
+            print("cancelled: door permission released")
+            return 130
+        print(f"{result.get('state')}" + (f": {result.get('error')}" if result.get("error") else ""))
+        return 0 if result.get("state") == "succeeded" else 1
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+
+
+def cmd_washer_stop_door(session, args) -> int:
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    try:
+        reply = _query(session, washer_keys.cmd_stop_door(args.realm, args.washer), {"client_id": cid})
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+    if reply is None:
+        print("no reply", file=sys.stderr)
+        return 1
+    ack = WasherAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_washer_recipe(session, args) -> int:
+    if args.set is None:
+        reply = _query(session, washer_keys.cmd_get_recipe(args.realm, args.washer), {})
+        if reply is None:
+            print("no reply", file=sys.stderr)
+            return 1
+        rr = RecipeReply.from_wire(reply)
+        if not rr.ok or rr.recipe is None:
+            print(f"error: {rr.error}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(rr.recipe.to_wire(), indent=2))
+            return 0
+        r = rr.recipe
+        print(f"recipe {r.name!r}")
+        print("  #  cleaning  time_s  movement  additional  pump_off")
+        for i, st in enumerate(r.steps):
+            if st.cleaning == 0 and st.time_s == 0:
+                continue
+            print(f"  {i + 1:<2} {st.cleaning:>8}  {st.time_s:>6}  {st.movement:>8}  {st.additional:>10}  {st.pump_off}")
+        for k, v in r.params.items():
+            spec = rr.schema.params.get(k) if rr.schema else None
+            print(f"  {k:24s} {v:>6}  {spec.title if spec else ''}")
+        return 0
+    recipe = Recipe.from_wire(json.loads(Path(args.set).read_text(encoding="utf-8")))
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    try:
+        reply = _query(session, washer_keys.cmd_set_recipe(args.realm, args.washer), SetRecipe(cid, recipe).to_wire(), timeout_s=15.0)
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+    if reply is None:
+        print("no reply", file=sys.stderr)
+        return 1
+    ack = WasherAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_tags_state(session, args) -> int:
+    reply = _query(session, tags_keys.state_tags(args.realm, args.tags), {})
+    if reply is None:
+        print("no reply from tags state/tags (device down?)", file=sys.stderr)
+        return 1
+    st = TagsState.from_wire(reply)
+    for name, tv in sorted(st.tags.items()):
+        flag = "  FORCED" if tv.forced else ""
+        auto = "  (auto)" if tv.auto else ""
+        addr = tv.address.get("node") or tv.address.get("tag") or ""
+        print(f"{name:28s} {tv.type:6s} {tv.access:2s} {tv.value!s:>12}  {addr}{flag}{auto}")
+    return 0
+
+
+def _tags_cmd(session, args, key, msg_ok):
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    try:
+        reply = _query(session, key, msg_ok(cid))
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+    if reply is None:
+        print(f"no reply from {key}", file=sys.stderr)
+        return 1
+    ack = TagsAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_tags_write(session, args) -> int:
+    value = args.value if args.string else _parse_tag_value(args.value)
+    return _tags_cmd(session, args, tags_keys.cmd_write(args.realm, args.tags),
+                     lambda cid: WriteTag(cid, args.tag, value).to_wire())
+
+
+def cmd_tags_force(session, args) -> int:
+    if not args.clear and args.value is None:
+        print("tags-force needs a value or --clear", file=sys.stderr)
+        return 2
+    value = None if args.clear else (args.value if args.string else _parse_tag_value(args.value))
+    # read-only tags need no lease: try lease-free first
+    reply = _query(session, tags_keys.cmd_force(args.realm, args.tags), ForceTag(args.client_id or "wfctl", args.tag, value).to_wire())
+    if reply is not None and reply.get("ok"):
+        print("ok")
+        return 0
+    if reply is not None and reply.get("error") != "no_control":
+        print(f"error: {reply.get('error')}")
+        return 1
+    return _tags_cmd(session, args, tags_keys.cmd_force(args.realm, args.tags),
+                     lambda cid: ForceTag(cid, args.tag, value).to_wire())
+
+
+def cmd_dio_state(session, args) -> int:
+    reply = _query(session, dio_keys.state_channels(args.realm, args.dio), {})
+    if reply is None:
+        print("no reply from dio state/channels (device down?)", file=sys.stderr)
+        return 1
+    for name, cv in sorted(reply.get("channels", {}).items()):
+        flag = "  FORCED" if cv.get("forced") else ""
+        print(f"{name:20s} {cv['kind']:3s} {cv['value']!s:>8}{flag}")
+    return 0
+
+
+def cmd_dio_set(session, args) -> int:
+    external_cid = args.client_id
+    cid = external_cid or str(uuid.uuid4())
+    if external_cid is None:
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+    try:
+        req = SetChannel(client_id=cid, channel=args.channel, value=_parse_channel_value(args.value))
+        reply = _query(session, dio_keys.cmd_set(args.realm, args.dio), req.to_wire())
+    finally:
+        if external_cid is None:
+            _release_lease(session, args, cid)
+    if reply is None:
+        print("no reply from dio cmd/set", file=sys.stderr)
+        return 1
+    ack = DioAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
+def cmd_dio_force(session, args) -> int:
+    if not args.clear and args.value is None:
+        print("dio-force needs a value or --clear", file=sys.stderr)
+        return 2
+    value = None if args.clear else _parse_channel_value(args.value)
+    external_cid = args.client_id
+
+    def attempt(cid: str):
+        req = ForceChannel(client_id=cid, channel=args.channel, value=value)
+        return _query(session, dio_keys.cmd_force(args.realm, args.dio), req.to_wire())
+
+    # Forcing an INPUT needs no lease (flagged test override); try that first so
+    # it works while a program holds the cell lease. Outputs fall back to a
+    # lease-acquiring attempt.
+    reply = attempt(external_cid or "wfctl")
+    if reply is not None and not reply.get("ok") and reply.get("error") == "no_control" and external_cid is None:
+        cid = str(uuid.uuid4())
+        ack = _acquire_lease(session, args, cid)
+        if not ack.ok:
+            print(f"lease denied: {ack.error}", file=sys.stderr)
+            return 1
+        try:
+            reply = attempt(cid)
+        finally:
+            _release_lease(session, args, cid)
+    if reply is None:
+        print("no reply from dio cmd/force", file=sys.stderr)
+        return 1
+    ack = DioAck.from_wire(reply)
+    print("ok" if ack.ok else f"error: {ack.error}")
+    return 0 if ack.ok else 1
+
+
 def cmd_acquire_control(session, args) -> int:
     cid = args.client_id or str(uuid.uuid4())
     ack = _acquire_lease(session, args, cid, user=args.user)
@@ -320,13 +783,13 @@ def cmd_acquire_control(session, args) -> int:
 def cmd_release_control(session, args) -> int:
     reply = _query(
         session,
-        keys.cmd_release_control(args.realm, args.rid),
+        control_keys.cmd_release(args.realm),
         {"client_id": args.client_id},
     )
     if reply is None:
-        print("no reply from cmd/release_control", file=sys.stderr)
+        print("no reply from control/cmd/release", file=sys.stderr)
         return 1
-    ack = Ack.from_wire(reply)
+    ack = ControlAck.from_wire(reply)
     print("released" if ack.ok else f"error: {ack.error}")
     return 0 if ack.ok else 1
 
@@ -763,14 +1226,113 @@ def main(argv=None) -> int:
     p = sub.add_parser("clear-pstop", help="unlock a protective stop (re-arm)")
     p.set_defaults(fn=cmd_clear_pstop)
 
-    p = sub.add_parser("acquire-control", help="acquire the motion control lease")
+    p = sub.add_parser("acquire-control", help="acquire the cell control lease (all devices)")
     p.add_argument("--user", default="wfctl", help="operator label for the lease")
     p.add_argument("--client-id", default=None, help="reuse a client id (default: new uuid)")
     p.set_defaults(fn=cmd_acquire_control)
 
-    p = sub.add_parser("release-control", help="release the motion control lease")
+    p = sub.add_parser("release-control", help="release the cell control lease")
     p.add_argument("--client-id", required=True, help="the holding client id")
     p.set_defaults(fn=cmd_release_control)
+
+    p = sub.add_parser("program-catalog", help="list discoverable programs")
+    p.set_defaults(fn=cmd_program_catalog)
+
+    p = sub.add_parser("program-load", help="load a program into the unit (Idle/Stopped)")
+    p.add_argument("name")
+    p.add_argument("--bind", action="append", metavar="ROLE=RID", help="bind a role to a device id")
+    p.add_argument("--param", action="append", metavar="KEY=VALUE", help="override a param (JSON value)")
+    p.set_defaults(fn=cmd_program_load)
+
+    p = sub.add_parser("program", help="send a PackML unit command")
+    p.add_argument("command", choices=program_keys.UNIT_COMMANDS)
+    p.add_argument("--reason", default=None, help="reason (stop/abort)")
+    p.set_defaults(fn=cmd_program)
+
+    p = sub.add_parser("program-event", help="send an event to the running program")
+    p.add_argument("event")
+    p.add_argument("--data", action="append", metavar="KEY=VALUE")
+    p.set_defaults(fn=cmd_program_event)
+
+    p = sub.add_parser("program-state", help="print the unit/program state")
+    p.add_argument("--follow", "-f", action="store_true", help="keep printing updates")
+    p.set_defaults(fn=cmd_program_state)
+
+    p = sub.add_parser("program-log", help="print the program/runner log")
+    p.add_argument("--tail", type=int, default=50, help="last N lines (default 50)")
+    p.add_argument("--follow", "-f", action="store_true", help="keep printing new lines")
+    p.set_defaults(fn=cmd_program_log)
+
+    p = sub.add_parser("cell", help="host API: list / activate / stop the cell running on this host")
+    p.add_argument("action", choices=("list", "activate", "stop", "health"))
+    p.add_argument("cell", nargs="?", default=None, help="cell id (activate)")
+    p.add_argument("--runtime", default=None, help="overlay id (activate; default: 'default' or the first)")
+    p.add_argument("--host-api", default=os.environ.get("WF_HOST_API", "http://127.0.0.1:8080"))
+    p.set_defaults(fn=cmd_cell, no_session=True)
+
+    p = sub.add_parser("washer-status", help="print a washer's phase/door/program")
+    p.add_argument("--washer", default="washer0", help="washer resource id (default washer0)")
+    p.set_defaults(fn=cmd_washer_status)
+
+    p = sub.add_parser("washer", help="run a washer action (auto-acquires the lease; Ctrl-C cancels)")
+    p.add_argument("action", choices=washer_keys.ACTIONS)
+    p.add_argument("--program", default=None, help="wash program number (start_wash)")
+    p.add_argument("--timeout", default=300.0)
+    p.add_argument("--washer", default="washer0")
+    p.add_argument("--client-id", default=None, help="reuse an external lease")
+    p.set_defaults(fn=cmd_washer_action)
+
+    p = sub.add_parser("washer-stop-door", help="release the door permission (a travelling door stops)")
+    p.add_argument("--washer", default="washer0")
+    p.add_argument("--client-id", default=None)
+    p.set_defaults(fn=cmd_washer_stop_door)
+
+    p = sub.add_parser("washer-recipe", help="print the machine's wash program, or --set it from a JSON file")
+    p.add_argument("--set", default=None, metavar="FILE.json")
+    p.add_argument("--json", action="store_true", help="print as JSON (round-trips with --set)")
+    p.add_argument("--washer", default="washer0")
+    p.add_argument("--client-id", default=None)
+    p.set_defaults(fn=cmd_washer_recipe)
+
+    p = sub.add_parser("tags-state", help="print a tags device's variables")
+    p.add_argument("--tags", default="plc0", help="tags resource id (default plc0)")
+    p.set_defaults(fn=cmd_tags_state)
+
+    p = sub.add_parser("tags-write", help="write a rw tag (auto-acquires the lease)")
+    p.add_argument("tag")
+    p.add_argument("value")
+    p.add_argument("--string", action="store_true", help="keep the value as a string")
+    p.add_argument("--tags", default="plc0", help="tags resource id (default plc0)")
+    p.add_argument("--client-id", default=None, help="reuse an external lease")
+    p.set_defaults(fn=cmd_tags_write)
+
+    p = sub.add_parser("tags-force", help="force a tag's reported value (read-only tags need no lease)")
+    p.add_argument("tag")
+    p.add_argument("value", nargs="?", default=None)
+    p.add_argument("--clear", action="store_true")
+    p.add_argument("--string", action="store_true")
+    p.add_argument("--tags", default="plc0", help="tags resource id (default plc0)")
+    p.add_argument("--client-id", default=None)
+    p.set_defaults(fn=cmd_tags_force)
+
+    p = sub.add_parser("dio-state", help="print a dio device's named channels")
+    p.add_argument("--dio", default="io0", help="dio resource id (default io0)")
+    p.set_defaults(fn=cmd_dio_state)
+
+    p = sub.add_parser("dio-set", help="set a dio OUTPUT channel (auto-acquires the lease)")
+    p.add_argument("channel")
+    p.add_argument("value", help="on|off|true|false|1|0 or a number")
+    p.add_argument("--dio", default="io0", help="dio resource id (default io0)")
+    p.add_argument("--client-id", default=None, help="reuse an external lease")
+    p.set_defaults(fn=cmd_dio_set)
+
+    p = sub.add_parser("dio-force", help="force ANY dio channel's reported value (auto-acquires the lease)")
+    p.add_argument("channel")
+    p.add_argument("value", nargs="?", default=None, help="on|off|true|false|1|0 or a number")
+    p.add_argument("--clear", action="store_true", help="clear the force instead")
+    p.add_argument("--dio", default="io0", help="dio resource id (default io0)")
+    p.add_argument("--client-id", default=None, help="reuse an external lease")
+    p.set_defaults(fn=cmd_dio_force)
 
     p = sub.add_parser("jog", help="hold-to-jog stream (auto-acquires the lease)")
     group = p.add_mutually_exclusive_group(required=True)
@@ -812,6 +1374,8 @@ def main(argv=None) -> int:
     p.set_defaults(fn=cmd_cam_stream)
 
     args = parser.parse_args(argv)
+    if getattr(args, "no_session", False):
+        return args.fn(args)
     session = _open_session(args)
     try:
         return args.fn(session, args)

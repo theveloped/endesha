@@ -6,11 +6,7 @@ import math
 
 from wf.contracts.arm.messages import (
     Ack,
-    AcquireControl,
     ArmStatus,
-    ControlAck,
-    ControlOwner,
-    ControlOwnerState,
     ExecutePathGoal,
     FlangeState,
     Freedom,
@@ -22,8 +18,6 @@ from wf.contracts.arm.messages import (
     TcpState,
     Waypoint,
 )
-
-OWNER = ControlOwner(client_id="c1", user="me", granted_at=10, expires_at=40)
 
 POSE = Pose(frame="arm/r1/base", xyz=[0.1, -0.2, 0.3], quat=[0.0, 0.0, 0.0, 1.0])
 
@@ -66,12 +60,6 @@ POSE = Pose(frame="arm/r1/base", xyz=[0.1, -0.2, 0.3], quat=[0.0, 0.0, 0.0, 1.0]
             client_id="c1", mode="joint", frame="base",
             velocity=[0.1, 0.0, 0.0, 0.0, 0.0, 0.0], t=100,
         ),
-        OWNER,
-        AcquireControl(client_id="c1", user="me"),
-        ControlAck(ok=True, owner=OWNER, error=None),
-        ControlAck(ok=False, owner=None, error="held_by:bob"),
-        ControlOwnerState(t=7, owner=OWNER),
-        ControlOwnerState(t=8, owner=None),
     ],
     ids=lambda m: type(m).__name__,
 )

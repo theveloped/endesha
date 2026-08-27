@@ -1,0 +1,57 @@
+# The Ecoclean cell: one parts washer, no arm. Replaces the ecoclean-controller
+# repo (asyncua client + pytransitions machine + FastAPI two-button webapp):
+# our HMI is the operator UI, the platform's program runner drives the cycle,
+# the washer HAL speaks the machine's OPC-UA handshake.
+#
+#   .\deploy\start_stack.ps1 -Cell deploy/ecoclean/cell.yaml -Runtime deploy/ecoclean/runtime/sim.yaml -Programs deploy/ecoclean/programs -BridgeInDocker
+#
+# Two devices from ONE provider process (like the arm serving its io pins):
+#   washer0  the `washer` contract — phase, door, actions, recipe (the device)
+#   plc0     the raw `tags` contract — every PLC variable under its own
+#            (German) name plus the cell names given below (the transport)
+cell_type: ecoclean-cell@0.1
+name: ecoclean
+platform: 0.1.0
+master_node: main
+
+control:
+  lease_ttl_s: 30.0
+
+resources:
+  washer0:
+    contract: washer
+    model: ecoclean_ecc
+    config:
+      door_timeout_s: 90            # a door travel / handshake must complete within this
+      cycle_start_timeout_s: 30     # WashingInProgress after the door closed
+      settle_s: 0.5                 # pause between handshake line writes (as the old controller)
+    sources:
+      live:
+        kind: ecoclean
+        params:
+          endpoint: opc.tcp://192.168.0.1:4840
+          username: ecoclean
+          password: ecoclean
+          timeout_s: 5.0
+          subscription_ms: 100
+          watchdog: { tag: WatchDogExt, period_s: 0.5 }   # PLC drops to manual without it
+      sim:
+        kind: ecoclean_sim
+        params:
+          time_scale: 0.1           # 10x faster than the real machine
+          door_travel_s: 3.0
+          wash_time_s: null         # null = sum of the recipe step times
+    provides:
+      plc0:
+        contract: tags
+        model: ecoclean_plc
+        # Our names for the lines we talk about; every other PLC variable stays
+        # visible as an auto tag (`door_open`, `programmfolgen_2_zeit`, ...).
+        tags:
+          machine_ready:   { tag: ReadyToLoad }
+          machine_done:    { tag: ReadyToUnload }
+          general_fault:   { tag: GeneralFault }
+          fault_no:        { tag: stoernummer }
+          in_auto:         { tag: Auto }
+          program_name:    { tag: Kommentar }
+          program_no:      { tag: WashProgram }

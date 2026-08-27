@@ -55,6 +55,8 @@ import type {
   SceneObject,
   TcpDef,
 } from "../lib/messages";
+import type { ScenePreview } from "../scene/types";
+import type { SceneStructure } from "../scene/useSceneStructure";
 
 const RAD_TO_DEG = 180 / Math.PI;
 const ROOT = "world";
@@ -69,10 +71,7 @@ type NamedFrame = { name: string; def: FrameDef };
 type NamedTcp = { name: string; def: TcpDef };
 type NamedPose = { name: string; def: PoseDef };
 
-type Preview =
-  | { kind: "pose"; name: string; q: number[] }
-  | { kind: "tcp"; name: string; def: TcpDef }
-  | null;
+type Preview = ScenePreview;
 
 const fmt = (v: number[], dp: number) => v.map((x) => x.toFixed(dp)).join(", ");
 const rpyOf = (quat: number[]) =>
@@ -84,17 +83,33 @@ interface FramesPageProps {
   session: Session | null;
   jointsRef: RefObject<JointState | null>;
   flangeRef: RefObject<FlangeState | null>;
+  panelOnly?: boolean;
+  structure?: Pick<SceneStructure, "frames" | "tcps" | "poses" | "objects">;
+  onPreviewChange?: (preview: ScenePreview) => void;
+  onConfigurationMutated?: () => void;
 }
 
 export default function FramesPage({
   session,
   jointsRef,
   flangeRef,
+  panelOnly = false,
+  structure,
+  onPreviewChange,
+  onConfigurationMutated,
 }: FramesPageProps) {
-  const [frames, setFrames] = useState<NamedFrame[]>([]);
-  const [tcps, setTcps] = useState<NamedTcp[]>([]);
-  const [poses, setPoses] = useState<NamedPose[]>([]);
-  const [scene, setScene] = useState<{ name: string; obj: SceneObject }[]>([]);
+  const [frames, setFrames] = useState<NamedFrame[]>(
+    () => structure?.frames ?? [],
+  );
+  const [tcps, setTcps] = useState<NamedTcp[]>(
+    () => structure?.tcps ?? [],
+  );
+  const [poses, setPoses] = useState<NamedPose[]>(
+    () => structure?.poses ?? [],
+  );
+  const [scene, setScene] = useState<{ name: string; obj: SceneObject }[]>(
+    () => structure?.objects ?? [],
+  );
 
   const [showFrames, setShowFrames] = useState(true);
   const [showScene, setShowScene] = useState(true);
@@ -146,18 +161,21 @@ export default function FramesPage({
   }, []);
 
   useEffect(() => {
-    if (session === null) return;
-    void (async () => {
-      await refresh(session);
-    })();
-  }, [session, refresh]);
+    if (session === null || structure !== undefined) return;
+    const timer = window.setTimeout(() => void refresh(session), 0);
+    return () => window.clearTimeout(timer);
+  }, [session, refresh, structure]);
 
   const onMutated = useCallback(
     (s: Session) => {
-      void refresh(s);
+      void refresh(s).then(onConfigurationMutated);
     },
-    [refresh],
+    [refresh, onConfigurationMutated],
   );
+  useEffect(() => {
+    onPreviewChange?.(preview);
+    return () => onPreviewChange?.(null);
+  }, [preview, onPreviewChange]);
 
   const frameNames = frames.map((f) => f.name);
 
@@ -169,8 +187,15 @@ export default function FramesPage({
   }, [frames]);
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[1fr_420px]">
-      <Viewport
+    <div
+      className={
+        panelOnly
+          ? "h-full min-h-0 overflow-y-auto"
+          : "grid h-full min-h-0 grid-cols-[1fr_420px]"
+      }
+    >
+      {!panelOnly && (
+        <Viewport
         jointsRef={jointsRef}
         baseMatrix={baseMatrix}
         controls={
@@ -220,9 +245,16 @@ export default function FramesPage({
             baseMatrix={baseMatrix}
           />
         )}
-      </Viewport>
+        </Viewport>
+      )}
 
-      <div className="min-h-0 space-y-2 overflow-y-auto border-l border-border p-2">
+      <div
+        className={
+          panelOnly
+            ? "min-h-0 space-y-2 p-2"
+            : "min-h-0 space-y-2 overflow-y-auto border-l border-border p-2"
+        }
+      >
         <FramesCard
           session={session}
           frames={frames}

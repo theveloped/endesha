@@ -17,11 +17,15 @@ import {
 import { cn } from "@/lib/utils";
 import { setDeviceSource } from "../lib/actions";
 import { query, subscribeLatest, watchAlive, type Unsubscribe } from "../lib/bus";
-import { alive, camAlive, supervisorDevices } from "../lib/config";
+import { alive, camAlive, dioAlive, supervisorDevices, tagsAlive, washerAlive } from "../lib/config";
 import type { DeviceEntry, DevicesList } from "../lib/messages";
 
 function deviceAliveKey(realm: string, d: DeviceEntry): string {
-  return d.contract === "camera2d" ? camAlive(realm, d.id) : alive(realm, d.id);
+  if (d.contract === "camera2d") return camAlive(realm, d.id);
+  if (d.contract === "dio") return dioAlive(realm, d.id);
+  if (d.contract === "tags") return tagsAlive(realm, d.id);
+  if (d.contract === "washer") return washerAlive(realm, d.id);
+  return alive(realm, d.id);
 }
 
 /** Declared modes + `off`, de-duplicated, in a stable order. */
@@ -37,40 +41,68 @@ export default function DeviceTree({
   session,
   realm,
   commandsEnabled,
+  devices: suppliedDevices,
 }: {
   session: Session | null;
   realm: string;
   commandsEnabled: boolean;
+  devices?: DeviceEntry[];
 }) {
-  const [devices, setDevices] = useState<DeviceEntry[]>([]);
-  const [aliveMap, setAliveMap] = useState<Record<string, boolean>>({});
+  const [deviceSample, setDeviceSample] = useState<{
+    session: Session | null;
+    realm: string;
+    devices: DeviceEntry[];
+  }>({ session: null, realm: "", devices: [] });
+  const [aliveSample, setAliveSample] = useState<{
+    session: Session | null;
+    realm: string;
+    map: Record<string, boolean>;
+  }>({ session: null, realm: "", map: {} });
+  const devices =
+    suppliedDevices ??
+    (deviceSample.session === session && deviceSample.realm === realm
+      ? deviceSample.devices
+      : []);
+  const aliveMap =
+    aliveSample.session === session && aliveSample.realm === realm
+      ? aliveSample.map
+      : {};
   const [pending, setPending] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; mode: string } | null>(null);
 
   // Subscribe + initial query the devices inventory.
   useEffect(() => {
-    setDevices([]);
-    if (session === null) return;
+    if (session === null || suppliedDevices !== undefined) return;
     let disposed = false;
     const unsubs: Unsubscribe[] = [];
     void (async () => {
       const u = await subscribeLatest(
         session,
         supervisorDevices(realm),
-        (m) => setDevices((m as DevicesList).devices ?? []),
+        (m) =>
+          setDeviceSample({
+            session,
+            realm,
+            devices: (m as DevicesList).devices ?? [],
+          }),
         4,
       );
       if (disposed) u();
       else unsubs.push(u);
       const cur = await query(session, supervisorDevices(realm), {});
-      if (!disposed && cur !== null)
-        setDevices((cur as DevicesList).devices ?? []);
+      if (!disposed && cur !== null) {
+        setDeviceSample({
+          session,
+          realm,
+          devices: (cur as DevicesList).devices ?? [],
+        });
+      }
     })();
     return () => {
       disposed = true;
       for (const u of unsubs) u();
     };
-  }, [session, realm]);
+  }, [session, realm, suppliedDevices]);
 
   // Watch each device's own liveliness token (re-subscribe when the set changes).
   const ids = devices.map((d) => d.id).join(",");
@@ -80,8 +112,15 @@ export default function DeviceTree({
     const unsubs: Unsubscribe[] = [];
     void (async () => {
       for (const d of devices) {
-        const u = await watchAlive(session, deviceAliveKey(realm, d), (a) =>
-          setAliveMap((prev) => ({ ...prev, [d.id]: a })),
+        const u = await watchAlive(session, deviceAliveKey(realm, d), (alive) =>
+          setAliveSample((previous) => ({
+            session,
+            realm,
+            map:
+              previous.session === session && previous.realm === realm
+                ? { ...previous.map, [d.id]: alive }
+                : { [d.id]: alive },
+          })),
         );
         if (disposed) u();
         else unsubs.push(u);
@@ -116,7 +155,7 @@ export default function DeviceTree({
   if (devices.length === 0) return null; // no supervisor in this namespace
 
   return (
-    <div className="pointer-events-auto w-56 rounded-md border border-border bg-card/95 p-2 text-xs shadow-md">
+    <div className="pointer-events-auto w-full rounded-lg bg-zinc-950/2.5 p-2 text-xs ring-1 ring-zinc-950/5 dark:bg-white/5 dark:ring-white/10">
       <div className="mb-1 font-semibold tracking-wide text-muted-foreground">
         DEVICES
       </div>
@@ -135,18 +174,27 @@ export default function DeviceTree({
               />
               <span className="font-medium">{d.id}</span>
               <span className="text-muted-foreground">{d.contract}</span>
-              <select
-                className="ml-auto rounded border border-border bg-background px-1 py-0.5 text-xs disabled:opacity-50"
-                value={d.active ?? "off"}
-                disabled={!commandsEnabled || pending === d.id}
-                onChange={(e) => onPick(d, e.target.value)}
-              >
-                {modesFor(d).map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
+              {d.provided_by !== undefined ? (
+                <span
+                  className="ml-auto text-muted-foreground"
+                  title={`served by ${d.provided_by}'s provider process; follows its source`}
+                >
+                  {d.active ?? "off"} · via {d.provided_by}
+                </span>
+              ) : (
+                <select
+                  className="ml-auto rounded border border-border bg-background px-1 py-0.5 text-xs disabled:opacity-50"
+                  value={d.active ?? "off"}
+                  disabled={!commandsEnabled || pending === d.id}
+                  onChange={(e) => onPick(d, e.target.value)}
+                >
+                  {modesFor(d).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              )}
               {external && (
                 <span
                   title="served by an external process (e.g. the headless camera) — the supervisor does not start it"

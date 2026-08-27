@@ -1,6 +1,6 @@
-# Runtime overlay: fully simulated session (arm_sim + headless-browser camera).
-# Pair with the canonical deploy/cell.yaml:
-#   python -m wf.services.supervisor --cell deploy/cell.yaml --runtime deploy/runtime/sim.yaml
+# Runtime overlay: interactive simulation with browser-produced camera frames.
+# Switch cam0 to `sim` for the autonomous headless Chromium provider.
 active_sources:
   r1: sim
-  cam0: sim
+  cam0: browser_sim
+  plc0: sim

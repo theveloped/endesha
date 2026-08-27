@@ -82,16 +82,131 @@ export function cmdJog(realm: string, rid = RID): string {
   return `${prefix(realm, rid)}/cmd/jog`;
 }
 
-export function cmdAcquireControl(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/cmd/acquire_control`;
+// dio contract (wf/contracts/dio/keys.py): named channels per dio device.
+export function dioStateChannels(realm: string, rid: string): string {
+  return `${realm}/dio/${rid}/state/channels`;
 }
 
-export function cmdReleaseControl(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/cmd/release_control`;
+export function dioCmdSet(realm: string, rid: string): string {
+  return `${realm}/dio/${rid}/cmd/set`;
 }
 
-export function stateControlOwner(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/state/control_owner`;
+export function dioCmdForce(realm: string, rid: string): string {
+  return `${realm}/dio/${rid}/cmd/force`;
+}
+
+export function dioAlive(realm: string, rid: string): string {
+  return `${realm}/dio/${rid}/alive`;
+}
+
+// program contract (wf/contracts/program/keys.py): one PackML unit per cell.
+export const UNIT_COMMANDS = [
+  "start", "hold", "unhold", "suspend", "unsuspend", "stop", "abort", "clear", "reset", "unload",
+] as const;
+export type UnitCommand = (typeof UNIT_COMMANDS)[number];
+
+export function programsCatalog(realm: string): string {
+  return `${realm}/programs/catalog`;
+}
+
+export function programsCmdLoad(realm: string): string {
+  return `${realm}/programs/cmd/load`;
+}
+
+export function programsCmdSource(realm: string): string {
+  return `${realm}/programs/cmd/source`;
+}
+
+export function programsCmdSave(realm: string): string {
+  return `${realm}/programs/cmd/save`;
+}
+
+export function programsCmdDelete(realm: string): string {
+  return `${realm}/programs/cmd/delete`;
+}
+
+export function programLog(realm: string): string {
+  return `${realm}/program/log`;
+}
+
+export function programState(realm: string): string {
+  return `${realm}/program/state`;
+}
+
+export function programCmd(realm: string, command: UnitCommand): string {
+  return `${realm}/program/cmd/${command}`;
+}
+
+export function programCmdEvent(realm: string): string {
+  return `${realm}/program/cmd/event`;
+}
+
+export function programTransitions(realm: string): string {
+  return `${realm}/program/transitions`;
+}
+
+export function programAlive(realm: string): string {
+  return `${realm}/program/alive`;
+}
+
+// tags contract (wf/contracts/tags/keys.py): named typed controller variables.
+export function tagsState(realm: string, rid: string): string {
+  return `${realm}/tags/${rid}/state/tags`;
+}
+
+export function tagsCmdWrite(realm: string, rid: string): string {
+  return `${realm}/tags/${rid}/cmd/write`;
+}
+
+export function tagsCmdForce(realm: string, rid: string): string {
+  return `${realm}/tags/${rid}/cmd/force`;
+}
+
+export function tagsAlive(realm: string, rid: string): string {
+  return `${realm}/tags/${rid}/alive`;
+}
+
+// washer contract (wf/contracts/washer/keys.py): parts washer door/cycle/recipe.
+export function washerState(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/state/status`;
+}
+
+export function washerActionPrefix(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/action`;
+}
+
+export function washerCmdStopDoor(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/cmd/stop_door`;
+}
+
+export function washerCmdGetRecipe(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/cmd/get_recipe`;
+}
+
+export function washerCmdSetRecipe(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/cmd/set_recipe`;
+}
+
+export function washerAlive(realm: string, rid: string): string {
+  return `${realm}/washer/${rid}/alive`;
+}
+
+// Cell-level control lease (wf/contracts/control/keys.py): ONE holder for every
+// device in the cell, granted by the supervisor-hosted authority. No rid.
+export function controlCmdAcquire(realm: string): string {
+  return `${realm}/control/cmd/acquire`;
+}
+
+export function controlCmdRelease(realm: string): string {
+  return `${realm}/control/cmd/release`;
+}
+
+export function controlStateOwner(realm: string): string {
+  return `${realm}/control/state/owner`;
+}
+
+export function controlAlive(realm: string): string {
+  return `${realm}/control/alive`;
 }
 
 export function actionPrefix(realm: string, rid = RID): string {
@@ -142,6 +257,19 @@ export function configPosesGlob(): string {
   return "config/poses/**";
 }
 
+export function configProgramPosesGlob(program: string): string {
+  return `config/programs/${program}/poses/**`;
+}
+
+export function configProgramPose(program: string, name: string): string {
+  return `config/programs/${program}/poses/${name}`;
+}
+
+/** Hand-placed node positions of a program's graph view: {positions: {state: [x, y]}}. */
+export function configProgramLayout(program: string): string {
+  return `config/programs/${program}/layout`;
+}
+
 export function configPose(name: string): string {
   return `config/poses/${name}`;
 }
@@ -188,55 +316,27 @@ export function camCmd(realm: string, action: string, cid = CID): string {
   return `${camPrefix(realm, cid)}/cmd/${action}`;
 }
 
-// Key space for the `task` contract, mirroring wf/contracts/task/keys.py.
-// `{flow}` is the YAML statechart name. The UI discovers running flows
-// by watching the per-realm `task/*/alive` liveliness glob.
-
-function taskPrefix(realm: string, flow: string): string {
-  return `${realm}/task/${flow}`;
+export function camProducerCmd(realm: string, action: "acquire" | "release", cid = CID): string {
+  return `${camPrefix(realm, cid)}/producer/cmd/${action}`;
 }
 
-export function taskState(realm: string, flow: string): string {
-  return `${taskPrefix(realm, flow)}/state`;
+export function camProducerOwner(realm: string, cid = CID): string {
+  return `${camPrefix(realm, cid)}/producer/state/owner`;
 }
 
-export function taskResult(realm: string, flow: string): string {
-  return `${taskPrefix(realm, flow)}/result`;
+export function camProducerDemand(realm: string, cid = CID): string {
+  return `${camPrefix(realm, cid)}/producer/state/demand`;
 }
 
-export function taskAlive(realm: string, flow: string): string {
-  return `${taskPrefix(realm, flow)}/alive`;
+export function camProducerIngress(realm: string, cid = CID): string {
+  return `${camPrefix(realm, cid)}/producer/ingress`;
 }
 
-export function taskCmdStart(realm: string, flow: string): string {
-  return `${taskPrefix(realm, flow)}/cmd/start`;
+export function camProducerRender(realm: string, clientId: string, cid = CID): string {
+  return `${camPrefix(realm, cid)}/producer/clients/${clientId}/render`;
 }
 
-export function taskCmdAbort(realm: string, flow: string): string {
-  return `${taskPrefix(realm, flow)}/cmd/abort`;
-}
-
-/** Matches `{realm}/task/{flow}/alive` liveliness tokens for one realm. */
-export function taskAliveGlob(realm: string): string {
-  return `${realm}/task/*/alive`;
-}
-
-// Key space for the `supervisor` contract, mirroring
-// wf/contracts/supervisor/keys.py. The supervisor is the sole interpreter of
-// flows: it publishes a catalog of selectable flows with resolved role
-// bindings, and brings each online/offline on demand.
-
-export function flowsCatalog(realm: string): string {
-  return `${realm}/flows/catalog`;
-}
-
-export function flowsCmdStart(realm: string): string {
-  return `${realm}/flows/cmd/start`;
-}
-
-export function flowsCmdStop(realm: string): string {
-  return `${realm}/flows/cmd/stop`;
-}
+// Supervisor process and device-inventory key space.
 
 export function supervisorAlive(realm: string, node = "main"): string {
   return `${realm}/supervisor/${node}/alive`;

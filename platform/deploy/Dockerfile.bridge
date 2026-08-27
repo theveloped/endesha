@@ -14,8 +14,8 @@
 #   docker build -f deploy/Dockerfile.bridge -t wf-bridge deploy/
 FROM alpine:3.20
 
-ARG BRIDGE_URL=https://github.com/eclipse-zenoh/zenoh-ts/releases/download/1.8.0/zenoh-ts-1.8.0-x86_64-unknown-linux-musl-standalone.zip
-ARG BRIDGE_SHA256=b8f9d3fd91dd0b8fd82876bacda8c25ef7eee19c70a2eb60b58555fcecea298e
+ARG BRIDGE_URL=https://github.com/eclipse-zenoh/zenoh-ts/releases/download/1.9.0/zenoh-ts-1.9.0-x86_64-unknown-linux-musl-standalone.zip
+ARG BRIDGE_SHA256=c97c703ffeaa0dcc1692d10dcc91f57e276ec6ee593d56fc5b79135fd8553a67
 
 RUN apk add --no-cache curl unzip libgcc \
     && cd /tmp \

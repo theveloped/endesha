@@ -37,6 +37,34 @@ def cmd_stream_stop(realm: str, cid: str) -> str:
 def alive(realm: str, cid: str) -> str:
     return key(prefix(realm, cid), "alive")
 
+def producer_prefix(realm: str, cid: str) -> str:
+    return key(prefix(realm, cid), "producer")
+
+
+def producer_cmd_acquire(realm: str, cid: str) -> str:
+    return key(producer_prefix(realm, cid), "cmd", "acquire")
+
+
+def producer_cmd_release(realm: str, cid: str) -> str:
+    return key(producer_prefix(realm, cid), "cmd", "release")
+
+
+def producer_state_owner(realm: str, cid: str) -> str:
+    return key(producer_prefix(realm, cid), "state", "owner")
+
+
+def producer_state_demand(realm: str, cid: str) -> str:
+    return key(producer_prefix(realm, cid), "state", "demand")
+
+
+def producer_ingress(realm: str, cid: str) -> str:
+    return key(producer_prefix(realm, cid), "ingress")
+
+
+def producer_render(realm: str, cid: str, client_id: str) -> str:
+    return key(producer_prefix(realm, cid), "clients", client_id, "render")
+
+
 
 def optical_frame(cid: str) -> str:
     """Name of the camera optical frame: ``camera2d/{cid}/optical``.

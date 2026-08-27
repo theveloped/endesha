@@ -1,1 +1,1 @@
-"""WF supervisor service: cell bring-up + sole flow interpreter."""
+"""WF supervisor service: cell bring-up and runtime source management."""

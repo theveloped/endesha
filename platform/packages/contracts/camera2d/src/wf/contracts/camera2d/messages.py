@@ -41,13 +41,11 @@ class Ack:
 class FrameHeader:
     """CBOR attachment on every frame topic; embedded in GrabReply.
 
-    THE bus-wide frame-stream convention: any frame producer (camera HAL now,
-    processing nodes in the vision phase) publishes payload = image bytes,
-    attachment = this header, on its own ``.../image`` topic. Processors
-    preserve ``t_capture`` and ``frame_id``, set their own ``seq``, and
-    update ``w``/``h``/``encoding`` — frames stay uniformly consumable
-    across camera streams, grab sets, and pipeline outputs. Origin is
-    carried by the topic; there is no ``source`` field.
+    The bus-wide frame convention: producers publish image bytes as the payload
+    and this header as the attachment on an ``.../image`` topic. Derived frame
+    producers preserve ``t_capture`` and ``frame_id``, assign their own ``seq``,
+    and update ``w``/``h``/``encoding``.
+    Origin is carried by the topic; there is no ``source`` field.
     """
 
     t_capture: int  # ns, exposure midpoint
@@ -103,6 +101,117 @@ class FrameHeader:
             clock_domain=d.get("clock_domain", CLOCK_HOST),
             pose=d.get("pose"),
         )
+
+@dataclass
+class ProducerGrant:
+    """Current browser producer grant, including restart-safe fencing."""
+
+    client_id: str
+    user: str
+    authority_id: str
+    epoch: int
+    granted_at: int
+    expires_at: int
+
+    def to_wire(self) -> dict:
+        return {
+            "client_id": self.client_id,
+            "user": self.user,
+            "authority_id": self.authority_id,
+            "epoch": int(self.epoch),
+            "granted_at": int(self.granted_at),
+            "expires_at": int(self.expires_at),
+        }
+
+    @classmethod
+    def from_wire(cls, d: dict) -> "ProducerGrant":
+        return cls(
+            client_id=d["client_id"],
+            user=d["user"],
+            authority_id=d["authority_id"],
+            epoch=d["epoch"],
+            granted_at=d["granted_at"],
+            expires_at=d["expires_at"],
+        )
+
+
+@dataclass
+class ProducerAck:
+    """Reply from producer acquire/release queryables."""
+
+    ok: bool
+    owner: ProducerGrant | None = None
+    error: str | None = None
+
+    def to_wire(self) -> dict:
+        return {
+            "ok": bool(self.ok),
+            "owner": None if self.owner is None else self.owner.to_wire(),
+            "error": self.error,
+        }
+
+    @classmethod
+    def from_wire(cls, d: dict) -> "ProducerAck":
+        owner = d.get("owner")
+        return cls(
+            ok=d["ok"],
+            owner=None if owner is None else ProducerGrant.from_wire(owner),
+            error=d.get("error"),
+        )
+
+
+@dataclass
+class ProducerFrame:
+    """CBOR attachment on a candidate frame published to producer ingress."""
+
+    client_id: str
+    authority_id: str
+    epoch: int
+    captured_at: int
+    w: int
+    h: int
+    encoding: str
+    exposure_us: float
+    gain_db: float
+    pose: dict | None = None
+
+    def __post_init__(self):
+        if self.encoding != ENCODING_JPEG:
+            raise ValueError("browser producer frames must use jpeg encoding")
+        if self.w <= 0 or self.h <= 0:
+            raise ValueError("producer frame dimensions must be positive")
+
+    def to_wire(self) -> dict:
+        d = {
+            "client_id": self.client_id,
+            "authority_id": self.authority_id,
+            "epoch": int(self.epoch),
+            "captured_at": int(self.captured_at),
+            "w": int(self.w),
+            "h": int(self.h),
+            "encoding": self.encoding,
+            "exposure_us": float(self.exposure_us),
+            "gain_db": float(self.gain_db),
+        }
+        if self.pose is not None:
+            d["pose"] = self.pose
+        return d
+
+    @classmethod
+    def from_wire(cls, d: dict) -> "ProducerFrame":
+        return cls(
+            client_id=d["client_id"],
+            authority_id=d["authority_id"],
+            epoch=d["epoch"],
+            captured_at=d["captured_at"],
+            w=d["w"],
+            h=d["h"],
+            encoding=d["encoding"],
+            exposure_us=d["exposure_us"],
+            gain_db=d["gain_db"],
+            pose=d.get("pose"),
+        )
+
 
 
 @dataclass
@@ -210,7 +319,9 @@ class ConfigureCmd:
 
     def to_wire(self) -> dict:
         return {
-            "exposure_us": None if self.exposure_us is None else float(self.exposure_us),
+            "exposure_us": None
+            if self.exposure_us is None
+            else float(self.exposure_us),
             "gain_db": None if self.gain_db is None else float(self.gain_db),
             "auto_exposure": self.auto_exposure,
             "auto_gain": self.auto_gain,
@@ -283,7 +394,9 @@ class CameraStatus:
             "connected": bool(self.connected),
             "streaming": bool(self.streaming),
             "stream": None if self.stream is None else self.stream.to_wire(),
-            "exposure_us": None if self.exposure_us is None else float(self.exposure_us),
+            "exposure_us": None
+            if self.exposure_us is None
+            else float(self.exposure_us),
             "gain_db": None if self.gain_db is None else float(self.gain_db),
             "achieved_rate_hz": float(self.achieved_rate_hz),
             "error": self.error,

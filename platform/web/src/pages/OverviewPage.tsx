@@ -3,7 +3,6 @@
 // right. The twin overlays the static frame triads and the active-TCP tip
 // marker (config is realm-less; fetched page-local like CamerasPage).
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -12,41 +11,56 @@ import {
 } from "react";
 import type { Session } from "@eclipse-zenoh/zenoh-ts";
 import { decode } from "cbor-x";
-import { Button } from "@/components/ui/button";
 import DeviceTree from "../components/DeviceTree";
 import MotionPanel from "../components/MotionPanel";
 import StatusPanel from "../components/StatusPanel";
 import Viewport from "../components/Viewport";
+import { ViewportLegend } from "../components/ViewportLegend";
 import {
   FrameTriads,
   FlangeToolMeshes,
   FrustumOverlay,
+  PoseGhost,
   SceneMeshes,
   TcpDragControls,
   TcpTipMarker,
 } from "../components/SceneOverlays";
-import { clearProtectiveStop, sendExecutePath } from "../lib/actions";
+import { clearProtectiveStop } from "../lib/actions";
 import { queryAll, subscribeRaw } from "../lib/bus";
 import {
   camImage,
+  CID,
   configFramesGlob,
   configIntrinsics,
   configIntrinsicsGlob,
   configSceneGlob,
   configTcpsGlob,
+  RID,
 } from "../lib/config";
 import { BASE_FRAME, frameWorldMatrix } from "../lib/framemath";
+import { intrinsicsFromCameraInfo } from "../lib/messages";
 import type {
   ArmStatus,
   FlangeState,
   FrameDef,
   FrameHeader,
   Intrinsics,
+  CameraInfo,
   JointState,
   Pose,
   SceneObject,
   TcpDef,
 } from "../lib/messages";
+import type { ScenePreview } from "../scene/types";
+import type {
+  TcpDragMode,
+  ViewerVisibility,
+} from "../scene/viewerControls";
+import {
+  isSceneItemHidden,
+  sceneGroupVisibilityId,
+  sceneItemVisibilityId,
+} from "../scene/visibility";
 
 const TCP_FLANGE = "flange";
 
@@ -61,6 +75,18 @@ interface OverviewPageProps {
   commandsEnabled: boolean;
   clientId: string;
   holdsControl: boolean;
+  workspace?: boolean;
+  preview?: ScenePreview;
+  configurationRevision?: number;
+  visibility: ViewerVisibility;
+  onVisibilityChange: (visibility: ViewerVisibility) => void;
+  hiddenSceneItems: ReadonlySet<string>;
+  dragMode: TcpDragMode;
+  dragPending: boolean;
+  onDragCommit: (
+    xyz: [number, number, number],
+    quat: [number, number, number, number],
+  ) => void;
 }
 
 export default function OverviewPage({
@@ -74,19 +100,19 @@ export default function OverviewPage({
   commandsEnabled,
   clientId,
   holdsControl,
+  workspace = false,
+  preview = null,
+  configurationRevision = 0,
+  visibility,
+  onVisibilityChange,
+  hiddenSceneItems,
+  dragMode,
+  dragPending,
+  onDragCommit,
 }: OverviewPageProps) {
   const [frames, setFrames] = useState<{ name: string; def: FrameDef }[]>([]);
   const [tcps, setTcps] = useState<{ name: string; def: TcpDef }[]>([]);
-  const [showFrames, setShowFrames] = useState(true);
-  const [showTcp, setShowTcp] = useState(true);
-  const [showScene, setShowScene] = useState(true);
   const [scene, setScene] = useState<{ name: string; obj: SceneObject }[]>([]);
-  const [dragMode, setDragMode] = useState<"off" | "translate" | "rotate">(
-    "off",
-  );
-  const [dragPending, setDragPending] = useState(false);
-  const [dragError, setDragError] = useState<string | null>(null);
-  const [showFrustum, setShowFrustum] = useState(true);
   const [intrinsics, setIntrinsics] = useState<Intrinsics | null>(null);
   // Latest per-frame world<-optical camera pose, fed from the image header's
   // attachment (a ref so 15 Hz frames never re-render the page).
@@ -118,12 +144,12 @@ export default function OverviewPage({
           })),
         );
         const cam = intr.find((r) => r.key === configIntrinsics());
-        setIntrinsics(cam !== undefined ? (cam.value as Intrinsics) : null);
+        setIntrinsics(cam !== undefined ? intrinsicsFromCameraInfo(cam.value as CameraInfo) : null);
       } catch (e) {
         console.error("overview config fetch failed:", e);
       }
     })();
-  }, [session]);
+  }, [session, configurationRevision]);
 
   // Track the camera's per-frame pose from the image topic's CBOR attachment.
   // Realm-keyed: re-subscribe on realm/session change; clears the ref so a
@@ -162,149 +188,152 @@ export default function OverviewPage({
     const map = new Map(frames.map((fr) => [fr.name, fr.def]));
     return frameWorldMatrix(map, BASE_FRAME);
   }, [frames]);
+  const filteredScene = useMemo(() => {
+    const worldHidden = hiddenSceneItems.has("world");
+    const deviceGroupHidden = hiddenSceneItems.has(
+      sceneGroupVisibilityId("devices"),
+    );
+    const frameByName = new Map(frames.map((frame) => [frame.name, frame.def]));
+    const frameHiddenCache = new Map<string, boolean>();
+    const frameTreeHidden = (name: string, visiting = new Set<string>()): boolean => {
+      const cached = frameHiddenCache.get(name);
+      if (cached !== undefined) return cached;
+      if (worldHidden) return true;
+      const arm = /^arm\/([^/]+)\//.exec(name)?.[1];
+      if (
+        arm !== undefined &&
+        (deviceGroupHidden ||
+          hiddenSceneItems.has(sceneItemVisibilityId("device", arm)))
+      ) {
+        frameHiddenCache.set(name, true);
+        return true;
+      }
+      if (hiddenSceneItems.has(sceneItemVisibilityId("frame", name))) {
+        frameHiddenCache.set(name, true);
+        return true;
+      }
+      if (visiting.has(name)) return false;
+      const parent = frameByName.get(name)?.parent;
+      if (parent === undefined || parent === "world") {
+        frameHiddenCache.set(name, false);
+        return false;
+      }
+      const nextVisiting = new Set(visiting);
+      nextVisiting.add(name);
+      const hidden = frameTreeHidden(parent, nextVisiting);
+      frameHiddenCache.set(name, hidden);
+      return hidden;
+    };
+    const framesVisible =
+      !hiddenSceneItems.has(sceneGroupVisibilityId("frames"));
+    const objectsVisible =
+      !hiddenSceneItems.has(sceneGroupVisibilityId("objects"));
+    return {
+      worldHidden,
+      robotVisible:
+        !worldHidden &&
+        !deviceGroupHidden &&
+        !hiddenSceneItems.has(sceneItemVisibilityId("device", RID)),
+      cameraVisible:
+        !worldHidden &&
+        !deviceGroupHidden &&
+        !hiddenSceneItems.has(sceneItemVisibilityId("device", CID)),
+      frames: framesVisible
+        ? frames.filter((frame) => !frameTreeHidden(frame.name))
+        : [],
+      objects: objectsVisible
+        ? scene.filter(
+            (object) =>
+              !hiddenSceneItems.has(
+                sceneItemVisibilityId("object", object.name),
+              ) && !frameTreeHidden(object.obj.frame),
+          )
+        : [],
+    };
+  }, [frames, hiddenSceneItems, scene]);
+
+  const tcpVisible =
+    filteredScene.robotVisible &&
+    !isSceneItemHidden(hiddenSceneItems, "tcp", activeTcp ?? "");
+  const previewVisible =
+    preview === null ||
+    (preview.kind === "pose"
+      ? filteredScene.robotVisible &&
+        !isSceneItemHidden(hiddenSceneItems, "pose", preview.name)
+      : filteredScene.robotVisible &&
+        !isSceneItemHidden(hiddenSceneItems, "tcp", preview.name));
 
   // Jogging is only allowed live, with the driver alive AND this browser
   // holding the control lease (the driver gates execute_path on the lease).
   // When disallowed the gizmo is forced off in render.
   const dragAllowed = commandsEnabled && driverAlive && holdsControl;
 
-  const handleDragCommit = useCallback(
-    async (
-      xyz: [number, number, number],
-      quat: [number, number, number, number],
-    ) => {
-      if (session === null || dragPending) return;
-      setDragPending(true);
-      setDragError(null);
-      try {
-        const handle = await sendExecutePath(
-          session,
-          realm,
-          [
-            {
-              type: "movej",
-              target: { pose: { frame: "arm/r1/base", xyz, quat } },
-              speed: null,
-              accel: null,
-              blend_radius: 0,
-            },
-          ],
-          { clientId },
-        );
-        const result = await handle.result;
-        if (result.state !== "succeeded")
-          setDragError(
-            result.error === null
-              ? result.state
-              : `${result.state}: ${result.error}`,
-          );
-      } catch (e) {
-        setDragError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setDragPending(false);
-      }
-    },
-    [session, realm, dragPending, clientId],
-  );
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[1fr_340px]">
+    <div
+      className={
+        workspace
+          ? "h-full min-h-0"
+          : "grid h-full min-h-0 grid-cols-[1fr_340px]"
+      }
+    >
       <Viewport
         jointsRef={jointsRef}
         baseMatrix={baseMatrix}
+        robotVisible={filteredScene.robotVisible}
         topRight={
-          <DeviceTree
-            session={session}
-            realm={realm}
-            commandsEnabled={commandsEnabled}
+          workspace ? undefined : (
+            <DeviceTree
+              session={session}
+              realm={realm}
+              commandsEnabled={commandsEnabled}
+            />
+          )
+        }
+        legend={
+          <ViewportLegend
+            visibility={visibility}
+            onChange={onVisibilityChange}
           />
         }
-        controls={
-          <>
-            <Button
-              variant={showFrames ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowFrames((v) => !v)}
-            >
-              Frames
-            </Button>
-            <Button
-              variant={showTcp ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowTcp((v) => !v)}
-            >
-              TCP
-            </Button>
-            <Button
-              variant={showFrustum ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowFrustum((v) => !v)}
-            >
-              Camera
-            </Button>
-            <Button
-              variant={showScene ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowScene((v) => !v)}
-            >
-              Scene
-            </Button>
-            <Button
-              variant={dragMode !== "off" ? "default" : "outline"}
-              size="sm"
-              disabled={!dragAllowed}
-              onClick={() =>
-                setDragMode((m) => (m === "off" ? "translate" : "off"))
-              }
-            >
-              Drag TCP
-            </Button>
-            {dragMode !== "off" && (
-              <>
-                <Button
-                  variant={dragMode === "translate" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setDragMode("translate")}
-                >
-                  Move
-                </Button>
-                <Button
-                  variant={dragMode === "rotate" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setDragMode("rotate")}
-                >
-                  Rotate
-                </Button>
-              </>
-            )}
-            {dragError !== null && (
-              <span className="self-center rounded bg-background/90 px-1.5 py-0.5 text-xs text-destructive">
-                {dragError}
-              </span>
-            )}
-          </>
-        }
       >
-        {showFrames && frames.length > 0 && <FrameTriads frames={frames} />}
-        <SceneMeshes objects={scene} frames={frames} visible={showScene} />
+        {visibility.frames && filteredScene.frames.length > 0 && (
+          <FrameTriads frames={filteredScene.frames} />
+        )}
+        <SceneMeshes
+          objects={filteredScene.objects}
+          frames={frames}
+          visible={visibility.scene}
+        />
         <FlangeToolMeshes
-          objects={scene}
+          objects={filteredScene.objects}
           flangeRef={flangeRef}
           baseMatrix={baseMatrix}
-          visible={showScene}
+          visible={visibility.scene}
         />
-        {showFrustum && intrinsics !== null && (
+        {visibility.camera && filteredScene.cameraVisible && intrinsics !== null && (
           <FrustumOverlay
             intrinsics={intrinsics}
             poseRef={cameraPoseRef}
             baseMatrix={baseMatrix}
           />
         )}
-        {showTcp && activeTcpDef !== null && activeTcp !== null && (
+        {visibility.tcp && tcpVisible && activeTcpDef !== null && activeTcp !== null && (
           <TcpTipMarker
             flangeRef={flangeRef}
             tcpDef={activeTcpDef}
             label={activeTcp}
+            baseMatrix={baseMatrix}
+          />
+        )}
+        {previewVisible && preview?.kind === "pose" && (
+          <PoseGhost q={preview.q} baseMatrix={baseMatrix} />
+        )}
+        {previewVisible && preview?.kind === "tcp" && (
+          <TcpTipMarker
+            flangeRef={flangeRef}
+            tcpDef={preview.def}
+            label={preview.name}
             baseMatrix={baseMatrix}
           />
         )}
@@ -314,34 +343,36 @@ export default function OverviewPage({
             tcpDef={activeTcpDef}
             mode={dragMode === "rotate" ? "rotate" : "translate"}
             pending={dragPending}
-            onCommit={handleDragCommit}
+            onCommit={onDragCommit}
             baseMatrix={baseMatrix}
           />
         )}
       </Viewport>
-      <div className="min-h-0 space-y-2 overflow-y-auto border-l border-border p-2">
-        <StatusPanel
-          status={status}
-          driverAlive={driverAlive}
-          jointsCountRef={jointsCountRef}
-          flangeRef={flangeRef}
-          onClearProtectiveStop={() => {
-            if (session === null)
-              return Promise.reject(new Error("not connected"));
-            return clearProtectiveStop(session, realm);
-          }}
-        />
-        <MotionPanel
-          session={session}
-          realm={realm}
-          enabled={commandsEnabled && driverAlive}
-          commandsEnabled={commandsEnabled}
-          clientId={clientId}
-          holdsControl={holdsControl}
-          jointsRef={jointsRef}
-          activeTcp={status?.active_tcp ?? null}
-        />
-      </div>
+      {!workspace && (
+        <div className="min-h-0 space-y-2 overflow-y-auto border-l border-border p-2">
+          <StatusPanel
+            status={status}
+            driverAlive={driverAlive}
+            jointsCountRef={jointsCountRef}
+            flangeRef={flangeRef}
+            onClearProtectiveStop={() => {
+              if (session === null)
+                return Promise.reject(new Error("not connected"));
+              return clearProtectiveStop(session, realm);
+            }}
+          />
+          <MotionPanel
+            session={session}
+            realm={realm}
+            enabled={commandsEnabled && driverAlive}
+            commandsEnabled={commandsEnabled}
+            clientId={clientId}
+            holdsControl={holdsControl}
+            jointsRef={jointsRef}
+            activeTcp={status?.active_tcp ?? null}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,4 @@
-"""Unit tests for the supervisor cell loader, runtime overlay, source
-realization, and role resolution (no bus)."""
+"""Unit tests for cell loading, source realization, and source switching."""
 
 from __future__ import annotations
 
@@ -15,7 +14,6 @@ from wf.services.supervisor.cell import (
     load_cell,
     load_runtime,
     realize_cell,
-    resolve_roles,
 )
 from wf.services.supervisor.procs import PROVIDER_MODULES, provider_module
 from wf.services.supervisor.service import SupervisorService
@@ -23,7 +21,7 @@ from wf.services.supervisor.service import SupervisorService
 # Legacy single-`hal` cell (still accepted, normalized to one "default" source).
 _LEGACY_CELL = textwrap.dedent(
     """
-    cell_type: vision-pick-cell-sim@0.1
+    cell_type: manual-cell-sim@0.1
     platform: 0.1.0
     master_node: main
     resources:
@@ -33,15 +31,13 @@ _LEGACY_CELL = textwrap.dedent(
         hal: external
         node: main
         params: {mount: flange, mount_arm: r1}
-    bindings:
-      demo_inspect: {arm: r1, cam: cam0}
     """
 )
 
 # New-schema cell: shared config + a sources map of selectable provider modes.
 _SOURCES_CELL = textwrap.dedent(
     """
-    cell_type: vision-pick-cell@0.1
+    cell_type: manual-cell@0.1
     resources:
       r1:
         contract: arm
@@ -53,22 +49,15 @@ _SOURCES_CELL = textwrap.dedent(
           replay: {kind: replay_arm, params: {recording: foo.mcap}}
       cam0:
         contract: camera2d
-        config: {mount_arm: r1}
+        config:
+          mount_arm: r1
+          render: {width: 1280, height: 800, fx: 900.0, fy: 900.0}
         sources:
           live: {kind: genicam, params: {serial: null}}
           sim: {kind: headless_camera, launch: external, params: {}}
-    bindings:
-      demo_inspect: {arm: r1, cam: cam0}
+          browser_sim: {kind: browser_camera, params: {}}
     """
 )
-
-_DEMO_SPEC = {
-    "name": "demo_inspect",
-    "poses": ["a"],
-    "roles": {"arm": {"contract": "arm"}, "cam": {"contract": "camera2d"}},
-    "vision": {"format": "DataMatrix", "min_count": 1, "pipeline": "demo_detect"},
-    "conveyor": {"do_pin": 0, "di_pin": 0, "timeout_s": 2.0},
-}
 
 
 def _write(tmp_path, text, name="cell.yaml"):
@@ -91,6 +80,7 @@ def test_load_cell_normalizes_legacy_hal(tmp_path):
         "sources": {
             "default": {"kind": "arm_sim", "params": {}, "launch": "module"},
         },
+        "provides": {},
     }
     # hal: external -> a synthetic source with launch external.
     assert cell["resources"]["cam0"]["sources"] == {
@@ -101,7 +91,6 @@ def test_load_cell_normalizes_legacy_hal(tmp_path):
         },
     }
     assert cell["master_node"] == "main"
-    assert cell["bindings"] == {"demo_inspect": {"arm": "r1", "cam": "cam0"}}
 
 
 def test_load_cell_defaults_node_and_master(tmp_path):
@@ -109,7 +98,6 @@ def test_load_cell_defaults_node_and_master(tmp_path):
     cell = load_cell(_write(tmp_path, text))
     assert cell["resources"]["r1"]["node"] == "main"
     assert cell["master_node"] is None
-    assert cell["bindings"] == {}
 
 
 # ── load_cell: new sources schema ────────────────────────────────────────────
@@ -121,6 +109,7 @@ def test_load_cell_accepts_sources_schema(tmp_path):
     assert r1["model"] == "aubo_i10"
     assert r1["config"] == {"lease_ttl_s": 30.0}
     assert set(r1["sources"]) == {"live", "sim", "replay"}
+    assert set(cell["resources"]["cam0"]["sources"]) == {"live", "sim", "browser_sim"}
     assert r1["sources"]["live"] == {
         "kind": "aubo_i10",
         "params": {"ip": "1.2.3.4"},
@@ -148,35 +137,12 @@ def test_load_cell_accepts_sources_schema(tmp_path):
         "resources:\n  r1: {contract: arm, sources: {sim: {params: {}}}}\n",
         # bad launch
         "resources:\n  r1: {contract: arm, sources: {sim: {kind: arm_sim, launch: docker}}}\n",
-        # unknown binding -> resource id not present
-        textwrap.dedent(
-            """
-            resources:
-              r1: {contract: arm, hal: arm_sim, params: {}}
-            bindings:
-              demo_inspect: {arm: rZ}
-            """
-        ),
     ],
 )
 def test_load_cell_rejects(tmp_path, text):
     with pytest.raises(ValueError) as exc:
         load_cell(_write(tmp_path, text))
     assert str(exc.value).startswith("bad_cell:")
-
-
-def test_load_cell_unknown_binding_message(tmp_path):
-    text = textwrap.dedent(
-        """
-        resources:
-          r1: {contract: arm, hal: arm_sim, params: {}}
-        bindings:
-          demo_inspect: {arm: rZ}
-        """
-    )
-    with pytest.raises(ValueError) as exc:
-        load_cell(_write(tmp_path, text))
-    assert str(exc.value) == "bad_cell:unknown_binding:demo_inspect.arm=rZ"
 
 
 # ── load_runtime ─────────────────────────────────────────────────────────────
@@ -231,7 +197,6 @@ def test_realize_legacy_uses_default_source(tmp_path):
     # legacy external -> external launch preserved.
     assert realized["resources"]["cam0"]["kind"] == "external"
     assert realized["resources"]["cam0"]["launch"] == "external"
-    assert realized["bindings"] == {"demo_inspect": {"arm": "r1", "cam": "cam0"}}
 
 
 def test_realize_overlay_selects_mode_and_merges_config(tmp_path):
@@ -248,7 +213,17 @@ def test_realize_overlay_selects_mode_and_merges_config(tmp_path):
     # external launch carried through (headless camera served outside supervisor).
     assert realized["resources"]["cam0"]["kind"] == "headless_camera"
     assert realized["resources"]["cam0"]["launch"] == "external"
-    assert realized["resources"]["cam0"]["params"] == {"mount_arm": "r1"}
+    assert realized["resources"]["cam0"]["params"] == {
+        "mount_arm": "r1",
+        "render": {"width": 1280, "height": 800, "fx": 900.0, "fy": 900.0},
+    }
+
+
+def test_realize_camera_sources_share_device_optics(tmp_path):
+    cell = load_cell(_write(tmp_path, _SOURCES_CELL))
+    sim = realize_cell(cell, {"r1": "sim", "cam0": "sim"})
+    browser = realize_cell(cell, {"r1": "sim", "cam0": "browser_sim"})
+    assert sim["resources"]["cam0"]["params"]["render"] == browser["resources"]["cam0"]["params"]["render"]
 
 
 def test_realize_off_omits_resource(tmp_path):
@@ -271,59 +246,6 @@ def test_realize_unknown_mode_errors(tmp_path):
     assert str(exc.value) == "bad_runtime:no_source:cam0:replay"
 
 
-# ── resolve_roles ────────────────────────────────────────────────────────────
-
-
-def test_resolve_roles_explicit_binding_wins(tmp_path):
-    text = textwrap.dedent(
-        """
-        resources:
-          r1: {contract: arm, hal: arm_sim, params: {}}
-          r2: {contract: arm, hal: arm_sim, params: {}}
-          cam0: {contract: camera2d, hal: genicam, params: {}}
-        bindings:
-          demo_inspect: {arm: r2, cam: cam0}
-        """
-    )
-    cell = load_cell(_write(tmp_path, text))
-    assert resolve_roles(cell, _DEMO_SPEC, "demo_inspect") == {
-        "arm": "r2",
-        "cam": "cam0",
-    }
-
-
-def test_resolve_roles_falls_back_to_first_of_contract(tmp_path):
-    text = textwrap.dedent(
-        """
-        resources:
-          r1: {contract: arm, hal: arm_sim, params: {}}
-          cam0: {contract: camera2d, hal: genicam, params: {}}
-        """
-    )
-    cell = load_cell(_write(tmp_path, text))
-    assert resolve_roles(cell, _DEMO_SPEC, "demo_inspect") == {
-        "arm": "r1",
-        "cam": "cam0",
-    }
-
-
-def test_resolve_roles_unresolved_when_no_resource_of_contract(tmp_path):
-    text = "resources:\n  r1: {contract: arm, hal: arm_sim, params: {}}\n"
-    cell = load_cell(_write(tmp_path, text))
-    with pytest.raises(KeyError) as exc:
-        resolve_roles(cell, _DEMO_SPEC, "demo_inspect")
-    assert exc.value.args[0] == "unresolved_role:cam"
-
-
-def test_resolve_roles_works_on_realized_cell(tmp_path):
-    cell = load_cell(_write(tmp_path, _SOURCES_CELL))
-    realized = realize_cell(cell, {"r1": "sim", "cam0": "live"})
-    assert resolve_roles(realized, _DEMO_SPEC, "demo_inspect") == {
-        "arm": "r1",
-        "cam": "cam0",
-    }
-
-
 # ── PROVIDER_MODULES coverage ────────────────────────────────────────────────
 
 
@@ -336,6 +258,12 @@ def test_provider_modules_cover_module_launched_kinds():
         ("arm", "replay_arm"): "wf.hal.replay.arm",
         ("camera2d", "genicam"): "wf.hal.genicam",
         ("camera2d", "replay_camera"): "wf.hal.replay.camera",
+        ("camera2d", "browser_camera"): "wf.hal.browser_camera",
+        ("dio", "sim_dio"): "wf.hal.sim_dio",
+        ("tags", "sim_tags"): "wf.hal.sim_tags",
+        ("tags", "opcua"): "wf.hal.opcua",
+        ("washer", "ecoclean"): "wf.hal.ecoclean",
+        ("washer", "ecoclean_sim"): "wf.hal.ecoclean",
     }
 
 
@@ -355,8 +283,13 @@ def test_devices_inventory(tmp_path):
     assert by_id["r1"]["contract"] == "arm"
     assert by_id["r1"]["model"] == "aubo_i10"
     assert by_id["r1"]["active"] == "sim"
+    assert by_id["r1"]["config"] == {"lease_ttl_s": 30.0}
     assert {s["mode"] for s in by_id["r1"]["sources"]} == {"live", "sim", "replay"}
     assert by_id["cam0"]["active"] == "live"
+    assert by_id["cam0"]["config"] == {
+        "mount_arm": "r1",
+        "render": {"width": 1280, "height": 800, "fx": 900.0, "fy": 900.0},
+    }
     cam_sim = next(s for s in by_id["cam0"]["sources"] if s["mode"] == "sim")
     assert cam_sim["launch"] == "external"  # headless camera
 
@@ -406,9 +339,10 @@ def test_set_source_cold_switch_restarts_provider(tmp_path):
     svc = _switchable_service(tmp_path)
     r = svc._set_source_reply("r1", "replay")
     assert r["ok"] and svc.active_sources["r1"] == "replay"
-    # old provider stopped, new (replay_arm) spawned.
     assert ("stop", "hal:r1") in svc._procs.calls
-    spawn = next(c for c in svc._procs.calls if c[0] == "spawn" and c[1] == "hal:r1")
+    spawn = next(
+        call for call in svc._procs.calls if call[0] == "spawn" and call[1] == "hal:r1"
+    )
     assert "wf.hal.replay.arm" in spawn[2]
     os.unlink(svc.cell_path)
 
@@ -418,16 +352,19 @@ def test_set_source_off_stops_without_spawn(tmp_path):
     r = svc._set_source_reply("cam0", "off")
     assert r["ok"] and svc.active_sources["cam0"] == "off"
     assert ("stop", "hal:cam0") in svc._procs.calls
-    assert not any(c[0] == "spawn" and c[1] == "hal:cam0" for c in svc._procs.calls)
+    assert not any(
+        call[0] == "spawn" and call[1] == "hal:cam0" for call in svc._procs.calls
+    )
     os.unlink(svc.cell_path)
 
 
 def test_set_source_external_stops_without_spawn(tmp_path):
     svc = _switchable_service(tmp_path)
-    # cam0 sim = headless (external) -> stopped, but supervisor spawns nothing.
     r = svc._set_source_reply("cam0", "sim")
     assert r["ok"] and svc.active_sources["cam0"] == "sim"
-    assert not any(c[0] == "spawn" and c[1] == "hal:cam0" for c in svc._procs.calls)
+    assert not any(
+        call[0] == "spawn" and call[1] == "hal:cam0" for call in svc._procs.calls
+    )
     os.unlink(svc.cell_path)
 
 
@@ -436,3 +373,166 @@ def test_set_source_rejects_unknown_device_and_mode(tmp_path):
     assert svc._set_source_reply("rX", "sim")["ok"] is False
     assert svc._set_source_reply("r1", "bogus")["ok"] is False
     os.unlink(svc.cell_path)
+
+
+# ── dio devices ──────────────────────────────────────────────────────────────
+
+_DIO_CELL = textwrap.dedent(
+    """
+    cell_type: t@0.1
+    resources:
+      io0:
+        contract: dio
+        config:
+          channels:
+            part_present: {kind: di, bank: standard, pin: 3}
+            clamp: {kind: do, bank: standard, pin: 0}
+        sources:
+          sim: {kind: sim_dio, params: {}}
+    """
+)
+
+_PROVIDES_CELL = textwrap.dedent(
+    """
+    cell_type: t@0.1
+    resources:
+      r1:
+        contract: arm
+        config: {}
+        sources:
+          live: {kind: aubo_i10, params: {ip: 1.2.3.4}}
+          sim: {kind: arm_sim, params: {}}
+        provides:
+          io0:
+            contract: dio
+            model: aubo_onboard
+            channels:
+              part_present: {kind: di, bank: standard, pin: 3}
+            layout: {di: 16, do: 16, tool_do: 4}
+    """
+)
+
+
+def test_provided_device_realizes_into_host_params_and_inventory(tmp_path):
+    cell = load_cell(_write(tmp_path, _PROVIDES_CELL))
+    assert list(cell["resources"]["r1"]["provides"]) == ["io0"]
+    realized = realize_cell(cell, {"r1": "sim"})
+    assert list(realized["resources"]) == ["r1"], "provided devices spawn no process"
+    provides = realized["resources"]["r1"]["params"]["provides"]
+    assert provides["io0"]["contract"] == "dio"
+    assert provides["io0"]["channels"]["part_present"]["pin"] == 3
+    assert provides["io0"]["layout"]["tool_do"] == 4
+    by_id = {d["id"]: d for d in devices_inventory(cell, {"r1": "sim"})}
+    io0 = by_id["io0"]
+    assert io0["contract"] == "dio" and io0["provided_by"] == "r1"
+    assert io0["active"] == "sim" and io0["sources"] == []
+    assert io0["model"] == "aubo_onboard"
+    assert "part_present" in io0["config"]["channels"]
+
+
+def test_provided_device_cannot_be_switched(tmp_path):
+    cell = load_cell(_write(tmp_path, _PROVIDES_CELL))
+    svc = SupervisorService.__new__(SupervisorService)
+    svc.cell = cell
+    assert svc._set_source_reply("io0", "sim") == {"ok": False, "error": "provided_by:r1"}
+
+
+@pytest.mark.parametrize(
+    "provides, reason",
+    [
+        ("{io0: {contract: camera2d}}", "contract must be one of"),
+        ("{io0: {contract: dio, channels: {Bad: {kind: di}}}}", "must match"),
+        ("{r1: {contract: dio}}", "duplicate device id"),
+    ],
+)
+def test_provides_rejects(tmp_path, provides, reason):
+    cell = textwrap.dedent(
+        f"""
+        cell_type: t@0.1
+        resources:
+          r1:
+            contract: arm
+            sources:
+              sim: {{kind: arm_sim, params: {{}}}}
+            provides: {provides}
+        """
+    )
+    with pytest.raises(ValueError, match=reason):
+        load_cell(_write(tmp_path, cell))
+
+
+def test_dio_resource_loads_and_realizes(tmp_path):
+    cell = load_cell(_write(tmp_path, _DIO_CELL))
+    io0 = cell["resources"]["io0"]
+    assert io0["contract"] == "dio"
+    assert list(io0["config"]["channels"]) == ["part_present", "clamp"]
+    realized = realize_cell(cell, {"io0": "sim"})
+    assert realized["resources"]["io0"]["kind"] == "sim_dio"
+    assert realized["resources"]["io0"]["params"]["channels"]["clamp"] == {
+        "kind": "do", "bank": "standard", "pin": 0,
+    }
+    assert provider_module("dio", "sim_dio") == "wf.hal.sim_dio"
+
+
+@pytest.mark.parametrize(
+    "channels, reason",
+    [
+        ("{}", "must declare at least one channel"),
+        ("{Bad: {kind: di}}", "must match"),
+        ("{x: {kind: relay}}", "kind must be one of"),
+    ],
+)
+def test_dio_resource_rejects_bad_channels(tmp_path, channels, reason):
+    cell = textwrap.dedent(
+        f"""
+        cell_type: t@0.1
+        resources:
+          io0:
+            contract: dio
+            config:
+              channels: {channels}
+            sources:
+              sim: {{kind: sim_dio, params: {{}}}}
+        """
+    )
+    with pytest.raises(ValueError, match=reason):
+        load_cell(_write(tmp_path, cell))
+
+
+# ── the shipped Ecoclean cell (washer host + provided tags device) ──────────
+
+_ECOCLEAN_CELL = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "deploy", "ecoclean", "cell.yaml")
+
+
+def test_ecoclean_cell_loads_and_realizes():
+    cell = load_cell(_ECOCLEAN_CELL)
+    washer = cell["resources"]["washer0"]
+    assert washer["contract"] == "washer"
+    assert washer["provides"]["plc0"]["contract"] == "tags"
+    for mode in ("sim", "live"):
+        realized = realize_cell(cell, {"washer0": mode})
+        assert list(realized["resources"]) == ["washer0"], "the tags device is hosted, not spawned"
+        res = realized["resources"]["washer0"]
+        assert provider_module(res["contract"], res["kind"]) == "wf.hal.ecoclean"
+        assert res["params"]["provides"]["plc0"]["tags"]["machine_ready"] == {"tag": "ReadyToLoad"}
+        assert res["params"]["door_timeout_s"] == 90
+    by_id = {d["id"]: d for d in devices_inventory(cell, {"washer0": "sim"})}
+    assert by_id["plc0"]["provided_by"] == "washer0" and by_id["plc0"]["contract"] == "tags"
+    assert by_id["washer0"]["active"] == "sim"
+
+
+def test_provides_tags_validates_names(tmp_path):
+    cell = textwrap.dedent(
+        """
+        cell_type: t@0.1
+        resources:
+          w:
+            contract: washer
+            sources:
+              sim: {kind: ecoclean_sim, params: {}}
+            provides:
+              plc0: {contract: tags, tags: {"Bad Name": {tag: X}}}
+        """
+    )
+    with pytest.raises(ValueError, match="provides.plc0"):
+        load_cell(_write(tmp_path, cell))

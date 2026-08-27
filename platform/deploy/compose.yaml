@@ -1,27 +1,22 @@
-# `docker compose -f deploy/compose.yaml up` brings up the FULL all-simulated
-# cell + frontend in one command: router -> bridge -> config -> supervisor
-# (cell.yaml + runtime/sim.yaml = sim arm + headless-browser sim camera) -> seed
-# -> camera -> web (Vite dev server at http://localhost:5173). No hardware, no
-# file choices. Switch a device to live/replay/off at runtime from the UI device
-# tree. For the HOST hardware stack instead, run only the router
-# (`docker compose up -d zenoh-router`) and use deploy/start_stack.ps1.
+# `docker compose -f deploy/compose.yaml up` brings up the complete simulated
+# cell and frontend: router, bridge, config, supervisor, simulated arm,
+# headless-browser camera, and Vite at http://localhost:5173. Switch devices
+# between live, replay, and off sources from the UI. For the host hardware
+# stack, start only the router and use deploy/start_stack.ps1.
 #
 # Phase-1 router topology. Dev/tests run peer-to-peer without the router;
 # the router is for the multi-host/live-cell topology (and is exercised once
 # during the hardware verification gate).
 #
 # If the exact 1.8.0 tag is absent at pull time, use the newest plain 1.8.x.
-# Live-reload our own source: bind-mount the host workspace `packages/` over the
-# image's baked copy so Python/flow-YAML edits land in the container without a
-# rebuild. The pixi env runs these sources directly (not pip-installed), so a
-# process restart (`docker compose restart <svc>`) is a true hot reload. The
-# `pixi install` image layer (deps) is untouched. Read-only: containers never
-# write back into the repo.
+# Live-reload our own source by mounting `packages/` over the image copy. The
+# Pixi environment runs these sources directly, so restarting a service applies
+# Python edits without rebuilding the dependency layer. The mount is read-only.
 x-code-mount: &code ../packages:/platform/packages:ro
 
 services:
   zenoh-router:
-    image: eclipse/zenoh:1.8.0
+    image: eclipse/zenoh:1.9.0
     ports:
       - "7447:7447"
     volumes:
@@ -42,57 +37,35 @@ services:
       - "127.0.0.1:10000:10000"
 
   # ── the simulated cell ──────────────────────────────────────────────────
-  # The supervisor realizes cell.yaml + runtime/sim.yaml: it spawns the sim arm
-  # (r1=sim) and the always-on demo_detect vision runtime, then publishes the
-  # flow catalog + device inventory. The sim camera (cam0=sim) is the separate
-  # camera2d-headless service (an external-launch source the supervisor does NOT
-  # spawn). The seeder one-shots the demo poses + board. The Python services
-  # share the build context `platform/` via Dockerfile.sim and connect to the
-  # router by name.
-  config:
+  # The host API is the machine-level control plane (http://localhost:8080):
+  # it runs the realm-less config store and the ACTIVE cell's supervisor tree
+  # (supervisor -> providers + program runner). Cells are the cell.yaml files
+  # under deploy/ (deploy/cell.yaml = "default", deploy/<dir>/cell.yaml =
+  # "<dir>") with their runtime/*.yaml overlays; switch from the UI navbar,
+  # `wfctl cell activate <id> --runtime <overlay>` or POST /cells/<id>/activate.
+  # WF_CELL / WF_RUNTIME pick the cell at start (default: last active, else
+  # "default" with the "sim" overlay). The simulated camera is the separate
+  # camera2d-headless service because its source is external.
+  host-api:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.sim
     image: wf-sim:latest
     depends_on: [zenoh-router]
-    # Persist the config store on the HOST so UI edits (frames/poses/TCPs)
-    # survive `docker compose --build`/recreate — the container fs is otherwise
-    # ephemeral and reverts to the image's baked store.yaml on every rebuild.
-    # This is the SAME deploy/config the host tooling uses: one source of truth.
-    volumes:
-      - *code
-      - ./config:/platform/deploy/config
-    command: ["python", "-m", "wf.services.config",
-              "--dir", "deploy/config",
-              "--zenoh-config", "deploy/zenoh/sim-container.json5"]
-
-  supervisor:
-    image: wf-sim:latest
     environment:
       WF_REALM: cell
-    depends_on: [zenoh-router, config]
+      WF_CELL: ${WF_CELL:-}
+      WF_RUNTIME: ${WF_RUNTIME:-}
+    ports:
+      - "127.0.0.1:8080:8080"
     volumes:
       - *code
-      # Hot-reload the canonical cell + overlays like packages/: they live in
-      # deploy/ (NOT under the packages mount), so bind them explicitly or the
-      # supervisor reads the STALE copies baked into the wf-sim image at build.
-      - ./cell.yaml:/platform/deploy/cell.yaml:ro
-      - ./runtime:/platform/deploy/runtime:ro
-    command: ["python", "-m", "wf.services.supervisor",
-              "--realm", "cell",
-              "--cell", "deploy/cell.yaml",
-              "--runtime", "deploy/runtime/sim.yaml",
-              "--flows-dir", "packages/services/task_runner/flows",
-              "--zenoh-config", "deploy/zenoh/sim-container.json5"]
-
-  seed:
-    image: wf-sim:latest
-    depends_on: [config]
-    restart: "no"
-    volumes:
-      - *code
-    command: ["python", "scripts/seed_demo_cell.py",
-              "--connect", "tcp/zenoh-router:7447"]
+      # deploy/ is bind-mounted (cells, overlays, programs, config store,
+      # host.yaml) so edits hot-reload and UI edits (frames/poses/TCPs, program
+      # files, the active cell) survive `docker compose --build`/recreate.
+      - ./:/platform/deploy
+    command: ["sh", "-c",
+              "python -m wf.services.host_api --deploy deploy --port 8080 --with-config --zenoh-config deploy/zenoh/sim-container.json5 $${WF_CELL:+--activate $$WF_CELL} $${WF_RUNTIME:+--runtime $$WF_RUNTIME}"]
 
   # The headless-browser camera2d HAL: serves the camera2d contract for cid=cam0
   # by rendering the shared Three.js twin scene under headless Chromium
@@ -101,21 +74,16 @@ services:
   # source is `launch: external` in cell.yaml so the supervisor does NOT spawn a
   # Python camera HAL. Long-running service (not a one-shot).
   camera2d-headless:
+    profiles: ["headless-camera"]
     build:
       context: ..
       dockerfile: deploy/Dockerfile.headless
     image: wf-camera2d-headless:latest
-    depends_on: [bridge, supervisor]
+    depends_on: [bridge, host-api]
     environment:
       WS_URL: ws/bridge:10000
       REALM: cell
       CID: cam0
-      W: "1280"
-      H: "800"
-      FX: "900.0"
-      FY: "900.0"
-      MOUNT_XYZ: "0.08685228895,0.06511,0.029"
-      MOUNT_RPY_DEG: "90.0,0.0,180.0"
 
   # The twin frontend (Vite dev server) with hot-reload. Bind-mounts the host
   # web/ source (live HMR) + packages/ (the URDF/GLB assets sync-assets copies);

@@ -1,0 +1,5 @@
+# The bridge image downloads its pinned binary and needs no repository files.
+# Compose uses deploy/ as this build context, which also contains large local
+# recordings and a host bridge executable that must not be sent to BuildKit.
+**
+!Dockerfile.bridge

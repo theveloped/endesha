@@ -79,6 +79,26 @@ export async function subscribeRaw(
   return () => void sub.undeclare();
 }
 
+/** Issue a raw get and collect every successful Sample reply without decoding
+ * its payload. Used by diagnostics where encoding, attachments, and raw bytes
+ * are part of the data being inspected. */
+export async function queryRawAll(
+  session: Session,
+  key: string,
+  timeoutMs = 2000,
+): Promise<Sample[]> {
+  const receiver = await session.get(key, {
+    timeout: Duration.milliseconds.of(timeoutMs),
+  });
+  const samples: Sample[] = [];
+  if (receiver === undefined) return samples;
+  for await (const reply of receiver) {
+    const result = reply.result();
+    if (result instanceof Sample) samples.push(result);
+  }
+  return samples;
+}
+
 /**
  * Issue a get, return the first Sample reply decoded; null on no reply
  * (timeout) or error-only replies.
@@ -317,34 +337,6 @@ export async function watchReplaySessions(
           set.delete(key);
           if (set.size === 0) tokens.delete(sid);
         }
-        emit();
-      },
-    });
-  return () => void sub.undeclare();
-}
-
-/**
- * Watch `{realm}/task/{flow}/alive` liveliness for one realm; reports the
- * set of currently-running flow names (sorted). Mirrors watchReplaySessions
- * — a flow appears only while its task_runner process holds the token.
- */
-export async function watchTaskFlows(
-  session: Session,
-  realm: string,
-  onChange: (flows: string[]) => void,
-): Promise<Unsubscribe> {
-  const live = new Set<string>();
-  const emit = () => onChange([...live].sort());
-  const sub = await session
-    .liveliness()
-    .declareSubscriber(new KeyExpr(`${realm}/task/*/alive`), {
-      history: true,
-      handler: (sample: Sample) => {
-        // key = {realm}/task/{flow}/alive
-        const flow = sample.keyexpr().toString().split("/").at(-2);
-        if (flow === undefined) return;
-        if (sample.kind() === SampleKind.PUT) live.add(flow);
-        else if (sample.kind() === SampleKind.DELETE) live.delete(flow);
         emit();
       },
     });

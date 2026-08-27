@@ -7,10 +7,9 @@ so a ``{frame: "pallet_1"}`` waypoint or a scene object parented to a detected
 frame resolves with no consumer change. :class:`FrameTree` is composed, never
 modified — every ``snapshot()`` rebuilds a fresh validated tree.
 
-No time-aware ring buffer / interpolation: every consumer resolves at "now".
-The wire sample carries ``t``/``source``/``confidence`` so the vision pipeline
-can anchor a detection to a stationary parent at ``t_capture`` and a future
-consumer-side staleness check stays purely additive.
+No time-aware ring buffer or interpolation: every consumer resolves at "now".
+The sample still carries ``t``/``source``/``confidence`` for provenance and
+future consumer-side staleness checks.
 """
 
 from __future__ import annotations
@@ -107,7 +106,8 @@ class LiveFrameTree:
                 # dynamic frame, so the loop terminates. A frame whose parent
                 # later appears resolves on a subsequent snapshot.
                 doomed = {
-                    n for n, fd in dynamic.items()
+                    n
+                    for n, fd in dynamic.items()
                     if n == exc.frame or fd.parent == exc.frame
                 }
                 if not doomed:
@@ -139,7 +139,5 @@ def build_live_tree(session, realm: str, *, timeout_s: float = 2.0):
         except (ValueError, KeyError, TypeError) as exc:
             _log.debug("skipping malformed dynamic frame sample: %r", exc)
 
-    subscriber = session.declare_subscriber(
-        keys.dynamic_frames_glob(realm), _on_sample
-    )
+    subscriber = session.declare_subscriber(keys.dynamic_frames_glob(realm), _on_sample)
     return live, subscriber

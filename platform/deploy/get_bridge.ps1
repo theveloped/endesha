@@ -1,16 +1,16 @@
-# Builds the zenoh-ts 1.8.0 remote-api bridge (zenohd 1.8 + remote-api
+# Builds the zenoh-ts 1.9.0 remote-api bridge (zenohd 1.9 + remote-api
 # plugin statically linked) into platform/deploy/bridge/.
 #
-# Built from source (cargo, tag 1.8.0) because the zenoh-ts GitHub release
-# zips for Windows ship only the plugin DLL — no standalone exe (verified
-# for 1.8.0 and 1.9.0; the Linux zips do carry the standalone binary).
+# Built from source (cargo, tag 1.9.0) because the zenoh-ts GitHub release
+# zips for Windows ship only the plugin DLL — no standalone exe. The Linux
+# release does carry the standalone binary.
 # Loading the plugin DLL into a separately-built zenohd is not an option:
 # a plugin must ABI-match the router's exact build. The statically-linked
 # standalone eliminates that failure class.
 #
 # Requires a Rust toolchain (cargo). No-cargo fallback: run the Linux musl
 # standalone binary from the release zip in docker:
-#     zenoh-ts-1.8.0-x86_64-unknown-linux-musl-standalone.zip -> zenoh-bridge-remote-api
+#     zenoh-ts-1.9.0-x86_64-unknown-linux-musl-standalone.zip -> zenoh-bridge-remote-api
 #     docker run --rm -p 10000:10000 -v <dir>:/b alpine \
 #         /b/zenoh-bridge-remote-api -m peer -e tcp/host.docker.internal:7447 --no-multicast-scouting --ws-port 10000
 #
@@ -28,7 +28,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$version = "1.8.0"
+$version = "1.9.0"
 $exeName = "zenoh-bridge-remote-api.exe"
 
 $destDir = Join-Path $PSScriptRoot "bridge"

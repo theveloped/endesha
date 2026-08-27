@@ -3,11 +3,18 @@
 # logical device (live/sim/replay/off); the supervisor realizes cell + overlay
 # into the concrete inventory. Replaces the duplicated cell.dev.yaml /
 # cell.sim.yaml (retired at the end of the migration).
-cell_type: vision-pick-cell@0.1
+cell_type: manual-cell@0.1
+name: dev-cell
 platform: 0.1.0
 
 # Distributed seams: single node is its own master this slice.
 master_node: main
+
+# Cell-level control lease (program-layer RFC §2.4): ONE operator/program holds
+# control of every device in the cell. The supervisor is the authority; every
+# provider only checks it. The UI renews every 10 s.
+control:
+  lease_ttl_s: 30.0
 
 resources:
   r1:
@@ -21,7 +28,6 @@ resources:
         vmax: [1.5, 1.5, 1.5, 1.5, 1.5, 1.5]        # rad/s
         amax: [3.0, 3.0, 3.0, 3.0, 3.0, 3.0]        # rad/s^2
         jmax: [20.0, 20.0, 20.0, 20.0, 20.0, 20.0]  # rad/s^3
-      lease_ttl_s: 30.0                # arbitration TTL; UI renews every 10 s
       jog_vmax: 0.5                    # per-joint jog clamp, rad/s
       jog_acc: 2.0                     # speedJoint acceleration, rad/s^2
       jog_watchdog_s: 0.25            # halt if no jog cmd within this window
@@ -45,6 +51,23 @@ resources:
           # Operator-set for v1 (runtime selection is step-7 tooling). A missing
           # file surfaces as a status error rather than crashing the provider.
           recording: deploy/recordings/demo.mcap
+    # One HAL, two contracts: the arm process ALSO serves its onboard IO bank
+    # as a first-class `dio` device (program-layer RFC §2). Follows r1's source:
+    # live -> the controller's IO, sim -> forceable in-memory IO, replay ->
+    # recorded IO. Programs/UI use channel NAMES; unmapped pins show as `di3`,
+    # `tool_do0`, ... so the raw bank stays visible.
+    provides:
+      io0:
+        contract: dio
+        model: aubo_onboard
+        layout: { di: 16, do: 16, tool_do: 4, ai: 0, ao: 0 }
+        channels:
+          part_present: { kind: di, bank: standard, pin: 0 }
+          door_closed:  { kind: di, bank: standard, pin: 1 }
+          start_button: { kind: di, bank: standard, pin: 2 }
+          clamp:        { kind: do, bank: standard, pin: 0 }
+          conveyor_run: { kind: do, bank: standard, pin: 1 }
+          gripper:      { kind: do, bank: tool,     pin: 0 }
 
   cam0:
     contract: camera2d
@@ -54,6 +77,15 @@ resources:
       mount_arm: r1
       mount_xyz: [0.08685228895, 0.06511, 0.029]
       mount_rpy_deg: [90.0, 0.0, 180.0]
+      # Design optics for the simulated providers. When the config store has
+      # config/intrinsics/cam0 (ROS CameraInfo layout: K/D/width/height — the
+      # calibrated truth) the browser producer uses that instead of this block.
+      render:
+        width: 1280
+        height: 800
+        fx: 900.0
+        fy: 900.0
+        background_gray: 90
     sources:
       live:
         kind: genicam
@@ -71,23 +103,37 @@ resources:
         kind: headless_camera
         launch: external
         params:
-          render:
-            width: 1280
-            height: 800
-            fx: 900.0
-            fy: 900.0
-            background_gray: 90
-            mount_xyz: [0.08685228895, 0.06511, 0.029]
-            mount_rpy_deg: [90.0, 0.0, 180.0]
+          grab_defaults: { encoding: jpeg, quality: 90, scale: 1.0 }
+      browser_sim:
+        kind: browser_camera
+        params:
+          producer_lease_ttl_s: 10.0
+          producer_max_payload_bytes: 8388608
+          stream_defaults: { rate_hz: 15.0, scale: 0.25, encoding: jpeg, quality: 75 }
           grab_defaults: { encoding: jpeg, quality: 90, scale: 1.0 }
       replay:
         kind: replay_camera
         params:
           recording: deploy/recordings/demo.mcap
 
-# Role bindings: the supervisor resolves a flow's contract-typed roles to these
-# concrete resources. demo_inspect's arm -> r1, cam -> cam0.
-bindings:
-  demo_inspect:
-    arm: r1
-    cam: cam0
+  # Example controller device: named typed variables (`tags` contract). The
+  # inventory is what a PLC exposes (OPC-UA nodes here); `tags:` gives the ones
+  # we use our own names, the rest stay visible under their controller names.
+  # `live` would be the opcua provider (endpoint + inventory + watchdog).
+  plc0:
+    contract: tags
+    model: example_plc
+    config:
+      tags:
+        machine_ready: { tag: ReadyToLoad }
+        start_request: { tag: LoadRequest }
+    sources:
+      sim:
+        kind: sim_tags
+        params:
+          inventory:
+            ReadyToLoad: { node: "ns=4;i=85",  type: bool,   access: r }
+            DoorOpen:    { node: "ns=4;i=88",  type: bool,   access: r }
+            LoadRequest: { node: "ns=4;i=118", type: bool,   access: rw }
+            WashProgram: { node: "ns=4;i=134", type: int,    access: rw }
+            Kommentar:   { node: "ns=4;i=77",  type: string, access: rw }

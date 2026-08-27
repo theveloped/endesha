@@ -3,3 +3,4 @@ deploy/logs/
 deploy/recordings/
 deploy/out/
 .pixi/
+deploy/host.yaml

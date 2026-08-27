@@ -1,7 +1,7 @@
 [project]
 name = "wf-contracts-supervisor"
 version = "0.1.0"
-description = "WF platform L1: supervisor / flow-orchestration contract key space"
+description = "WF platform L1: supervisor device inventory and source control"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "wf-core",

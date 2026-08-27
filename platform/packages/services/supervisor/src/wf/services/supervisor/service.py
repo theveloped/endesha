@@ -1,21 +1,10 @@
-"""The supervisor service: cell bring-up + sole flow interpreter (design §8, §68).
+"""Cell supervisor: provider bring-up and runtime device source management.
 
-From one cell file the supervisor brings up every always-on service the cell
-needs (one HAL per resource + a node-local always-on vision runtime per distinct
-detection pipeline), scans a flows directory, validates each flow spec, and
-publishes a catalog of selectable flows with their RESOLVED role bindings.
-
-The supervisor is the ONLY interpreter of flows: it owns the inventory and
-resolves each flow's contract-typed roles to concrete resources. On
-``flows/cmd/start`` it resolves roles -> ``--rid``/``--cid`` and spawns the
-flow's ``task_runner`` (bringing it ONLINE); the operator runs it from the
-Tasks page via the unchanged ``task/{flow}/cmd/start``. The flow's vision
-detection is the always-on vision runtime, toggled by the running flow via the
-existing ``vision/{pipeline}/cmd/enable`` — NOT a per-flow process.
-
-Single-node this slice: the supervisor spawns all resources locally and is its
-own master. The cell.yaml ``node:``/``master_node`` fields + the reserved
-per-node key builders lay in the distributed seams (config-only later).
+The supervisor realizes the canonical cell plus a runtime overlay, starts one
+provider per active resource, publishes the device inventory, and cold-switches
+providers between live, simulated, replay, and off sources. It also hosts the
+cell's single control-lease authority (``wf.contracts.control``). It
+deliberately contains no task, flow, graph, or vision-pipeline orchestration.
 
 Run: ``python -m wf.services.supervisor --cell deploy/cell.yaml
 --runtime deploy/runtime/sim.yaml``.
@@ -28,29 +17,21 @@ import os
 import signal
 import tempfile
 import threading
-from pathlib import Path
 
 import yaml
 import zenoh
 
+from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.supervisor import keys as sup_keys
 from wf.core.codec import decode, encode
 from wf.core.log import get_logger
 from wf.core.session import declare_alive, open_session
 from wf.core.time import now_ns
-from wf.services.task_runner.spec import load_spec
 
-from .cell import (
-    devices_inventory,
-    load_cell,
-    load_runtime,
-    realize_cell,
-    resolve_roles,
-)
+from .cell import devices_inventory, load_cell, load_runtime, realize_cell
 from .procs import LAUNCH_EXTERNAL, ProcManager, provider_module
 
 _log = get_logger("wf.services.supervisor.service")
-
 _REAP_PERIOD_S = 1.0
 
 
@@ -62,24 +43,21 @@ class SupervisorService:
         cell: dict,
         active_sources: dict,
         *,
-        flows_dir: str,
         config_dir: str = "deploy/config",
         with_config: bool = False,
+        programs_dir: str | None = None,
         zenoh_config: str | None = None,
         node: str = "main",
     ) -> None:
         self.session = session
         self.realm = realm
-        # The full (multi-source) cell + a mutable active-source map: the service
-        # realizes the concrete inventory itself and rewrites the child-params
-        # file on a runtime source switch.
         self.cell = cell
         self.active_sources = dict(active_sources)
         self.realized = realize_cell(cell, self.active_sources)
         self.cell_path = _write_realized_cell(self.realized)
-        self.flows_dir = Path(flows_dir)
         self.config_dir = config_dir
         self.with_config = with_config
+        self.programs_dir = programs_dir
         self.zenoh_config = zenoh_config
         self.node = node
 
@@ -90,26 +68,6 @@ class SupervisorService:
         self._alive_token = None
         self._started_at = now_ns()
 
-        # Scan the flows directory: a valid spec lands in _catalog; a malformed
-        # file lands in _errors under its file stem (reported, never a crash).
-        self._catalog: dict[str, dict] = {}
-        self._flow_files: dict[str, str] = {}
-        self._errors: dict[str, str] = {}
-        for path in sorted(self.flows_dir.glob("*.yaml")):
-            stem = path.stem
-            try:
-                spec = load_spec(path)
-            except Exception as exc:  # noqa: BLE001
-                self._errors[stem] = str(exc)
-                _log.warning("flow %s invalid: %s", stem, exc)
-                continue
-            self._catalog[spec["name"]] = spec
-            self._flow_files[spec["name"]] = str(path.resolve())
-
-        self._catalog_pub = session.declare_publisher(
-            sup_keys.flows_catalog(realm),
-            congestion_control=zenoh.CongestionControl.DROP,
-        )
         self._descriptor_pub = session.declare_publisher(
             sup_keys.supervisor_descriptor(realm, node),
             congestion_control=zenoh.CongestionControl.DROP,
@@ -118,23 +76,16 @@ class SupervisorService:
             sup_keys.supervisor_devices(realm, node),
             congestion_control=zenoh.CongestionControl.DROP,
         )
-        self._status_pubs: dict[str, zenoh.Publisher] = {}
         self._queryables: list = []
-
-    # ── lifecycle ────────────────────────────────────────────────────────
+        self._control = ControlAuthority(
+            session, realm, ttl_s=cell.get("control", {}).get("lease_ttl_s", 30.0)
+        )
 
     def start(self) -> None:
+        # Authority first: providers check the lease as soon as they come up.
+        self._control.start()
         self._spawn_always_on()
         self._queryables = [
-            self.session.declare_queryable(
-                sup_keys.flows_cmd_start(self.realm), self._on_cmd_start
-            ),
-            self.session.declare_queryable(
-                sup_keys.flows_cmd_stop(self.realm), self._on_cmd_stop
-            ),
-            self.session.declare_queryable(
-                sup_keys.flows_catalog(self.realm), self._on_catalog_query
-            ),
             self.session.declare_queryable(
                 sup_keys.supervisor_descriptor(self.realm, self.node),
                 self._on_descriptor_query,
@@ -151,21 +102,16 @@ class SupervisorService:
         self._alive_token = declare_alive(
             self.session, self.realm, "supervisor", self.node
         )
-        self._publish_catalog()
         self._publish_descriptor()
         self._publish_devices()
         self._start_reaper()
-        _log.info(
-            "supervisor up: realm=%s node=%s flows=%s errors=%s",
-            self.realm,
-            self.node,
-            sorted(self._catalog),
-            sorted(self._errors),
-        )
+        _log.info("supervisor up: realm=%s node=%s", self.realm, self.node)
 
     def run_forever(self) -> None:
         signal.signal(signal.SIGTERM, lambda *_: self._stop_event.set())
         signal.signal(signal.SIGINT, lambda *_: self._stop_event.set())
+        if hasattr(signal, "SIGBREAK"):  # Windows: the host API stops us with Ctrl-Break
+            signal.signal(signal.SIGBREAK, lambda *_: self._stop_event.set())
         try:
             self._stop_event.wait()
         except KeyboardInterrupt:
@@ -181,9 +127,10 @@ class SupervisorService:
             self._reaper.join(timeout=2.0)
             self._reaper = None
         self._procs.stop_all()
-        for q in self._queryables:
-            q.undeclare()
+        for queryable in self._queryables:
+            queryable.undeclare()
         self._queryables = []
+        self._control.close()
         if self._alive_token is not None:
             del self._alive_token
             self._alive_token = None
@@ -193,240 +140,79 @@ class SupervisorService:
             pass
         _log.info("supervisor stopped")
 
-    # ── always-on bring-up ───────────────────────────────────────────────
-
     def _spawn_always_on(self) -> None:
-        cfg = self.zenoh_config
         if self.with_config:
             argv = ["wf.services.config", "--dir", self.config_dir]
-            if cfg:
-                argv += ["--zenoh-config", cfg]
+            if self.zenoh_config:
+                argv += ["--zenoh-config", self.zenoh_config]
             self._procs.spawn("config", argv)
+        if self.programs_dir:
+            argv = ["wf.services.program_runner", "--programs", self.programs_dir,
+                    "--realm", self.realm, "--node", self.node]
+            if self.zenoh_config:
+                argv += ["--zenoh-config", self.zenoh_config]
+            self._procs.spawn("program_runner", argv)
 
-        # One provider per resource (single node -> all of them). An
-        # external-launched provider (e.g. the headless-browser camera2d that
-        # renders the twin scene and serves the contract over the bridge) is
-        # served outside the supervisor's control; the supervisor still carries
-        # it in the inventory (role resolution, vision binding) but spawns no
-        # Python child for it.
-        for rid in self.realized["resources"]:
+        for resource_id in self.realized["resources"]:
             try:
-                self._spawn_provider(rid)
+                self._spawn_provider(resource_id)
             except RuntimeError as exc:
-                # A provider that can't start (e.g. a live device with no
-                # hardware attached) must NOT kill the cell — log it, leave the
-                # device down; it can be switched to sim/replay at runtime.
-                _log.error("provider %s failed to start: %s; left down", rid, exc)
+                _log.error(
+                    "provider %s failed to start: %s; left down",
+                    resource_id,
+                    exc,
+                )
 
-        # Always-on vision runtime: one process per distinct (pipeline, format)
-        # found across the catalog, bound to the camera resource the flows
-        # using it resolve to. The flow's task_runner toggles it via cmd/enable.
-        for pipeline, fmt, cid in self._vision_runtimes():
-            argv = [
-                "wf.services.vision",
-                "--realm",
-                self.realm,
-                "--pipeline",
-                pipeline,
-                "--input",
-                f"camera2d/{cid}",
-                "--op",
-                "detect",
-                "--detect-format",
-                fmt,
-            ]
-            if cfg:
-                argv += ["--zenoh-config", cfg]
-            self._procs.spawn(f"vision:{pipeline}", argv)
-
-    def _spawn_provider(self, rid: str) -> None:
-        """Spawn the realized provider child for ``rid`` (no-op for an
-        off / external-launched source). Raises RuntimeError on spawn failure."""
-        res = self.realized["resources"].get(rid)
-        if res is None:
-            return  # selected off -> no provider
-        if res["launch"] == LAUNCH_EXTERNAL:
+    def _spawn_provider(self, resource_id: str) -> None:
+        """Spawn one realized provider; external and off sources are no-ops."""
+        resource = self.realized["resources"].get(resource_id)
+        if resource is None:
+            return
+        if resource["launch"] == LAUNCH_EXTERNAL:
             _log.info(
                 "resource %s served externally (kind=%s); not spawning",
-                rid,
-                res["kind"],
+                resource_id,
+                resource["kind"],
             )
             return
-        module = provider_module(res["contract"], res["kind"])
-        argv = [module, "--cell", self.cell_path, "--resource", rid, "--realm", self.realm]
+        module = provider_module(resource["contract"], resource["kind"])
+        argv = [
+            module,
+            "--cell",
+            self.cell_path,
+            "--resource",
+            resource_id,
+            "--realm",
+            self.realm,
+        ]
         if self.zenoh_config:
             argv += ["--zenoh-config", self.zenoh_config]
-        self._procs.spawn(f"hal:{rid}", argv)
-
-    def _vision_runtimes(self) -> list[tuple[str, str, str]]:
-        """Distinct ``(pipeline, format, cid)`` triples to spawn as always-on
-        detectors. The camera is the one the flows using that pipeline resolve
-        to (single-camera cell -> the one camera)."""
-        seen: dict[str, tuple[str, str, str]] = {}
-        for name, spec in self._catalog.items():
-            pipeline = spec["vision"]["pipeline"]
-            fmt = spec["vision"]["format"]
-            try:
-                roles = resolve_roles(self.cell, spec, name)
-            except KeyError:
-                continue
-            cid = roles.get("cam")
-            if cid is None:
-                continue
-            seen.setdefault(pipeline, (pipeline, fmt, cid))
-        return list(seen.values())
-
-    # ── flow orchestration ───────────────────────────────────────────────
-
-    def _on_cmd_start(self, query: zenoh.Query) -> None:
-        self._reply_dict(query, self._start_flow_reply(self._req_flow(query)))
-
-    def _on_cmd_stop(self, query: zenoh.Query) -> None:
-        self._reply_dict(query, self._stop_flow_reply(self._req_flow(query)))
-
-    def _start_flow_reply(self, name: str | None) -> dict:
-        if not name:
-            return {"ok": False, "error": "unknown_flow:"}
-        if name not in self._catalog:
-            if name in self._errors:
-                return {"ok": False, "error": self._errors[name]}
-            return {"ok": False, "error": f"unknown_flow:{name}"}
-        with self._lock:
-            if self._procs.alive(f"task:{name}"):
-                return {"ok": False, "error": "already_online"}
-            spec = self._catalog[name]
-            try:
-                roles = resolve_roles(self.cell, spec, name)
-            except KeyError as exc:
-                return {"ok": False, "error": str(exc)}
-            try:
-                rid = roles["arm"]
-                cid = roles["cam"]
-            except KeyError as exc:
-                return {"ok": False, "error": f"unresolved_role:{exc.args[0]}"}
-            self._publish_status(name, "spawning", [])
-            cfg = self.zenoh_config
-            argv = [
-                "wf.services.task_runner",
-                "--realm",
-                self.realm,
-                "--flow",
-                self._flow_files[name],
-                "--rid",
-                rid,
-                "--cid",
-                cid,
-            ]
-            if cfg:
-                argv += ["--zenoh-config", cfg]
-            try:
-                self._procs.spawn(f"task:{name}", argv)
-            except RuntimeError as exc:
-                self._publish_status(name, "stopped", [])
-                return {"ok": False, "error": str(exc)}
-        self._publish_status(name, "running", [{"kind": "task_runner", "alive": True}])
-        self._publish_catalog()
-        self._publish_descriptor()
-        return {
-            "ok": True,
-            "flow": name,
-            "services": [{"kind": "task_runner", "instance_id": f"task:{name}"}],
-        }
-
-    def _stop_flow_reply(self, name: str | None) -> dict:
-        if not name or name not in self._catalog:
-            return {"ok": False, "error": "not_online"}
-        with self._lock:
-            stopped = self._procs.stop(f"task:{name}")
-        if not stopped:
-            return {"ok": False, "error": "not_online"}
-        self._publish_status(name, "stopped", [])
-        self._publish_catalog()
-        self._publish_descriptor()
-        return {"ok": True}
-
-    # ── catalog / descriptor / status ────────────────────────────────────
-
-    def _catalog_payload(self) -> dict:
-        flows = []
-        for name in sorted(set(self._catalog) | set(self._errors)):
-            if name in self._errors:
-                flows.append(
-                    {
-                        "name": name,
-                        "roles": {},
-                        "pipeline": None,
-                        "format": None,
-                        "online": False,
-                        "error": self._errors[name],
-                    }
-                )
-                continue
-            spec = self._catalog[name]
-            error = None
-            roles: dict[str, dict] = {}
-            try:
-                resolved = resolve_roles(self.cell, spec, name)
-                for role, decl in spec["roles"].items():
-                    roles[role] = {
-                        "contract": decl["contract"],
-                        "resource_id": resolved[role],
-                    }
-            except KeyError as exc:
-                error = str(exc)
-            flows.append(
-                {
-                    "name": name,
-                    "roles": roles,
-                    "pipeline": spec["vision"]["pipeline"],
-                    "format": spec["vision"]["format"],
-                    "online": self._procs.alive(f"task:{name}"),
-                    "error": error,
-                }
-            )
-        return {"t": now_ns(), "realm": self.realm, "flows": flows}
+        self._procs.spawn(f"hal:{resource_id}", argv)
 
     def _descriptor_payload(self) -> dict:
-        always_on = []
-        for name in self._procs.names():
-            if name.startswith("task:"):
-                continue
-            always_on.append({"kind": name, "instance_id": name, "alive": True})
+        always_on = [
+            {"kind": name, "instance_id": name, "alive": True}
+            for name in self._procs.names()
+        ]
         return {
             "t": now_ns(),
             "node": self.node,
+            # Cell identity for multi-cell UIs: the realm is the id, ``name`` is
+            # the display name (cell.yaml ``name:``, default the realm).
+            "realm": self.realm,
+            "cell_name": self.cell.get("name") or self.realm,
+            "cell_type": self.cell.get("cell_type"),
             "is_master": True,
             "owns_resources": sorted(self.cell["resources"]),
             "always_on": always_on,
             "started_at": self._started_at,
         }
 
-    def _publish_catalog(self) -> None:
-        self._publish(self._catalog_pub, self._catalog_payload())
-
     def _publish_descriptor(self) -> None:
         self._publish(self._descriptor_pub, self._descriptor_payload())
 
-    def _publish_status(self, flow: str, phase: str, services: list) -> None:
-        pub = self._status_pubs.get(flow)
-        if pub is None:
-            pub = self.session.declare_publisher(
-                sup_keys.flow_status(self.realm, flow),
-                congestion_control=zenoh.CongestionControl.DROP,
-            )
-            self._status_pubs[flow] = pub
-        self._publish(
-            pub,
-            {"t": now_ns(), "flow": flow, "phase": phase, "services": services},
-        )
-
-    def _on_catalog_query(self, query: zenoh.Query) -> None:
-        self._reply_dict(query, self._catalog_payload())
-
     def _on_descriptor_query(self, query: zenoh.Query) -> None:
         self._reply_dict(query, self._descriptor_payload())
-
-    # ── devices inventory + runtime source switching ─────────────────────
 
     def _devices_payload(self) -> dict:
         return {
@@ -442,28 +228,33 @@ class SupervisorService:
         self._reply_dict(query, self._devices_payload())
 
     def _on_set_source(self, query: zenoh.Query) -> None:
-        req: dict = {}
+        request: dict = {}
         if query.payload is not None:
             try:
                 decoded = decode(query.payload)
                 if isinstance(decoded, dict):
-                    req = decoded
+                    request = decoded
             except Exception:  # noqa: BLE001
-                req = {}
+                pass
         self._reply_dict(
-            query, self._set_source_reply(req.get("device_id"), req.get("source"))
+            query,
+            self._set_source_reply(request.get("device_id"), request.get("source")),
         )
 
     def _set_source_reply(self, device_id, source) -> dict:
-        """Cold-switch a device's source: stop the old provider, re-realize +
-        rewrite the child-params file, start the new provider."""
+        """Cold-switch a device and restart its selected provider."""
         if not isinstance(device_id, str) or device_id not in self.cell["resources"]:
+            for host, res in self.cell["resources"].items():
+                if device_id in (res.get("provides") or {}):
+                    return {"ok": False, "error": f"provided_by:{host}"}
             return {"ok": False, "error": f"unknown_device:{device_id}"}
-        if source != "off" and source not in self.cell["resources"][device_id]["sources"]:
+        sources = self.cell["resources"].get(device_id, {}).get("sources", {})
+        if source != "off" and source not in sources:
             return {"ok": False, "error": f"no_source:{device_id}:{source}"}
+
         error = None
         with self._lock:
-            self._procs.stop(f"hal:{device_id}")  # idempotent
+            self._procs.stop(f"hal:{device_id}")
             self.active_sources[device_id] = source
             self.realized = realize_cell(self.cell, self.active_sources)
             _dump_realized(self.realized, self.cell_path)
@@ -471,50 +262,37 @@ class SupervisorService:
                 self._spawn_provider(device_id)
             except RuntimeError as exc:
                 error = str(exc)
+
         self._publish_devices()
         self._publish_descriptor()
         if error:
-            return {"ok": False, "error": error, "device_id": device_id, "source": source}
+            return {
+                "ok": False,
+                "error": error,
+                "device_id": device_id,
+                "source": source,
+            }
         return {"ok": True, "device_id": device_id, "source": source}
-
-    # ── reaper ───────────────────────────────────────────────────────────
 
     def _start_reaper(self) -> None:
         self._reaper = threading.Thread(
-            target=self._reap_loop, name="supervisor-reaper", daemon=True
+            target=self._reap_loop,
+            name="supervisor-reaper",
+            daemon=True,
         )
         self._reaper.start()
 
     def _reap_loop(self) -> None:
         while not self._stop_event.wait(_REAP_PERIOD_S):
-            dead = self._procs.reap_dead()
-            if dead:
-                self._publish_catalog()
+            if self._procs.reap_dead():
                 self._publish_descriptor()
-
-    # ── helpers ──────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _req_flow(query: zenoh.Query) -> str | None:
-        from wf.core.codec import decode
-
-        payload = query.payload
-        if payload is None:
-            return None
-        try:
-            req = decode(payload)
-        except Exception:  # noqa: BLE001
-            return None
-        if isinstance(req, dict):
-            flow = req.get("flow")
-            return flow if isinstance(flow, str) else None
-        return None
 
     @staticmethod
     def _reply_dict(query: zenoh.Query, value: dict) -> None:
         query.reply(str(query.key_expr), encode(value))
 
-    def _publish(self, pub: zenoh.Publisher, value: dict) -> None:
+    @staticmethod
+    def _publish(pub: zenoh.Publisher, value: dict) -> None:
         try:
             pub.put(encode(value))
         except Exception:  # noqa: BLE001
@@ -522,16 +300,11 @@ class SupervisorService:
 
 
 def _dump_realized(realized: dict, path: str) -> None:
-    """Write the realized inventory to ``path`` (overwriting). The realized
-    resources carry ``{contract, kind, launch, node, params}`` so each HAL's
-    existing ``load_resource(cell, rid)`` reads its merged params unchanged."""
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(realized, f, sort_keys=False)
+    with open(path, "w", encoding="utf-8") as file:
+        yaml.safe_dump(realized, file, sort_keys=False)
 
 
 def _write_realized_cell(realized: dict) -> str:
-    """Create a temp realized cell file for child HAL spawning; the service
-    rewrites it in place on a source switch and unlinks it on shutdown."""
     fd, path = tempfile.mkstemp(prefix="wf-realized-cell-", suffix=".yaml")
     os.close(fd)
     _dump_realized(realized, path)
@@ -539,7 +312,10 @@ def _write_realized_cell(realized: dict) -> str:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="wf.services.supervisor", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="wf.services.supervisor",
+        description=__doc__,
+    )
     parser.add_argument(
         "--realm",
         default=os.environ.get("WF_REALM", "cell"),
@@ -549,30 +325,36 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--runtime",
         default=None,
-        help="path to a runtime overlay (active_sources) selecting source modes",
-    )
-    parser.add_argument(
-        "--flows-dir",
-        default="packages/services/task_runner/flows",
-        help="directory of flow YAML specs",
+        help="runtime overlay selecting active device sources",
     )
     parser.add_argument(
         "--config-dir",
         default="deploy/config",
-        help="config store dir (only used with --with-config)",
+        help="config store directory (only used with --with-config)",
     )
     parser.add_argument(
         "--with-config",
         action="store_true",
         help="spawn the config service as an always-on child",
     )
-    parser.add_argument("--node", default="main", help="node id (default main)")
-    parser.add_argument("--zenoh-config", default=None, help="zenoh config path")
+    parser.add_argument(
+        "--programs",
+        default=None,
+        metavar="DIR",
+        help="spawn the program runner over this directory of program modules",
+    )
+    parser.add_argument(
+        "--node",
+        default="main",
+        help="node id (default main)",
+    )
+    parser.add_argument(
+        "--zenoh-config",
+        default=None,
+        help="zenoh config path",
+    )
     args = parser.parse_args(argv)
 
-    # cell = design-time truth; the runtime overlay selects an initial source
-    # mode per logical device. The service holds both, realizes the concrete
-    # inventory, and cold-switches a device's source on cmd/set_source.
     cell = load_cell(args.cell)
     active = load_runtime(args.runtime)["active_sources"] if args.runtime else {}
 
@@ -582,9 +364,9 @@ def main(argv=None) -> int:
         args.realm,
         cell,
         active,
-        flows_dir=args.flows_dir,
         config_dir=args.config_dir,
         with_config=args.with_config,
+        programs_dir=args.programs,
         zenoh_config=args.zenoh_config,
         node=args.node,
     )

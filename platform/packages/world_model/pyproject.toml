@@ -7,7 +7,7 @@ dependencies = [
     "wf-core",
     "wf-contracts-arm",
     "numpy",
-    "ruckig",
+    "ruckig==0.19.4",
 ]
 
 [build-system]

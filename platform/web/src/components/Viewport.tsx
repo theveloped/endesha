@@ -2,13 +2,14 @@
 // Bus rate (200 Hz) is decoupled from render rate: the subscription writes
 // the latest q into a mutable ref; useFrame applies it per rendered frame.
 // Optional `children` render extra scene nodes (frame triads, TCP markers,
-// pose ghost) inside the Canvas; `controls` is an absolutely-positioned DOM
-// overlay (toggle buttons).
-import { Canvas, useFrame } from "@react-three/fiber";
+// pose ghost) inside the Canvas; DOM overlays render above it. The interactive
+// orientation triad matches the CAD analyzer's Three.js ViewHelper.
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import {
   useMemo,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
   type RefObject,
@@ -16,6 +17,7 @@ import {
 import URDFLoader, { type URDFRobot } from "urdf-loader";
 import type { JointState } from "../lib/messages";
 import * as THREE from "three";
+import { ViewHelper } from "three/addons/helpers/ViewHelper.js";
 import { ZUP_TO_YUP } from "../lib/framemath";
 
 // URDF joint names in wire order (wf/hal/aubo_i10/fk.py JOINT_ORDER).
@@ -103,24 +105,82 @@ export function Robot({
     />
   );
 }
+function ViewTriad() {
+  const { camera, controls, gl, scene } = useThree();
+  const helperRef = useRef<ViewHelper | null>(null);
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const helper = new ViewHelper(camera, canvas);
+    helper.setLabelStyle("bold 22px system-ui, sans-serif", "#18181b", 15);
+    helper.setLabels("X", "Y", "Z");
+    helperRef.current = helper;
+    let downAt: [number, number] | null = null;
+    const onPointerDown = (event: PointerEvent) => {
+      downAt = [event.clientX, event.clientY];
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      if (
+        downAt !== null &&
+        Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) <= 4
+      ) {
+        helper.handleClick(event);
+      }
+      downAt = null;
+    };
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointerup", onPointerUp);
+    return () => {
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      helperRef.current = null;
+      helper.dispose();
+    };
+  }, [camera, gl.domElement]);
+
+  useFrame((_state, delta) => {
+    const helper = helperRef.current;
+    if (helper === null) return;
+    const orbit = controls as
+      | { target?: THREE.Vector3; update?: () => void }
+      | undefined;
+    if (orbit?.target !== undefined) helper.center = orbit.target;
+    if (helper.animating) {
+      helper.update(delta);
+      orbit?.update?.();
+    }
+    gl.clear();
+    gl.render(scene, camera);
+    helper.render(gl);
+  }, 1);
+
+  return null;
+}
+
 
 export default function Viewport({
   jointsRef,
   children,
   controls,
+  legend,
   topRight,
   baseMatrix = IDENTITY,
+  robotVisible = true,
   robotSelected = false,
   onRobotSelect,
 }: {
   jointsRef: RefObject<JointState | null>;
   children?: ReactNode;
   controls?: ReactNode;
+  /** Bottom-left viewer legend overlay. */
+  legend?: ReactNode;
   /** Absolutely-positioned DOM overlay pinned top-right (e.g. the device tree). */
   topRight?: ReactNode;
   /** Robot base pose (Z-up world matrix). The robot + grid render in world;
    *  the robot nests inside this so world (grid) stays the canvas origin. */
   baseMatrix?: THREE.Matrix4;
+  /** Whether the robot device and its URDF meshes render. */
+  robotVisible?: boolean;
   robotSelected?: boolean;
   onRobotSelect?: () => void;
 }) {
@@ -135,7 +195,7 @@ export default function Viewport({
 
   return (
     <div className="relative h-full min-h-0">
-      {!robotLoaded && (
+      {robotVisible && !robotLoaded && (
         <div className="absolute inset-0 z-10 flex items-center justify-center text-sm text-muted-foreground">
           loading robot…
         </div>
@@ -145,25 +205,36 @@ export default function Viewport({
           {controls}
         </div>
       )}
+      {legend}
       {topRight !== undefined && (
         <div className="absolute top-2 right-2 z-10">{topRight}</div>
       )}
-      <Canvas camera={{ position: [2, 1.6, 2], fov: 50 }}>
+      <Canvas
+        camera={{ position: [2, 1.6, 2], fov: 50 }}
+        onCreated={({ gl }) => {
+          // ViewHelper performs a second renderer.render() for its overlay.
+          // Without manual clearing, that pass erases the main scene.
+          gl.autoClear = false;
+        }}
+      >
         <ambientLight intensity={0.6} />
         <directionalLight position={[3, 6, 3]} intensity={1.2} />
         <gridHelper args={[6, 24, 0x666666, 0x333333]} />
-        <group rotation={ZUP_TO_YUP}>
-          <group matrix={baseMatrix} matrixAutoUpdate={false}>
-            <Robot
-              jointsRef={jointsRef}
-              onLoaded={() => setRobotLoaded(true)}
-              selected={robotSelected}
-              onSelect={onRobotSelect}
-            />
+        {robotVisible && (
+          <group rotation={ZUP_TO_YUP}>
+            <group matrix={baseMatrix} matrixAutoUpdate={false}>
+              <Robot
+                jointsRef={jointsRef}
+                onLoaded={() => setRobotLoaded(true)}
+                selected={robotSelected}
+                onSelect={onRobotSelect}
+              />
+            </group>
           </group>
-        </group>
+        )}
         {children}
         <OrbitControls makeDefault target={target} />
+        <ViewTriad />
       </Canvas>
     </div>
   );

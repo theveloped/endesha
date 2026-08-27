@@ -70,7 +70,11 @@ def test_cmd_set_and_delete_publish_on_key(linked, tmp_path):
         _wait_until(lambda: len(received) >= 1, 5.0, "no set sample published")
         key, payload = received[-1]
         assert key == keys.scene("foo")
-        assert decode(payload) == SCENE
+        # The published sample is the STORED value in the same flat form a
+        # query returns (value + revision/t), so subscribers and queriers agree.
+        published = decode(payload)
+        assert published["revision"] == 1 and published["t"] > 0
+        assert {k: v for k, v in published.items() if k not in ("revision", "t")} == SCENE
 
         # delete -> publishes an empty tombstone on the same key
         reply = _query(session_a, keys.cmd_delete(), {"key": keys.scene("foo")})

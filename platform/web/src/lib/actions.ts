@@ -8,30 +8,43 @@ import { query } from "./bus";
 import { decodeSample } from "./codec";
 import {
   actionPrefix,
-  cmdAcquireControl,
+  controlCmdAcquire,
+  dioCmdForce,
+  dioCmdSet,
+  programCmd,
+  programCmdEvent,
+  programsCmdDelete,
+  programsCmdLoad,
+  programsCmdSave,
+  programsCmdSource,
+  tagsCmdForce,
+  tagsCmdWrite,
+  washerActionPrefix,
+  washerCmdGetRecipe,
+  washerCmdSetRecipe,
+  washerCmdStopDoor,
+  type UnitCommand,
   cmdClearProtectiveStop,
-  cmdReleaseControl,
+  controlCmdRelease,
   cmdSetDo,
   cmdSetTcp,
   cmdStop,
   configCmdDelete,
   configCmdSet,
-  flowsCmdStart,
-  flowsCmdStop,
   supervisorCmdSetSource,
-  taskCmdAbort,
-  taskCmdStart,
 } from "./config";
 import type {
   Ack,
+  ProgramSaveReply,
+  ProgramSourceReply,
   CancelReply,
   ControlAck,
   GoalFeedback,
   GoalReply,
   GoalResult,
-  FlowCmdReply,
+  Recipe,
+  RecipeReply,
   SetSourceReply,
-  TaskStartReply,
   Waypoint,
 } from "./messages";
 
@@ -50,7 +63,18 @@ export async function sendExecutePath(
     clientId,
   }: { onFeedback?: (fb: GoalFeedback) => void; clientId?: string } = {},
 ): Promise<GoalHandle> {
-  const prefix = actionPrefix(realm);
+  return sendGoal(session, actionPrefix(realm), "execute_path", { waypoints, client_id: clientId ?? null }, { onFeedback });
+}
+
+/** Submit a goal to `{prefix}/{name}` and return a handle whose `result`
+ * resolves with the terminal result (any action server, any contract). */
+export async function sendGoal(
+  session: Session,
+  prefix: string,
+  name: string,
+  goal: Record<string, unknown>,
+  { onFeedback }: { onFeedback?: (fb: GoalFeedback) => void } = {},
+): Promise<GoalHandle> {
   const goalId = uuidv7();
 
   const feedbackSub = await session.declareSubscriber(
@@ -91,17 +115,14 @@ export async function sendExecutePath(
 
   let reply: GoalReply | null;
   try {
-    reply = (await query(session, `${prefix}/execute_path`, {
-      goal_id: goalId,
-      goal: { waypoints, client_id: clientId ?? null },
-    })) as GoalReply | null;
+    reply = (await query(session, `${prefix}/${name}`, { goal_id: goalId, goal })) as GoalReply | null;
   } catch (e) {
     undeclareBoth();
     throw e;
   }
   if (reply === null) {
     undeclareBoth();
-    throw new Error("no reply from action server for execute_path");
+    throw new Error(`no reply from action server for ${name}`);
   }
   if (!reply.accepted) {
     undeclareBoth();
@@ -115,11 +136,56 @@ export async function cancelGoal(
   realm: string,
   goalId: string,
 ): Promise<CancelReply> {
-  const reply = await query(session, `${actionPrefix(realm)}/cancel`, {
-    goal_id: goalId,
-  });
+  return cancelGoalAt(session, actionPrefix(realm), goalId);
+}
+
+export async function cancelGoalAt(session: Session, prefix: string, goalId: string): Promise<CancelReply> {
+  const reply = await query(session, `${prefix}/cancel`, { goal_id: goalId });
   if (reply === null) throw new Error(`no cancel reply for goal ${goalId}`);
   return reply as CancelReply;
+}
+
+// ── washer ──────────────────────────────────────────────────────────────────
+
+export type WasherAction = "open_door" | "close_door" | "start_wash" | "reset";
+
+export async function washerAction(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  name: WasherAction,
+  goal: Record<string, unknown> = {},
+): Promise<GoalHandle> {
+  return sendGoal(session, washerActionPrefix(realm, rid), name, { client_id: clientId, ...goal });
+}
+
+export async function washerCancel(session: Session, realm: string, rid: string, goalId: string): Promise<CancelReply> {
+  return cancelGoalAt(session, washerActionPrefix(realm, rid), goalId);
+}
+
+export async function washerStopDoor(session: Session, realm: string, rid: string, clientId: string): Promise<Ack> {
+  const reply = await query(session, washerCmdStopDoor(realm, rid), { client_id: clientId });
+  if (reply === null) throw new Error("no reply from washer cmd/stop_door");
+  return reply as Ack;
+}
+
+export async function washerGetRecipe(session: Session, realm: string, rid: string): Promise<RecipeReply> {
+  const reply = await query(session, washerCmdGetRecipe(realm, rid), {});
+  if (reply === null) throw new Error("no reply from washer cmd/get_recipe");
+  return reply as RecipeReply;
+}
+
+export async function washerSetRecipe(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  recipe: Recipe,
+): Promise<Ack> {
+  const reply = await query(session, washerCmdSetRecipe(realm, rid), { client_id: clientId, recipe }, 15000);
+  if (reply === null) throw new Error("no reply from washer cmd/set_recipe");
+  return reply as Ack;
 }
 
 export async function setDo(
@@ -163,17 +229,140 @@ export async function setTcp(
   return reply as Ack;
 }
 
+export async function dioSet(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  channel: string,
+  value: boolean | number,
+): Promise<Ack> {
+  const reply = await query(session, dioCmdSet(realm, rid), {
+    client_id: clientId,
+    channel,
+    value,
+  });
+  if (reply === null) throw new Error("no reply from dio cmd/set");
+  return reply as Ack;
+}
+
+/** ``value: null`` clears the force. */
+export async function dioForce(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  channel: string,
+  value: boolean | number | null,
+): Promise<Ack> {
+  const reply = await query(session, dioCmdForce(realm, rid), {
+    client_id: clientId,
+    channel,
+    value,
+  });
+  if (reply === null) throw new Error("no reply from dio cmd/force");
+  return reply as Ack;
+}
+
+export async function tagsWrite(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  tag: string,
+  value: boolean | number | string,
+): Promise<Ack> {
+  const reply = await query(session, tagsCmdWrite(realm, rid), { client_id: clientId, tag, value });
+  if (reply === null) throw new Error("no reply from tags cmd/write");
+  return reply as Ack;
+}
+
+/** ``value: null`` clears the force. */
+export async function tagsForce(
+  session: Session,
+  realm: string,
+  rid: string,
+  clientId: string,
+  tag: string,
+  value: boolean | number | string | null,
+): Promise<Ack> {
+  const reply = await query(session, tagsCmdForce(realm, rid), { client_id: clientId, tag, value });
+  if (reply === null) throw new Error("no reply from tags cmd/force");
+  return reply as Ack;
+}
+
+export async function programLoad(
+  session: Session,
+  realm: string,
+  name: string,
+  bindings: Record<string, string>,
+  params: Record<string, unknown>,
+): Promise<Ack> {
+  const reply = await query(session, programsCmdLoad(realm), { name, bindings, params });
+  if (reply === null) throw new Error("no reply from programs/cmd/load");
+  return reply as Ack;
+}
+
+export async function programCommand(
+  session: Session,
+  realm: string,
+  command: UnitCommand,
+  reason?: string,
+): Promise<Ack> {
+  const reply = await query(session, programCmd(realm, command), reason ? { reason } : {});
+  if (reply === null) throw new Error(`no reply from program/cmd/${command}`);
+  return reply as Ack;
+}
+
+export async function programSource(
+  session: Session,
+  realm: string,
+  nameOrFile: { name: string } | { file: string },
+): Promise<ProgramSourceReply> {
+  const reply = await query(session, programsCmdSource(realm), nameOrFile);
+  if (reply === null) throw new Error("no reply from programs/cmd/source");
+  return reply as ProgramSourceReply;
+}
+
+export async function programSave(
+  session: Session,
+  realm: string,
+  file: string,
+  text: string,
+): Promise<ProgramSaveReply> {
+  const reply = await query(session, programsCmdSave(realm), { file, text });
+  if (reply === null) throw new Error("no reply from programs/cmd/save");
+  return reply as ProgramSaveReply;
+}
+
+export async function programDeleteFile(session: Session, realm: string, name: string): Promise<Ack> {
+  const reply = await query(session, programsCmdDelete(realm), { name });
+  if (reply === null) throw new Error("no reply from programs/cmd/delete");
+  return reply as Ack;
+}
+
+export async function programEvent(
+  session: Session,
+  realm: string,
+  event: string,
+  data: Record<string, unknown> = {},
+): Promise<Ack> {
+  const reply = await query(session, programCmdEvent(realm), { event, data });
+  if (reply === null) throw new Error("no reply from program/cmd/event");
+  return reply as Ack;
+}
+
 export async function acquireControl(
   session: Session,
   realm: string,
   clientId: string,
   user: string,
 ): Promise<ControlAck> {
-  const reply = await query(session, cmdAcquireControl(realm), {
+  const reply = await query(session, controlCmdAcquire(realm), {
     client_id: clientId,
     user,
   });
-  if (reply === null) throw new Error("no reply from cmd/acquire_control");
+  if (reply === null) throw new Error("no reply from control/cmd/acquire");
   return reply as ControlAck;
 }
 
@@ -181,12 +370,12 @@ export async function releaseControl(
   session: Session,
   realm: string,
   clientId: string,
-): Promise<Ack> {
-  const reply = await query(session, cmdReleaseControl(realm), {
+): Promise<ControlAck> {
+  const reply = await query(session, controlCmdRelease(realm), {
     client_id: clientId,
   });
-  if (reply === null) throw new Error("no reply from cmd/release_control");
-  return reply as Ack;
+  if (reply === null) throw new Error("no reply from control/cmd/release");
+  return reply as ControlAck;
 }
 
 export interface ConfigSetReply {
@@ -221,48 +410,6 @@ export async function configDelete(
   return reply as ConfigDeleteReply;
 }
 
-export async function startTask(
-  session: Session,
-  realm: string,
-  flow: string,
-): Promise<TaskStartReply> {
-  const reply = await query(session, taskCmdStart(realm, flow), {});
-  if (reply === null)
-    throw new Error("no reply from task/cmd/start (task_runner running?)");
-  return reply as TaskStartReply;
-}
-
-export async function abortTask(
-  session: Session,
-  realm: string,
-  flow: string,
-): Promise<{ ok: boolean }> {
-  const reply = await query(session, taskCmdAbort(realm, flow), {});
-  if (reply === null) throw new Error("no reply from task/cmd/abort");
-  return reply as { ok: boolean };
-}
-
-export async function startFlow(
-  session: Session,
-  realm: string,
-  flow: string,
-): Promise<FlowCmdReply> {
-  const reply = await query(session, flowsCmdStart(realm), { flow });
-  if (reply === null)
-    throw new Error("no reply from flows/cmd/start (supervisor running?)");
-  return reply as FlowCmdReply;
-}
-
-export async function stopFlow(
-  session: Session,
-  realm: string,
-  flow: string,
-): Promise<FlowCmdReply> {
-  const reply = await query(session, flowsCmdStop(realm), { flow });
-  if (reply === null)
-    throw new Error("no reply from flows/cmd/stop (supervisor running?)");
-  return reply as FlowCmdReply;
-}
 
 /** Cold-switch a device's source mode (live/sim/replay/off) via the supervisor. */
 export async function setDeviceSource(

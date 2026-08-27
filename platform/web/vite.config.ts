@@ -21,13 +21,10 @@ export default defineConfig({
     },
   },
   build: {
-    // Multi-page: the twin (index.html) and the headless render-only bundle
-    // (headless.html) ship as separate entries from one build. The twin's
-    // dist/index.html is unchanged.
+    // Multi-page: the operator UI and headless render-only camera bundle.
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, "index.html"),
-        spatial: path.resolve(__dirname, "spatial.html"),
         headless: path.resolve(__dirname, "headless.html"),
       },
     },

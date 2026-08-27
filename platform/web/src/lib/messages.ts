@@ -44,6 +44,236 @@ export interface IoState {
   ao: number[];
 }
 
+// ── dio contract (wf/contracts/dio/messages.py) ─────────────────────────────
+
+export type ChannelKind = "di" | "do" | "ai" | "ao";
+
+export interface ChannelValue {
+  kind: ChannelKind;
+  value: boolean | number;
+  forced: boolean;
+  /** Provider address (bank/pin/index…) — the raw pin behind the name. */
+  address?: Record<string, unknown>;
+  /** True for a synthesized channel of an unmapped physical point (raw pin). */
+  auto?: boolean;
+}
+
+export interface ChannelsState {
+  t: WireTimestamp;
+  channels: Record<string, ChannelValue>;
+}
+
+/** One entry of a dio device's cell ``config.channels`` mapping. */
+export interface ChannelDecl {
+  kind: ChannelKind;
+  unit?: string;
+  scale?: number;
+  offset?: number;
+  [address: string]: unknown;
+}
+
+// ── program contract (wf/contracts/program/messages.py) ─────────────────────
+
+export type UnitState =
+  | "idle" | "starting" | "execute" | "completing" | "complete"
+  | "holding" | "held" | "unholding" | "suspending" | "suspended" | "unsuspending"
+  | "stopping" | "stopped" | "aborting" | "aborted" | "clearing" | "resetting";
+
+// ── program graph (wf/program/graph.py): the state machine as data ──────────
+
+export interface GraphState {
+  id: string;
+  initial: boolean;
+  final: boolean;
+  parent: string | null;
+  kind: "atomic" | "compound" | "parallel" | string;
+}
+
+export interface GraphTransition {
+  id: string;
+  source: string;
+  target: string;
+  event: string | null;
+  cond: string[];
+  unless: string[];
+  internal: boolean;
+}
+
+export interface GraphTrigger {
+  kind: "channel" | "timer" | string;
+  event: string;
+  params: Record<string, unknown>;
+}
+
+export interface GraphSource {
+  class: number | null;
+  states: Record<string, number>;
+  transitions: Record<string, number>; // event -> line
+  actions: Record<string, number>; // state -> line of run_<state>
+  guards: Record<string, number>;
+  hooks: Record<string, number>;
+}
+
+export interface ProgramGraph {
+  states: GraphState[];
+  transitions: GraphTransition[];
+  triggers: GraphTrigger[];
+  source?: GraphSource;
+}
+
+export interface CatalogEntry {
+  name: string;
+  roles: Record<string, string>; // role -> contract
+  params: Record<string, unknown>;
+  doc: string;
+  path: string;
+  error: string | null;
+  hmi?: Record<string, string>; // event -> operator button label
+  graph?: ProgramGraph;
+}
+
+export interface ProgramCatalog {
+  t: WireTimestamp;
+  programs: CatalogEntry[];
+}
+
+/** What would move the program on from an active state (debug aid). */
+export interface WaitingFor {
+  kind: "channel" | "timer" | "event";
+  event: string;
+  target?: string;
+  role?: string;
+  channel?: string;
+  edge?: string;
+  state?: string;
+  seconds?: number;
+}
+
+export interface ProgramState {
+  t: WireTimestamp;
+  unit: UnitState;
+  program: string | null;
+  program_states: string[];
+  actions: string[];
+  reason: string | null;
+  params: Record<string, unknown>;
+  bindings: Record<string, string>;
+  client_id: string | null;
+  cycle: number;
+  waiting_for?: WaitingFor[];
+}
+
+export interface ProgramLogLine {
+  t: WireTimestamp;
+  level: "info" | "warning" | "error";
+  source: string;
+  message: string;
+}
+
+export interface ProgramSourceReply {
+  ok: boolean;
+  name: string;
+  path: string;
+  text: string;
+  error: string | null;
+}
+
+export interface ProgramSaveReply {
+  ok: boolean;
+  entry: CatalogEntry | null;
+  error: string | null;
+}
+
+export interface TransitionEvent {
+  t: WireTimestamp;
+  scope: "unit" | "program";
+  source: string | null;
+  target: string;
+  event: string | null;
+  detail: string | null;
+}
+
+// ── tags contract (wf/contracts/tags/messages.py) ───────────────────────────
+
+export type TagType = "bool" | "int" | "float" | "string";
+
+export interface TagValue {
+  type: TagType;
+  value: boolean | number | string;
+  access: "r" | "rw";
+  forced: boolean;
+  address?: Record<string, unknown>;
+  auto?: boolean;
+}
+
+export interface TagsState {
+  t: WireTimestamp;
+  tags: Record<string, TagValue>;
+}
+
+// ── washer contract (wf/contracts/washer/messages.py) ───────────────────────
+
+export type WasherPhase =
+  | "initializing"
+  | "ready_to_load"
+  | "door_open"
+  | "door_moving"
+  | "washing"
+  | "ready_to_unload"
+  | "fault";
+
+export interface WasherStatus {
+  t: WireTimestamp;
+  phase: WasherPhase;
+  door: "open" | "closed" | "moving" | "unknown";
+  connected: boolean;
+  auto: boolean;
+  fault: boolean;
+  fault_code: number;
+  washing: boolean;
+  ready_to_load: boolean;
+  ready_to_unload: boolean;
+  program: string;
+  program_no: number;
+  sequence: string | null;
+  detail: string;
+}
+
+export interface RecipeStep {
+  cleaning: number;
+  time_s: number;
+  movement: number;
+  additional: number;
+  pump_off: boolean;
+}
+
+export interface Recipe {
+  name: string;
+  steps: RecipeStep[];
+  params: Record<string, number>;
+}
+
+export interface ParamSpec {
+  title: string;
+  min?: number;
+  max?: number;
+  choices?: number[];
+  unit?: string;
+}
+
+export interface RecipeSchema {
+  steps: number;
+  step_fields: Record<string, ParamSpec>;
+  params: Record<string, ParamSpec>;
+}
+
+export interface RecipeReply {
+  ok: boolean;
+  error: string | null;
+  recipe?: Recipe;
+  schema?: RecipeSchema;
+}
+
 export interface ArmStatus {
   t: WireTimestamp;
   mode: string;
@@ -144,12 +374,16 @@ export interface ControlAck {
 
 export interface FrameDef {
   parent: string;
-  xyz: number[];
+  xyz: number[]; // EFFECTIVE pose (calibrated when a calibration exists)
   quat: number[];
-  source?: string;
+  source?: string; // "manual" | "calibration" | ...
   meta?: Record<string, unknown>;
   revision?: number;
   t?: WireTimestamp;
+  /** Design value; set by the store on every manual write, kept by calibration writes. */
+  nominal?: { xyz: number[]; quat: number[] };
+  /** Present iff the effective pose came from a calibration. */
+  calibration?: { t?: WireTimestamp; method?: string; residual?: number; by?: string; [k: string]: unknown };
 }
 
 export interface PoseDef {
@@ -293,8 +527,7 @@ export interface FrameHeader {
   pose?: Pose;
 }
 
-// camera intrinsics config doc (config/intrinsics/{cid}); served flat with
-// the store's revision/t stamped on.
+// Pinhole view used by the renderers (derived from CameraInfo).
 export interface Intrinsics {
   fx: number;
   fy: number;
@@ -304,6 +537,31 @@ export interface Intrinsics {
   h: number;
   revision?: number;
   t?: WireTimestamp;
+}
+
+// config/intrinsics/{cid} in the ROS sensor_msgs/CameraInfo layout
+// (wf/core/camera_info.py); served flat with the store's revision/t stamped on.
+export interface CameraInfo {
+  width: number;
+  height: number;
+  distortion_model: string;
+  D: number[];
+  K: number[]; // 3x3 row-major: [fx,0,cx, 0,fy,cy, 0,0,1]
+  R?: number[];
+  P?: number[];
+  revision?: number;
+  t?: WireTimestamp;
+}
+
+/** Pinhole view of a CameraInfo doc (also accepts the legacy flat shape). */
+export function intrinsicsFromCameraInfo(doc: CameraInfo | Intrinsics): Intrinsics {
+  if ("K" in doc && Array.isArray(doc.K)) {
+    return {
+      fx: doc.K[0], fy: doc.K[4], cx: doc.K[2], cy: doc.K[5],
+      w: doc.width, h: doc.height, revision: doc.revision, t: doc.t,
+    };
+  }
+  return doc as Intrinsics;
 }
 
 export interface StreamParams {
@@ -333,95 +591,6 @@ export interface GrabReply {
   data: Uint8Array | null;
 }
 
-// task contract (wf/contracts/task/keys.py + task_runner service). `state` is
-// latest-wins (DROP); `result` is the terminal aggregate. `configuration` is
-// the set of active statechart state ids — multiple entries while the two
-// parallel regions (inspect + conveyor) are live.
-
-export interface TaskTransition {
-  event: string;
-  source: string | null;
-  target: string | null;
-  t: WireTimestamp;
-}
-
-export interface TaskContext {
-  by_pose?: { pose: string; detections: BarcodeDetection[] }[];
-  conveyor?: ConveyorOutcome | null;
-  summary?: TaskSummary | null;
-}
-
-export interface TaskState {
-  t: WireTimestamp;
-  flow: string;
-  configuration: string[];
-  terminated: boolean;
-  history: TaskTransition[];
-  context: TaskContext;
-}
-
-export interface BarcodeDetection {
-  text: string;
-  format: string;
-  corners: number[][];
-}
-
-export interface ConveyorOutcome {
-  tripped_by: "di" | "timeout";
-  elapsed_s: number;
-}
-
-export interface TaskSummary {
-  codes: string[];
-  by_pose: { pose: string; detections: BarcodeDetection[] }[];
-  conveyor: ConveyorOutcome | null;
-}
-
-export interface TaskResult {
-  t: WireTimestamp;
-  flow: string;
-  ok: boolean;
-  error: string | null;
-  summary: TaskSummary | null;
-}
-
-/** cmd/start reply: `{ok:true, flow}` or `{ok:false, error}` (busy/unknown_pose:*). */
-export interface TaskStartReply {
-  ok: boolean;
-  flow?: string;
-  error?: string;
-}
-
-// supervisor contract (wf/contracts/supervisor/keys.py + supervisor service).
-// The catalog is latest-wins: the selectable flows with their RESOLVED role
-// bindings (role -> the resource id it bound to) and online state.
-
-export interface FlowRoleBinding {
-  contract: string;
-  resource_id: string;
-}
-
-export interface FlowCatalogEntry {
-  name: string;
-  roles: Record<string, FlowRoleBinding>;
-  pipeline: string | null;
-  format: string | null;
-  online: boolean;
-  error: string | null;
-}
-
-export interface FlowsCatalog {
-  t: WireTimestamp;
-  realm: string;
-  flows: FlowCatalogEntry[];
-}
-
-/** flows/cmd/start|stop reply: `{ok:true, flow}` or `{ok:false, error}`. */
-export interface FlowCmdReply {
-  ok: boolean;
-  flow?: string;
-  error?: string;
-}
 
 export interface SupervisorService {
   kind: string;
@@ -452,13 +621,53 @@ export interface DeviceEntry {
   contract: string;
   model: string | null;
   active: string | null; // active mode, or null/off
+  config?: Record<string, unknown>;
   sources: DeviceSource[];
+  /** Set when another resource's provider process serves this device (e.g. the
+   *  arm's IO bank as a dio device): follows the host's source, not switchable. */
+  provided_by?: string;
 }
 
 export interface DevicesList {
   t: WireTimestamp;
   node: string;
   devices: DeviceEntry[];
+}
+
+export interface ProducerGrant {
+  client_id: string;
+  user: string;
+  authority_id: string;
+  epoch: number;
+  granted_at: WireTimestamp;
+  expires_at: WireTimestamp;
+}
+
+export interface ProducerOwnerState {
+  t: WireTimestamp;
+  owner: ProducerGrant | null;
+}
+
+export interface ProducerAck {
+  ok: boolean;
+  owner: ProducerGrant | null;
+  error: string | null;
+}
+
+export interface ProducerDemand {
+  t: WireTimestamp;
+  stream: {
+    rate_hz: number;
+    scale: number;
+    roi: number[] | null;
+    encoding: string;
+    quality: number;
+  } | null;
+  intrinsics: { w: number; h: number; fx: number; fy: number };
+  mount_xyz: number[];
+  mount_rpy_deg: number[];
+  exposure_us: number;
+  gain_db: number;
 }
 
 /** supervisor/cmd/set_source reply: `{ok, device_id?, source?, error?}`. */

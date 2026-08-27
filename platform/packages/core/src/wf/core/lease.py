@@ -13,6 +13,84 @@ import threading
 from .time import now_ns
 
 
+
+class FencedLease:
+    """Exclusive lease whose fresh grants carry a monotonically increasing epoch.
+
+    ``authority_id`` identifies this lease-manager process. A publisher must
+    present all three fields returned by :meth:`acquire` — client, authority,
+    and epoch — so work issued before expiry or a process restart is rejected.
+    Renewal by the current holder extends expiry without changing the epoch.
+    """
+
+    def __init__(self, ttl_s: float = 10.0, authority_id: str | None = None):
+        import uuid
+
+        self._ttl_ns = int(ttl_s * 1e9)
+        self._authority_id = authority_id or str(uuid.uuid4())
+        self._lock = threading.Lock()
+        self._owner: dict | None = None
+        self._epoch = 0
+
+    def _expired(self, owner: dict, now: int) -> bool:
+        return now >= owner["expires_at"]
+
+    def acquire(self, client_id: str, user: str) -> tuple[dict | None, str | None]:
+        now = now_ns()
+        with self._lock:
+            cur = self._owner
+            if cur is not None and not self._expired(cur, now):
+                if cur["client_id"] != client_id:
+                    return None, f"held_by:{cur['user']}"
+                cur = {**cur, "user": user, "expires_at": now + self._ttl_ns}
+                self._owner = cur
+                return dict(cur), None
+            self._epoch += 1
+            owner = {
+                "client_id": client_id,
+                "user": user,
+                "authority_id": self._authority_id,
+                "epoch": self._epoch,
+                "granted_at": now,
+                "expires_at": now + self._ttl_ns,
+            }
+            self._owner = owner
+            return dict(owner), None
+
+    def release(self, client_id: str) -> bool:
+        with self._lock:
+            cur = self._owner
+            if cur is not None and cur["client_id"] == client_id:
+                self._owner = None
+                return True
+            return False
+
+    def owner(self) -> dict | None:
+        now = now_ns()
+        with self._lock:
+            cur = self._owner
+            if cur is None:
+                return None
+            if self._expired(cur, now):
+                self._owner = None
+                return None
+            return dict(cur)
+
+    def holds(self, client_id: str, authority_id: str, epoch: int) -> bool:
+        now = now_ns()
+        with self._lock:
+            cur = self._owner
+            if cur is None:
+                return False
+            if self._expired(cur, now):
+                self._owner = None
+                return False
+            return (
+                cur["client_id"] == client_id
+                and cur["authority_id"] == authority_id
+                and cur["epoch"] == epoch
+            )
+
 class ControlLease:
     """Thread-safe exclusive lease keyed by ``client_id``.
 

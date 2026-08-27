@@ -1,15 +1,14 @@
 [project]
 name = "wf-services-supervisor"
 version = "0.1.0"
-description = "WF supervisor: cell bring-up + sole flow interpreter (role->resource resolution)"
+description = "WF supervisor: cell bring-up and runtime device source management"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "wf-core",
     "wf-contracts-supervisor",
-    "wf-contracts-task",
-    "wf-contracts-vision",
-    "wf-services-task-runner",
-    "wf-services-vision",
+    "wf-contracts-control",
+    "wf-contracts-dio",
+    "wf-contracts-tags",
     "pyyaml",
 ]
 

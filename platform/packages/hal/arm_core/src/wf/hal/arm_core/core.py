@@ -3,7 +3,7 @@
 ``ArmCore`` serves the entire ``arm`` contract for one logical device against a
 pluggable :class:`~wf.hal.arm_core.backend.ArmBackend`. It owns the zenoh
 endpoints (state publishers, cmd queryables, jog subscriber, execute_path
-action), the control lease, the active-TCP cache, and the twin (URDF FK,
+action), the cell-lease check, the active-TCP cache, and the twin (URDF FK,
 collision model, live frame tree + scene). The backend produces robot state and
 executes motion; the core does everything else identically for sim and hardware.
 
@@ -22,11 +22,7 @@ import numpy as np
 from wf.contracts.arm import keys
 from wf.contracts.arm.messages import (
     Ack,
-    AcquireControl,
     ArmStatus,
-    ControlAck,
-    ControlOwner,
-    ControlOwnerState,
     ExecutePathGoal,
     FlangeState,
     Freedom,
@@ -44,8 +40,9 @@ from wf.core.frames import (
     quaternion_to_rotation_matrix,
     rotation_matrix_to_quaternion,
 )
+from wf.contracts.control.watcher import LeaseWatcher
 from wf.core.frametree import FrameUnknown
-from wf.core.lease import ControlLease
+from wf.hal.dio_core import DioCore
 from wf.core.log import get_logger
 from wf.core.time import now_ns
 from wf.world_model.cartesian import (
@@ -67,12 +64,14 @@ from wf.world_model.trajectory import (
 )
 from wf.world_model.validate import (
     TCP_FLANGE,
+    fetch_disabled_pairs,
     fetch_tcp,
     resolve_goal,
     tcp_transform,
 )
 
 from .backend import ArmBackend
+from .io_device import ArmIoBackend
 
 _log = get_logger("wf.hal.arm_core")
 
@@ -84,10 +83,6 @@ def pose_from_transform(T: np.ndarray, frame: str) -> Pose:
         xyz=[float(v) for v in T[:3, 3]],
         quat=rotation_matrix_to_quaternion(T[:3, :3]),
     )
-
-
-def _owner_msg(owner_dict: dict | None) -> ControlOwner | None:
-    return None if owner_dict is None else ControlOwner.from_wire(owner_dict)
 
 
 class ArmCore:
@@ -147,11 +142,27 @@ class ArmCore:
         self._queryables: list = []
         self._jog_sub = None
 
-        # ── control lease ────────────────────────────────────────────────
-        self._lease = ControlLease(params.get("lease_ttl_s", 30.0))
-        self._pub_owner = session.declare_publisher(
-            keys.state_control_owner(realm, rid)
-        )
+        # ── cell-level control lease (checked, never granted here) ────────
+        self._lease = LeaseWatcher(session, realm)
+
+        # ── provided dio devices (the arm's IO bank as first-class devices) ─
+        # One HAL per robot, several contracts: each ``provides.<rid>`` entry
+        # of contract ``dio`` becomes a DioCore hosted in THIS process over an
+        # in-process ArmIoBackend fed by publish_io (see io_device.py).
+        self._io_devices: list[tuple[DioCore, ArmIoBackend]] = []
+        for io_rid, spec in (params.get("provides") or {}).items():
+            if not isinstance(spec, dict) or spec.get("contract") != "dio":
+                raise ValueError(f"bad_cell:provides.{io_rid} must be a dio device")
+            io_backend = ArmIoBackend(self, spec.get("layout"))
+            io_core = DioCore(
+                session,
+                realm,
+                io_rid,
+                {"channels": spec.get("channels") or {}, "poll_hz": spec.get("poll_hz", 20.0)},
+                io_backend,
+                lease=self._lease,
+            )
+            self._io_devices.append((io_core, io_backend))
 
         # ── hold-to-jog (state guarded by _jog_lock) ─────────────────────
         self._jog_vmax = params.get("jog_vmax", 0.5)
@@ -180,15 +191,10 @@ class ArmCore:
             self.session.declare_queryable(
                 keys.cmd_set_tcp(self.realm, self.rid), self._on_set_tcp
             ),
-            self.session.declare_queryable(
-                keys.cmd_acquire_control(self.realm, self.rid),
-                self._on_acquire_control,
-            ),
-            self.session.declare_queryable(
-                keys.cmd_release_control(self.realm, self.rid),
-                self._on_release_control,
-            ),
         ]
+        self._lease.start()
+        for io_core, _backend in self._io_devices:
+            io_core.start()
         self._jog_sub = self.session.declare_subscriber(
             keys.cmd_jog(self.realm, self.rid), self._on_jog
         )
@@ -196,7 +202,12 @@ class ArmCore:
             "execute_path", self._accept_execute_path, self._execute_path
         )
         self.backend.start(self)
-        _log.info("arm core up: realm=%s rid=%s", self.realm, self.rid)
+        _log.info(
+            "arm core up: realm=%s rid=%s provides=%s",
+            self.realm,
+            self.rid,
+            [c.rid for c, _b in self._io_devices] or "-",
+        )
 
     def run_forever(self) -> None:
         try:
@@ -214,6 +225,9 @@ class ArmCore:
         except Exception:
             _log.exception("backend shutdown failed")
         self.action_server.close()
+        for io_core, _backend in self._io_devices:
+            io_core.shutdown()
+        self._lease.close()
         for sub in (*self._queryables, self._jog_sub, self._frames_sub, self._scene_sub):
             if sub is not None:
                 try:
@@ -277,6 +291,8 @@ class ArmCore:
                 IoState(t=t or now_ns(), di=di, do_=do_, ai=ai, ao=ao).to_wire()
             )
         )
+        for _core, io_backend in self._io_devices:
+            io_backend.on_io(di, do_, ai, ao)
 
     def publish_status(
         self,
@@ -368,43 +384,6 @@ class ArmCore:
                 return
             with self._tcp_lock:
                 self._active_tcp = (name, tcp_transform(tcp_def))
-            query.reply(key, encode(Ack(ok=True).to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(Ack(ok=False, error=repr(exc)).to_wire()))
-
-    # ── control lease ──────────────────────────────────────────────────────
-
-    def publish_owner(self) -> None:
-        try:
-            self._pub_owner.put(
-                encode(
-                    ControlOwnerState(
-                        t=now_ns(), owner=_owner_msg(self._lease.owner())
-                    ).to_wire()
-                )
-            )
-        except Exception as exc:
-            _log.warning("publish control_owner failed: %r", exc)
-
-    def _on_acquire_control(self, query) -> None:
-        key = str(query.key_expr)
-        try:
-            req = AcquireControl.from_wire(decode(query.payload))
-            owner, err = self._lease.acquire(req.client_id, req.user)
-            if err is None:
-                self.publish_owner()
-            owner_dict = owner if owner is not None else self._lease.owner()
-            ack = ControlAck(ok=err is None, owner=_owner_msg(owner_dict), error=err)
-            query.reply(key, encode(ack.to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(ControlAck(ok=False, error=repr(exc)).to_wire()))
-
-    def _on_release_control(self, query) -> None:
-        key = str(query.key_expr)
-        try:
-            cid = decode(query.payload).get("client_id")
-            self._lease.release(cid)
-            self.publish_owner()
             query.reply(key, encode(Ack(ok=True).to_wire()))
         except Exception as exc:
             query.reply(key, encode(Ack(ok=False, error=repr(exc)).to_wire()))
@@ -503,6 +482,15 @@ class ArmCore:
         with self._jog_lock:
             return self._jog_active
 
+    def _refresh_collision_exceptions(self) -> None:
+        """Pick up operator-declared collision exceptions (SRDF-style
+        ``disable_collisions``) from the config store; a failed fetch keeps
+        the last good set."""
+        try:
+            self.collision.set_disabled_pairs(fetch_disabled_pairs(self.session, self.rid, timeout_s=1.0))
+        except Exception:
+            _log.debug("collision exceptions refresh failed", exc_info=True)
+
     # ── execute_path action ──────────────────────────────────────────────
 
     def _accept_execute_path(self, goal: dict) -> str | None:
@@ -522,6 +510,7 @@ class ArmCore:
         # the last good layer.
         self._live_frames.refresh_static(self.session)
         self._live_scene.refresh_static(self.session)
+        self._refresh_collision_exceptions()
         tree = self._live_frames.snapshot()
         with self._tcp_lock:
             tcp_name, tcp_T = self._active_tcp
