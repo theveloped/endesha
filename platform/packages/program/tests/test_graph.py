@@ -61,6 +61,53 @@ def test_graph_of_a_small_program():
     assert Tiny.describe()["graph"] == g
 
 
+class Twin(Program):
+    """two concurrent regions inside a parallel state"""
+
+    program_name = "twin"
+
+    heating = State(initial=True)
+    heated = State(final=True)
+    moving = State(initial=True)
+    parked = State(final=True)
+    region_a = State(states=[heating, heated])
+    region_b = State(states=[moving, parked])
+    work = State(initial=True, parallel=True, states=[region_a, region_b])
+    done = State(final=True)
+
+    hot = heating.to(heated)
+    park = moving.to(parked)
+    finish = work.to(done)
+
+
+def test_graph_recurses_into_parallel_regions():
+    g = build_graph(Twin)
+    by = {s["id"]: s for s in g["states"]}
+    assert set(by) == {"work", "done", "region_a", "region_b", "heating", "heated", "moving", "parked"}
+    assert by["work"]["kind"] == "parallel" and by["work"]["parent"] is None
+    assert by["region_a"]["kind"] == "compound" and by["region_a"]["parent"] == "work"
+    assert by["heating"]["parent"] == "region_a" and by["heating"]["initial"]
+    assert by["parked"]["parent"] == "region_b" and by["parked"]["final"]
+    edges = {(t["source"], t["target"], t["event"]) for t in g["transitions"]}
+    assert {("heating", "heated", "hot"), ("moving", "parked", "park"), ("work", "done", "finish")} <= edges
+    # the synthetic eventless enter-initial-child edges are not exported
+    assert all(t["event"] for t in g["transitions"])
+    # source anchors cover the nested states too
+    assert {"heating", "moving", "work", "region_a"} <= set(g["source"]["states"])
+    # runtime sanity: both regions are active at once and step independently
+    class _Rt:
+        def program_event(self, e, d): ...
+        def state_entered(self, p, s, e): ...
+        def state_exited(self, p, s, e): ...
+        def program_transition(self, p, s, t, e): ...
+        def log(self, m): ...
+
+    p = Twin({}, {}, _Rt())
+    assert {"heating", "moving"} <= set(p.active_state_ids)
+    p.send("hot")
+    assert {"heated", "moving"} <= set(p.active_state_ids)
+
+
 def test_shipped_programs_export_graphs():
     from wf.services.program_runner.discovery import discover  # noqa: PLC0415
 

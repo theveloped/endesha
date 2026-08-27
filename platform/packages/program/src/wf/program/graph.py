@@ -39,10 +39,21 @@ def _state_kind(state) -> str:
     return "atomic"
 
 
+def _all_states(states) -> list:
+    """Depth-first walk (parents before children) into compound/parallel
+    states; ``cls.states`` only lists the top level."""
+    out: list = []
+    for st in states:
+        out.append(st)
+        out.extend(_all_states(getattr(st, "states", None) or ()))
+    return out
+
+
 def build_graph(cls) -> dict[str, Any]:
     states: list[dict] = []
     transitions: list[dict] = []
-    for st in cls.states:
+    walked = _all_states(cls.states)
+    for st in walked:
         parent = getattr(st, "parent", None)
         states.append({
             "id": st.id,
@@ -51,10 +62,15 @@ def build_graph(cls) -> dict[str, Any]:
             "parent": getattr(parent, "id", None) if parent is not None else None,
             "kind": _state_kind(st),
         })
-    for st in cls.states:
+    for st in walked:
         for tr in st.transitions:
             targets = list(getattr(tr, "targets", None) or [tr.target])
             for tgt in targets:
+                # Skip the synthetic eventless edges that enter a compound
+                # state's initial child — the child's `initial` flag plus its
+                # `parent` already say this.
+                if not tr.event and getattr(tgt, "parent", None) is st:
+                    continue
                 cond: list[str] = []
                 unless: list[str] = []
                 for spec in getattr(tr, "cond", None) or ():
