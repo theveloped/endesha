@@ -335,22 +335,11 @@ function ProgramGraphInner({ graph, live, layout = null, compact = false, onLayo
 
   const [nodes, setNodes, onNodesChange] = useNodesState<StateNode>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<TransEdge>(initialEdges);
-  // Sync derived data (live overlay, layout) into the flow state; keep the
-  // user's in-progress drag positions.
-  const dragging = useRef(false);
-  useEffect(() => {
-    if (dragging.current) return;
-    setNodes((current) => {
-      const byId = new Map(current.map((n) => [n.id, n]));
-      return initialNodes.map((n) => {
-        const prev = byId.get(n.id);
-        return prev && layout?.positions[n.id] === undefined && prev.position ? { ...n, position: prev.position } : n;
-      });
-    });
-  }, [initialNodes, setNodes, layout]);
-  useEffect(() => {
-    setEdges(initialEdges);
-  }, [initialEdges, setEdges]);
+  // Node identity is precious: React Flow keeps measured dimensions, selection
+  // and the drag state on the node objects. Replace them wholesale only when
+  // the graph itself changes (new program, rankdir flip) — every other update
+  // (live overlay, layout echo from our own save) merges `data` into the
+  // existing objects so nothing flickers and drag positions survive.
   const lastKey = useRef<string | null>(null);
   useEffect(() => {
     if (lastKey.current === graphKey) return;
@@ -359,15 +348,48 @@ function ProgramGraphInner({ graph, live, layout = null, compact = false, onLayo
     const t = setTimeout(() => void fitView({ padding: 0.15, duration: 200 }), 30);
     return () => clearTimeout(t);
   }, [graphKey, initialNodes, setNodes, fitView]);
+  useEffect(() => {
+    setNodes((current) => {
+      const byId = new Map(initialNodes.map((n) => [n.id, n]));
+      return current.map((n) => {
+        const next = byId.get(n.id);
+        return next === undefined ? n : { ...n, data: next.data, draggable: next.draggable };
+      });
+    });
+  }, [initialNodes, setNodes]);
+  // Saved positions usually arrive from the store after the initial render:
+  // merge them into the existing objects (position only, so nothing is
+  // re-measured), but never while the user is dragging.
+  const dragging = useRef(false);
+  useEffect(() => {
+    if (layout === null || dragging.current) return;
+    setNodes((current) =>
+      current.map((n) => {
+        const saved = layout.positions[n.id];
+        if (saved === undefined || (n.position.x === saved[0] && n.position.y === saved[1])) return n;
+        return { ...n, position: { x: saved[0], y: saved[1] } };
+      }),
+    );
+  }, [layout, setNodes]);
+  useEffect(() => {
+    setEdges(initialEdges);
+  }, [initialEdges, setEdges]);
 
+  // Snapshot the whole arrangement (not only the moved nodes) so the saved
+  // layout is always complete and never merges against a stale copy.
+  const nodesRef = useRef(nodes);
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
   const persist = useCallback(
     (moved: StateNode[]) => {
       if (onLayoutChange === undefined) return;
-      const positions: Record<string, [number, number]> = { ...(layout?.positions ?? {}) };
+      const positions: Record<string, [number, number]> = {};
+      for (const n of nodesRef.current) positions[n.id] = [Math.round(n.position.x), Math.round(n.position.y)];
       for (const n of moved) positions[n.id] = [Math.round(n.position.x), Math.round(n.position.y)];
       onLayoutChange({ positions });
     },
-    [layout, onLayoutChange],
+    [onLayoutChange],
   );
 
   const [showHelp, setShowHelp] = useState(false);
