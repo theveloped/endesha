@@ -385,7 +385,9 @@ turn the existing platform into something an agent can *operate*; they are worth
 doing regardless of how far the rest goes.
 
 **1. Make the cell legible headlessly.** `wf.core.events.emit_event()` →
-`{realm}/events` (design v5 §4.6), adopted in control acquire/release, program
+`{realm}/events` — specified in detail in `event-ledger-rfc.md` (the record
+schema, the durable ledger, retention, and how an incident becomes a regression
+test); adopted in control acquire/release, program
 load/start/complete/abort, supervisor spawn/exit, safety stop, config write,
 source switch, recording mark. `QueryAudit` on the remaining queryables (camera2d,
 washer, recorder) and capture every reply, not just the first. New `wfctl`
