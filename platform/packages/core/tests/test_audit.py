@@ -55,6 +55,29 @@ def test_audit_echoes_query_and_reply(linked):
     queryable.undeclare()
 
 
+def test_audit_key_serves_history(linked):
+    """The audit key is queryable: late joiners get the ring of past echoes."""
+    server, client = linked
+    audit = QueryAudit(server, "cellx", "hist", maxlen=3)
+
+    def handler(query):
+        query.reply(str(query.key_expr), encode({"ok": True}))
+
+    queryable = server.declare_queryable("cellx/hist/cmd", audit.wrap(handler))
+    time.sleep(0.3)
+    for i in range(5):
+        _first_reply(client.get("cellx/hist/cmd", payload=encode({"n": i}), timeout=5.0))
+    time.sleep(0.2)
+
+    history = _first_reply(client.get(audit_key("cellx", "hist"), timeout=5.0))
+    assert history is not None
+    records = history["records"]
+    assert [r["request"]["n"] for r in records] == [2, 3, 4]  # ring keeps the last 3
+    assert all(r["service"] == "hist" and r["ok"] is True for r in records)
+    audit.close()
+    queryable.undeclare()
+
+
 def test_audit_marks_handler_errors(linked):
     server, client = linked
     audit = QueryAudit(server, "cellx", "boom")

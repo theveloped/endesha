@@ -139,9 +139,8 @@ class ArmCore:
         self._pub_io = session.declare_publisher(keys.state_io(realm, rid))
         self._pub_status = session.declare_publisher(keys.state_status(realm, rid))
 
-        self.action_server = ActionServer(
-            session, keys.action_prefix(realm, rid), audit=QueryAudit(session, realm, f"arm:{rid}")
-        )
+        self._audit = QueryAudit(session, realm, f"arm:{rid}")
+        self.action_server = ActionServer(session, keys.action_prefix(realm, rid), audit=self._audit)
         self._queryables: list = []
         self._jog_sub = None
 
@@ -182,17 +181,17 @@ class ArmCore:
     def start(self) -> None:
         self._queryables = [
             self.session.declare_queryable(
-                keys.cmd_set_do(self.realm, self.rid), self._on_set_do
+                keys.cmd_set_do(self.realm, self.rid), self._audit.wrap(self._on_set_do)
             ),
             self.session.declare_queryable(
-                keys.cmd_stop(self.realm, self.rid), self._on_stop
+                keys.cmd_stop(self.realm, self.rid), self._audit.wrap(self._on_stop)
             ),
             self.session.declare_queryable(
                 keys.cmd_clear_protective_stop(self.realm, self.rid),
-                self._on_clear_protective_stop,
+                self._audit.wrap(self._on_clear_protective_stop),
             ),
             self.session.declare_queryable(
-                keys.cmd_set_tcp(self.realm, self.rid), self._on_set_tcp
+                keys.cmd_set_tcp(self.realm, self.rid), self._audit.wrap(self._on_set_tcp)
             ),
         ]
         self._lease.start()

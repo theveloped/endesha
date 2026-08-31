@@ -14,13 +14,17 @@ Usage — instead of ``session.declare_queryable(key, handler)``::
     session.declare_queryable(key, audit.wrap(handler))
 
 The wrapper is failure-proof: audit errors never disturb the handler, and
-oversized request/reply values are truncated in the echo.
+oversized request/reply values are truncated in the echo. The audit key is
+also queryable — ``{records: [...]}``, the last ``maxlen`` echoes — so a
+late-joining viewer (the Queries page) starts with history.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import threading
+from collections import deque
 from typing import Callable
 
 import zenoh
@@ -80,12 +84,36 @@ class _RecordingQuery:
 
 
 class QueryAudit:
-    """Echoes handled queries of one service onto ``{realm}/audit/{service}``."""
+    """Echoes handled queries of one service onto ``{realm}/audit/{service}``
+    and serves the last ``maxlen`` echoes to queries on the same key."""
 
-    def __init__(self, session: zenoh.Session, realm: str, service: str) -> None:
+    def __init__(self, session: zenoh.Session, realm: str, service: str, *, maxlen: int = 200) -> None:
         self._session = session
         self._key = audit_key(realm, service)
         self._service = service
+        self._lock = threading.Lock()
+        self._ring: deque = deque(maxlen=maxlen)
+        self._queryable = None
+        try:
+            self._queryable = session.declare_queryable(self._key, self._on_history_query)
+        except Exception:  # noqa: BLE001
+            _log.debug("audit history queryable failed", exc_info=True)
+
+    def close(self) -> None:
+        if self._queryable is not None:
+            try:
+                self._queryable.undeclare()
+            except Exception:  # noqa: BLE001
+                pass
+            self._queryable = None
+
+    def _on_history_query(self, query: zenoh.Query) -> None:
+        with self._lock:
+            records = list(self._ring)
+        try:
+            query.reply(self._key, encode({"records": records}))
+        except Exception:  # noqa: BLE001
+            _log.debug("audit history reply failed", exc_info=True)
 
     def wrap(self, handler: Callable[[zenoh.Query], None]) -> Callable[[zenoh.Query], None]:
         def wrapped(query: zenoh.Query) -> None:
@@ -128,4 +156,6 @@ class QueryAudit:
             "error": error,
             "duration_ms": (now_ns() - t0) / 1e6,
         }
+        with self._lock:
+            self._ring.append(record)
         self._session.put(self._key, encode(record))

@@ -11,7 +11,7 @@ import { Badge } from "../catalyst/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { subscribeLatest, type Unsubscribe } from "../lib/bus";
+import { queryAll, subscribeLatest, type Unsubscribe } from "../lib/bus";
 import { auditGlob } from "../lib/config";
 import type { AuditRecord } from "../lib/messages";
 
@@ -20,6 +20,11 @@ const MAX_RECORDS = 1000;
 interface Row extends AuditRecord {
   id: number;
   tMs: number;
+}
+
+/** Identity of an echo across the live stream and the history ring. */
+function rowKey(r: AuditRecord): string {
+  return `${String(r.t)}:${r.service}:${r.key}`;
 }
 
 function formatClock(value: number): string {
@@ -86,8 +91,28 @@ export default function QueriesPage({
         },
         128,
       );
-      if (disposed) next();
-      else unsub = next;
+      if (disposed) {
+        next();
+        return;
+      }
+      unsub = next;
+      // Late joiner: every service's ring of past echoes (the audit keys are
+      // queryable), merged under the live rows that may already have arrived.
+      const rings = await queryAll(session, auditGlob(realm));
+      if (disposed) return;
+      const past: AuditRecord[] = [];
+      for (const ring of rings) {
+        past.push(...(((ring.value as { records?: AuditRecord[] }).records ?? []) as AuditRecord[]));
+      }
+      if (past.length === 0) return;
+      setRows((current) => {
+        const seen = new Set(current.map(rowKey));
+        const fresh = past
+          .filter((r) => !seen.has(rowKey(r)))
+          .map((r): Row => ({ ...r, id: ++sequence.current, tMs: Number(r.t) / 1e6 }));
+        const merged = [...fresh, ...current].sort((a, b) => a.tMs - b.tMs);
+        return merged.length > MAX_RECORDS ? merged.slice(-MAX_RECORDS) : merged;
+      });
     })();
     return () => {
       disposed = true;
@@ -179,7 +204,7 @@ export default function QueriesPage({
           {visible.length === 0 ? (
             <div className="flex h-full items-center justify-center p-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
               {wsConnected
-                ? "No command queries observed yet — send one (load a program, set an output, save a pose) and it appears here."
+                ? "No command queries yet. Commands show up here as services handle them: control lease acquire/release, arm STOP / moves / set TCP, IO set/force, program load/start/save, config set/delete, source switches. Reads and state polls are not audited."
                 : "Connect to the bridge to observe command queries."}
             </div>
           ) : (
