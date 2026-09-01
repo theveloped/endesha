@@ -406,12 +406,6 @@ export interface AcquireControl {
   user: string;
 }
 
-export interface ControlAck {
-  ok: boolean;
-  owner: ControlOwner | null;
-  error: string | null;
-}
-
 // Config store value shapes (wf/services/config/store.py). Served values
 // are flat: the stored payload merged with service-stamped revision/t.
 

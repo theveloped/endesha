@@ -15,7 +15,7 @@ import pytest
 
 from wf.contracts.control import keys as control_keys
 from wf.contracts.control.authority import ControlAuthority
-from wf.contracts.control.messages import AcquireControl
+from wf.core.envelope import request as envelope_request
 from wf.contracts.washer import keys
 from wf.contracts.washer.messages import RecipeReply, WasherStatus
 from wf.core.action import ActionClient
@@ -145,7 +145,8 @@ def test_live_handshake_against_opcua_server():
     try:
         core.start()
         assert _wait(lambda: backend.connected, timeout_s=15.0), "never connected"
-        _query(session, control_keys.cmd_acquire(realm), AcquireControl("op", "alice").to_wire())
+        envelope_request(session, control_keys.cmd_acquire(realm),
+                         {"user": "alice"}, client_id="op")
         assert _wait(lambda: core._lease.holds("op"))
 
         def status() -> WasherStatus:

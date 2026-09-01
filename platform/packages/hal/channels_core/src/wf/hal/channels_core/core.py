@@ -22,7 +22,7 @@ import yaml
 from wf.contracts.control.watcher import LeaseWatcher
 from wf.core.audit import QueryAudit
 from wf.core.codec import encode
-from wf.core.envelope import RecentReplies, Request, fail, ok_value, parse_request
+from wf.core.envelope import RecentReplies, Request, fail, ok_value, serve_query
 from wf.core.log import get_logger
 from wf.core.time import now_ns
 
@@ -324,31 +324,14 @@ class ChannelsCore:
     # Replies are the wire-contract envelope; the state query is a retained
     # read and answers with the identical published payload (unenveloped).
 
-    def _reply(self, query, wire: dict) -> None:
-        query.reply(str(query.key_expr), encode(wire))
-
     def _on_state_query(self, query) -> None:
         query.reply(str(query.key_expr), encode(self.snapshot_wire()))
 
-    def _serve(self, query, op) -> None:
-        """Envelope boilerplate: parse the request, serve idempotent
-        resubmissions from the recent-replies ring, reply the op's wire."""
-        try:
-            req = parse_request(query)
-        except Exception as exc:  # noqa: BLE001
-            self._reply(query, fail("invalid", "bad_request", repr(exc)))
-            return
-        wire = self._recent.get(req.req_id)
-        if wire is None:
-            wire = op(req)
-            self._recent.put(req.req_id, wire)
-        self._reply(query, wire)
-
     def _on_set(self, query) -> None:
-        self._serve(query, self._do_set)
+        serve_query(query, self._do_set, recent=self._recent)
 
     def _on_force(self, query) -> None:
-        self._serve(query, self._do_force)
+        serve_query(query, self._do_force, recent=self._recent)
 
     def _do_set(self, req: Request) -> dict:
         try:

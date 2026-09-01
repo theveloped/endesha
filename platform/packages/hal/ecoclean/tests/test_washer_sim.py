@@ -11,7 +11,6 @@ import pytest
 
 from wf.contracts.control import keys as control_keys
 from wf.contracts.control.authority import ControlAuthority
-from wf.contracts.control.messages import AcquireControl
 from wf.contracts.tags import keys as tags_keys
 from wf.contracts.tags.messages import ForceTag, TagsState
 from wf.core.envelope import request as envelope_request
@@ -61,7 +60,8 @@ class Rig:
         self.backend = EcocleanSimBackend(params)
         self.core = WasherCore(self.session, self.realm, "washer0", params, self.backend)
         self.core.start()
-        _query(self.session, control_keys.cmd_acquire(self.realm), AcquireControl("op", "alice").to_wire())
+        envelope_request(self.session, control_keys.cmd_acquire(self.realm),
+                         {"user": "alice"}, client_id="op")
         assert _wait(lambda: self.core._lease.holds("op"))
 
     def close(self):

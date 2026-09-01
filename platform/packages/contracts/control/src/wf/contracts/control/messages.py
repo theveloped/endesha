@@ -35,57 +35,25 @@ class ControlOwner:
 
 @dataclass
 class AcquireControl:
-    """``cmd/acquire`` request."""
+    """``cmd/acquire`` envelope ``args`` — the acquiring ``client_id``
+    travels top-level in the envelope request (wire-contract RFC §4.1).
+    ``cmd/release`` takes empty args (the ``client_id`` is the request's).
+    On success both reply ``value: ControlOwnerState``; a denied acquire is
+    ``conflict:held_by:<user>``, a release by a non-holder
+    ``conflict:not_holder``."""
 
-    client_id: str
     user: str
 
     def to_wire(self) -> dict:
-        return {"client_id": self.client_id, "user": self.user}
+        return {"user": self.user}
 
     @classmethod
     def from_wire(cls, d: dict) -> "AcquireControl":
-        return cls(client_id=d["client_id"], user=d["user"])
+        return cls(user=d["user"])
 
 
-@dataclass
-class ReleaseControl:
-    """``cmd/release`` request."""
-
-    client_id: str
-
-    def to_wire(self) -> dict:
-        return {"client_id": self.client_id}
-
-    @classmethod
-    def from_wire(cls, d: dict) -> "ReleaseControl":
-        return cls(client_id=d["client_id"])
-
-
-@dataclass
-class ControlAck:
-    """Reply payload for the lease queryables. ``owner`` is the holder after
-    the request (the requester on grant/renew; the blocking holder on denial)."""
-
-    ok: bool
-    owner: ControlOwner | None = None
-    error: str | None = None
-
-    def to_wire(self) -> dict:
-        return {
-            "ok": bool(self.ok),
-            "owner": None if self.owner is None else self.owner.to_wire(),
-            "error": self.error,
-        }
-
-    @classmethod
-    def from_wire(cls, d: dict) -> "ControlAck":
-        owner = d.get("owner")
-        return cls(
-            ok=d["ok"],
-            owner=None if owner is None else ControlOwner.from_wire(owner),
-            error=d.get("error"),
-        )
+#: Registered envelope error ``reason`` values (wire-contract RFC §5).
+ERROR_REASONS = ("bad_request", "held_by", "not_holder")
 
 
 @dataclass

@@ -90,7 +90,7 @@ envelope** (`wf.core.envelope` ↔ `web/src/lib/envelope.ts`): request
 recent-replies ring), reply `{ok, value|goal|error}` with the closed
 8-code error enum and per-contract registered reasons; field conventions
 in [wire-vocabulary.md](wire-vocabulary.md). Migration is
-contract-by-contract (seam #14) — dio and tags speak it today; the rest
+contract-by-contract (seam #14) — dio, tags and control speak it today; the rest
 still use their legacy dialects. Long-running operations use the
 **action pattern**
 ([core/action.py](../packages/core/src/wf/core/action.py)): goal queryable →
@@ -353,7 +353,7 @@ should either close it or consciously leave it.
 | 11 | `web/tests/` is empty; the CBOR wire gate and lint/tsc are the only web verification, and the gate is not in CI (no CI exists yet). | wants fixing eventually |
 | 12 | Web fallback constants when no host API answers: `CELL_NAME="dev-cell"`, `RID="r1"`, `CID="cam0"`. | accepted |
 | 13 | Orphaned `deploy/programs/__pycache__/ui_made_532*.pyc` from a deleted UI-authored program. | trivial cleanup |
-| 14 | Envelope migration ([ADR-0013](decisions/0013-reply-envelope.md)) in progress: **dio + tags** (shared `ChannelsCore`) speak it, with conformance enforcement on dio; `control`, `washer`, `program`, `camera2d`, `arm`, `config` still reply legacy dialects (their audit records show `ok: null` until migrated — no sniffing, no backcompat). | in progress, per RFC §9 |
+| 14 | Envelope migration ([ADR-0013](decisions/0013-reply-envelope.md)) in progress: **dio + tags** (shared `ChannelsCore`) and **control** speak it, with conformance enforcement on dio and control; `washer`, `program`, `camera2d`, `arm`, `config` still reply legacy dialects (their audit records show `ok: null` until migrated — no sniffing, no backcompat). | in progress, per RFC §9 |
 
 ## 13. Keeping this document honest
 

@@ -14,7 +14,6 @@ from wf.contracts.arm import keys as arm_keys
 from wf.contracts.arm.messages import IoState
 from wf.contracts.control import keys as control_keys
 from wf.contracts.control.authority import ControlAuthority
-from wf.contracts.control.messages import AcquireControl
 from wf.contracts.dio import keys as dio_keys
 from wf.contracts.dio.messages import ChannelsState, ForceChannel, SetChannel
 from wf.core.envelope import Reply, request as envelope_request
@@ -74,12 +73,8 @@ def test_arm_process_serves_dio_device(tmp_path):
     core = ArmCore(session, realm, "r1", params, SimArmBackend(HOME_Q))
     try:
         core.start()
-        # control still speaks its legacy dialect (envelope migration is per
-        # contract); acquire the lease with a plain query.
-        for _ in session.get(control_keys.cmd_acquire(realm),
-                             payload=encode(AcquireControl("op", "alice").to_wire()),
-                             timeout=3.0):
-            pass
+        envelope_request(session, control_keys.cmd_acquire(realm),
+                         {"user": "alice"}, client_id="op", timeout_s=3.0)
         assert _wait(lambda: core._lease.holds("op"))
 
         # Named channels + auto channels for every unmapped physical point.

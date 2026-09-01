@@ -39,7 +39,6 @@ import type {
   ProgramSaveReply,
   ProgramSourceReply,
   CancelReply,
-  ControlAck,
   GoalFeedback,
   GoalReply,
   GoalResult,
@@ -339,30 +338,23 @@ export async function programEvent(
   return reply as Ack;
 }
 
+// Control lease: envelope queryables (holds/owner state comes from the
+// retained state/owner key, not from these replies).
 export async function acquireControl(
   session: Session,
   realm: string,
   clientId: string,
   user: string,
-): Promise<ControlAck> {
-  const reply = await query(session, controlCmdAcquire(realm), {
-    client_id: clientId,
-    user,
-  });
-  if (reply === null) throw new Error("no reply from control/cmd/acquire");
-  return reply as ControlAck;
+): Promise<void> {
+  await call(session, controlCmdAcquire(realm), { user }, { clientId });
 }
 
 export async function releaseControl(
   session: Session,
   realm: string,
   clientId: string,
-): Promise<ControlAck> {
-  const reply = await query(session, controlCmdRelease(realm), {
-    client_id: clientId,
-  });
-  if (reply === null) throw new Error("no reply from control/cmd/release");
-  return reply as ControlAck;
+): Promise<void> {
+  await call(session, controlCmdRelease(realm), {}, { clientId });
 }
 
 export interface ConfigSetReply {

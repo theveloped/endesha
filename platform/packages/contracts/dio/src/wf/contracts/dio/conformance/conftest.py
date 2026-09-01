@@ -11,8 +11,8 @@ import pytest
 import zenoh
 
 from wf.contracts.control import keys as control_keys
-from wf.contracts.control.messages import AcquireControl, ControlAck
-from wf.core.codec import decode, encode
+from wf.core.codec import decode
+from wf.core.envelope import request as envelope_request
 
 
 @pytest.fixture(scope="session")
@@ -44,22 +44,15 @@ def session():
 def client_id(session, realm) -> str:
     """Hold the cell control lease for the whole suite."""
     cid = f"dio-conf-{uuid.uuid4().hex[:8]}"
-    ack = None
-    for reply in session.get(
-        control_keys.cmd_acquire(realm),
-        payload=encode(AcquireControl(client_id=cid, user="dio-conformance").to_wire()),
-        timeout=5.0,
-    ):
-        if reply.ok is not None:
-            ack = ControlAck.from_wire(decode(reply.ok.payload))
-    if ack is None:
+    reply = envelope_request(session, control_keys.cmd_acquire(realm),
+                             {"user": "dio-conformance"}, client_id=cid, timeout_s=5.0)
+    if not reply.ok and reply.error.reason == "no_reply":
         pytest.skip("no control authority on the bus")
-    if not ack.ok:
-        pytest.skip(f"control lease unavailable: {ack.error}")
+    if not reply.ok:
+        pytest.skip(f"control lease unavailable: {reply.error}")
     yield cid
-    session.get(
-        control_keys.cmd_release(realm), payload=encode({"client_id": cid}), timeout=5.0
-    )
+    envelope_request(session, control_keys.cmd_release(realm), {},
+                     client_id=cid, timeout_s=5.0)
 
 
 def collect_samples(session, key: str, *, duration_s: float, min_count: int = 0):

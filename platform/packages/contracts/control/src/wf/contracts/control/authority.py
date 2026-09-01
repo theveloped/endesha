@@ -12,13 +12,14 @@ from __future__ import annotations
 import threading
 
 from wf.core.audit import QueryAudit
-from wf.core.codec import decode, encode
+from wf.core.codec import encode
+from wf.core.envelope import RecentReplies, Request, fail, ok_value, serve_query
 from wf.core.lease import ControlLease
 from wf.core.log import get_logger
 from wf.core.time import now_ns
 
 from . import keys
-from .messages import AcquireControl, ControlAck, ControlOwner, ControlOwnerState
+from .messages import ControlOwner, ControlOwnerState
 
 _log = get_logger("wf.contracts.control.authority")
 _TICK_S = 1.0
@@ -33,6 +34,7 @@ class ControlAuthority:
         self.session = session
         self.realm = realm
         self._audit = QueryAudit(session, realm, "control")
+        self._recent = RecentReplies()
         self._lease = ControlLease(ttl_s)
         self._pub = session.declare_publisher(keys.state_owner(realm))
         self._queryables: list = []
@@ -86,33 +88,36 @@ class ControlAuthority:
     # ── queryables ───────────────────────────────────────────────────────
 
     def _on_acquire(self, query) -> None:
-        key = str(query.key_expr)
-        try:
-            req = AcquireControl.from_wire(decode(query.payload))
-            owner, err = self._lease.acquire(req.client_id, req.user)
-            if err is None:
-                self._publish()
-            holder = owner if owner is not None else self._lease.owner()
-            ack = ControlAck(ok=err is None, owner=_owner_msg(holder), error=err)
-            query.reply(key, encode(ack.to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(ControlAck(ok=False, error=repr(exc)).to_wire()))
+        serve_query(query, self._do_acquire, recent=self._recent)
 
     def _on_release(self, query) -> None:
-        key = str(query.key_expr)
-        try:
-            cid = decode(query.payload).get("client_id")
-            released = self._lease.release(cid)
-            if released:
-                self._publish()
-            ack = ControlAck(
-                ok=True,
-                owner=_owner_msg(self._lease.owner()),
-                error=None if released else "not_holder",
-            )
-            query.reply(key, encode(ack.to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(ControlAck(ok=False, error=repr(exc)).to_wire()))
+        serve_query(query, self._do_release, recent=self._recent)
+
+    def _do_acquire(self, req: Request) -> dict:
+        if req.client_id is None:
+            return fail("invalid", "bad_request", "client_id required")
+        user = req.args.get("user")
+        if not isinstance(user, str) or not user:
+            return fail("invalid", "bad_request", "user required")
+        owner, err = self._lease.acquire(req.client_id, user)
+        if err is not None:
+            # ControlLease reports "held_by:<user>"; the holder is readable
+            # on the retained state/owner key.
+            detail = err.split(":", 1)[1] if ":" in err else err
+            return fail("conflict", "held_by", detail)
+        self._publish()
+        return ok_value(ControlOwnerState(t=now_ns(), owner=_owner_msg(owner)).to_wire())
+
+    def _do_release(self, req: Request) -> dict:
+        if req.client_id is None:
+            return fail("invalid", "bad_request", "client_id required")
+        released = self._lease.release(req.client_id)
+        if not released:
+            return fail("conflict", "not_holder")
+        self._publish()
+        return ok_value(
+            ControlOwnerState(t=now_ns(), owner=_owner_msg(self._lease.owner())).to_wire()
+        )
 
     def _on_owner_query(self, query) -> None:
         query.reply(str(query.key_expr), encode(self._state().to_wire()))

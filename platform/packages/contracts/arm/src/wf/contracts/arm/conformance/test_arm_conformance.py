@@ -28,7 +28,8 @@ from wf.contracts.arm.messages import (
     Waypoint,
 )
 from wf.contracts.control import keys as control_keys
-from wf.contracts.control.messages import AcquireControl, ControlAck, ControlOwnerState
+from wf.contracts.control.messages import ControlOwnerState
+from wf.core.envelope import Reply, request as envelope_request
 from wf.core.action import ActionClient, ActionRejected
 from wf.core.codec import decode, encode
 
@@ -50,26 +51,19 @@ def _latest_q(session, realm: str, rid: str) -> list[float]:
     return joints.q
 
 
-def _acquire(session, realm, rid, client_id, user="conf") -> ControlAck:
+def _acquire(session, realm, rid, client_id, user="conf") -> Reply:
     # The lease is cell-level (``wf.contracts.control``); ``rid`` is unused but
     # kept so the helpers read like the rest of the suite.
-    replies = session.get(
-        control_keys.cmd_acquire(realm),
-        payload=encode(AcquireControl(client_id=client_id, user=user).to_wire()),
-        timeout=5.0,
-    )
-    for reply in replies:
-        if reply.ok is not None:
-            return ControlAck.from_wire(decode(reply.ok.payload))
-    pytest.fail("no reply from control/cmd/acquire")
+    reply = envelope_request(session, control_keys.cmd_acquire(realm),
+                             {"user": user}, client_id=client_id, timeout_s=5.0)
+    if not reply.ok and reply.error.reason == "no_reply":
+        pytest.fail("no reply from control/cmd/acquire")
+    return reply
 
 
 def _release(session, realm, rid, client_id) -> None:
-    session.get(
-        control_keys.cmd_release(realm),
-        payload=encode({"client_id": client_id}),
-        timeout=5.0,
-    )
+    envelope_request(session, control_keys.cmd_release(realm), {},
+                     client_id=client_id, timeout_s=5.0)
 
 
 @contextlib.contextmanager
@@ -310,7 +304,8 @@ def test_control_lease(session, realm, rid):
     cid_b = str(uuid.uuid4())
     ack_a = _acquire(session, realm, rid, cid_a, user="alice")
     assert ack_a.ok, ack_a.error
-    assert ack_a.owner is not None and ack_a.owner.user == "alice"
+    owner_a = ControlOwnerState.from_wire(ack_a.value).owner
+    assert owner_a is not None and owner_a.user == "alice"
     try:
         state = _wait_owner(
             session, realm, rid,
@@ -322,7 +317,7 @@ def test_control_lease(session, realm, rid):
         # A different client is refused while A holds the lease.
         ack_b = _acquire(session, realm, rid, cid_b, user="bob")
         assert ack_b.ok is False
-        assert ack_b.error.startswith("held_by:"), ack_b.error
+        assert ack_b.error.reason == "held_by", ack_b.error
     finally:
         _release(session, realm, rid, cid_a)
 

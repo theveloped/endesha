@@ -44,7 +44,7 @@ from wf.contracts.program.messages import Ack as ProgramAck
 from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, LogLine, ProgramState
 from wf.contracts.dio.messages import ForceChannel, SetChannel
 from wf.core.envelope import request as envelope_request
-from wf.contracts.control.messages import AcquireControl, ControlAck
+from wf.contracts.control.messages import ControlOwnerState
 from wf.contracts.camera2d.messages import Ack as CamAck
 from wf.contracts.camera2d.messages import GrabReply
 from wf.core.action import ActionClient, ActionRejected
@@ -199,24 +199,17 @@ def _pose_args_to_quat(args) -> list[float]:
     return [0.0, 0.0, 0.0, 1.0]
 
 
-def _acquire_lease(session, args, client_id: str, user: str = "wfctl") -> ControlAck:
+def _acquire_lease(session, args, client_id: str, user: str = "wfctl"):
     # Cell-level lease (one holder for every device), served by the supervisor.
-    reply = _query(
-        session,
-        control_keys.cmd_acquire(args.realm),
-        AcquireControl(client_id=client_id, user=user).to_wire(),
-    )
-    if reply is None:
-        return ControlAck(ok=False, error="no_reply")
-    return ControlAck.from_wire(reply)
+    # Envelope reply: value = ControlOwnerState on grant/renew.
+    return envelope_request(session, control_keys.cmd_acquire(args.realm),
+                            {"user": user}, client_id=client_id)
 
 
 def _release_lease(session, args, client_id: str) -> None:
-    _query(
-        session,
-        control_keys.cmd_release(args.realm),
-        {"client_id": client_id},
-    )
+    # Best-effort; conflict:not_holder after expiry is fine.
+    envelope_request(session, control_keys.cmd_release(args.realm),
+                     {}, client_id=client_id)
 
 
 def _send_goal(session, args, waypoints: list[Waypoint]) -> int:
@@ -759,30 +752,22 @@ def cmd_dio_force(session, args) -> int:
 
 def cmd_acquire_control(session, args) -> int:
     cid = args.client_id or str(uuid.uuid4())
-    ack = _acquire_lease(session, args, cid, user=args.user)
-    if ack.ok:
+    reply = _acquire_lease(session, args, cid, user=args.user)
+    if reply.ok:
+        owner = ControlOwnerState.from_wire(reply.value).owner
         print(f"client_id={cid}")
-        if ack.owner is not None:
-            print(f"granted to {ack.owner.user} (expires_at={ack.owner.expires_at})")
+        if owner is not None:
+            print(f"granted to {owner.user} (expires_at={owner.expires_at})")
         return 0
-    print(f"denied: {ack.error}", file=sys.stderr)
-    if ack.owner is not None:
-        print(f"held by {ack.owner.user}", file=sys.stderr)
+    print(f"denied: {reply.error}", file=sys.stderr)
     return 1
 
 
 def cmd_release_control(session, args) -> int:
-    reply = _query(
-        session,
-        control_keys.cmd_release(args.realm),
-        {"client_id": args.client_id},
-    )
-    if reply is None:
-        print("no reply from control/cmd/release", file=sys.stderr)
-        return 1
-    ack = ControlAck.from_wire(reply)
-    print("released" if ack.ok else f"error: {ack.error}")
-    return 0 if ack.ok else 1
+    reply = envelope_request(session, control_keys.cmd_release(args.realm),
+                             {}, client_id=args.client_id)
+    print("released" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_jog(session, args) -> int:

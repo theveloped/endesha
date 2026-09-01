@@ -47,7 +47,7 @@ import zenoh
 from wf.contracts.arm import keys as arm_keys
 from wf.contracts.arm.messages import ArmStatus
 from wf.contracts.control import keys as control_keys
-from wf.contracts.control.messages import AcquireControl, ControlAck
+from wf.core.envelope import request as envelope_request
 from wf.contracts.program import keys
 from wf.contracts.program.keys import UNIT_COMMANDS
 from wf.contracts.program.messages import (
@@ -789,24 +789,25 @@ class ProgramRunner:
     def _acquire_lease(self) -> str | None:
         assert self._client_id is not None
         try:
-            for reply in self.session.get(
+            reply = envelope_request(
+                self.session,
                 control_keys.cmd_acquire(self.realm),
-                payload=encode(AcquireControl(client_id=self._client_id, user=f"program:{self._loaded.name}").to_wire()),
-                timeout=3.0,
-            ):
-                if reply.ok is not None:
-                    ack = ControlAck.from_wire(decode(reply.ok.payload))
-                    return None if ack.ok else (ack.error or "lease_denied")
+                {"user": f"program:{self._loaded.name}"},
+                client_id=self._client_id,
+                timeout_s=3.0,
+            )
         except Exception as exc:  # noqa: BLE001
             return f"lease_error:{exc!r}"
-        return "lease_no_authority"
+        return None if reply.ok else str(reply.error)
 
     def _release_lease(self) -> None:
         cid = self._client_id
         if cid is None:
             return
         try:
-            self.session.get(control_keys.cmd_release(self.realm), payload=encode({"client_id": cid}), timeout=2.0)
+            # Best-effort: conflict:not_holder after expiry is fine.
+            envelope_request(self.session, control_keys.cmd_release(self.realm),
+                             {}, client_id=cid, timeout_s=2.0)
         except Exception:
             _log.debug("lease release failed", exc_info=True)
 

@@ -224,6 +224,30 @@ class RecentReplies:
             self._replies[req_id] = reply
 
 
+def serve_query(query, op, *, recent: RecentReplies | None = None) -> None:
+    """Server boilerplate for one envelope queryable: parse the request,
+    serve idempotent resubmissions from ``recent``, reply with ``op(req)``'s
+    envelope wire. An unparsable request is answered ``invalid:bad_request``;
+    an exception out of ``op`` is answered ``internal:handler_failed`` and
+    re-raised so an audit wrapper records it."""
+    key = str(query.key_expr)
+    try:
+        req = parse_request(query)
+    except Exception as exc:  # noqa: BLE001
+        query.reply(key, encode(fail("invalid", "bad_request", repr(exc))))
+        return
+    wire = recent.get(req.req_id) if recent is not None else None
+    if wire is None:
+        try:
+            wire = op(req)
+        except Exception as exc:  # noqa: BLE001
+            query.reply(key, encode(fail("internal", "handler_failed", repr(exc))))
+            raise
+        if recent is not None:
+            recent.put(req.req_id, wire)
+    query.reply(key, encode(wire))
+
+
 # ── client side ──────────────────────────────────────────────────────────
 
 

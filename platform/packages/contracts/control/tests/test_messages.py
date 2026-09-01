@@ -7,10 +7,8 @@ import pytest
 from wf.contracts.control import keys
 from wf.contracts.control.messages import (
     AcquireControl,
-    ControlAck,
     ControlOwner,
     ControlOwnerState,
-    ReleaseControl,
 )
 
 OWNER = ControlOwner(client_id="c1", user="me", granted_at=10, expires_at=40)
@@ -19,10 +17,8 @@ OWNER = ControlOwner(client_id="c1", user="me", granted_at=10, expires_at=40)
 @pytest.mark.parametrize(
     "msg",
     [
-        AcquireControl(client_id="c1", user="me"),
-        ReleaseControl(client_id="c1"),
-        ControlAck(ok=True, owner=OWNER, error=None),
-        ControlAck(ok=False, owner=None, error="held_by:bob"),
+        AcquireControl(user="me"),
+        ControlOwner(client_id="c1", user="me", granted_at=10, expires_at=40),
         ControlOwnerState(t=7, owner=OWNER),
         ControlOwnerState(t=8, owner=None),
     ],

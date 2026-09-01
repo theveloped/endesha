@@ -10,7 +10,6 @@ import pytest
 
 from wf.contracts.control import keys as control_keys
 from wf.contracts.control.authority import ControlAuthority
-from wf.contracts.control.messages import AcquireControl
 from wf.contracts.dio import keys
 from wf.contracts.dio.messages import ChannelsState, ForceChannel, SetChannel
 from wf.core.envelope import Reply, request as envelope_request
@@ -77,12 +76,8 @@ def stack():
     backend = FakeBackend()
     core = DioCore(session, realm, "io0", {"channels": CHANNELS, "poll_hz": 50}, backend)
     core.start()
-    # control still speaks its legacy dialect (envelope migration is per
-    # contract); acquire the lease with a plain query.
-    for _ in session.get(control_keys.cmd_acquire(realm),
-                         payload=encode(AcquireControl("op", "alice").to_wire()),
-                         timeout=3.0):
-        pass
+    envelope_request(session, control_keys.cmd_acquire(realm),
+                     {"user": "alice"}, client_id="op", timeout_s=3.0)
     assert _wait(lambda: core._lease.holds("op"))
     yield session, realm, core, backend
     core.shutdown()
