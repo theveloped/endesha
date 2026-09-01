@@ -153,14 +153,13 @@ function DioDeviceCard({
     };
   }, [session, realm, device.id, device.active]);
 
-  const run = async (label: string, fn: () => Promise<{ ok: boolean; error: string | null }>) => {
+  const run = async (label: string, fn: () => Promise<void>) => {
     if (session === null) return;
     setError(null);
     try {
-      const ack = await fn();
-      if (!ack.ok) setError(`${label}: ${ack.error ?? "failed"}`);
+      await fn();
     } catch (e) {
-      setError(`${label}: ${String(e)}`);
+      setError(`${label}: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
@@ -391,14 +390,13 @@ function TagsDeviceCard({
     };
   }, [session, realm, device.id, device.active]);
 
-  const run = async (label: string, fn: () => Promise<{ ok: boolean; error: string | null }>) => {
+  const run = async (label: string, fn: () => Promise<void>) => {
     if (session === null) return;
     setError(null);
     try {
-      const ack = await fn();
-      if (!ack.ok) setError(`${label}: ${ack.error ?? "failed"}`);
+      await fn();
     } catch (e) {
-      setError(`${label}: ${String(e)}`);
+      setError(`${label}: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
   const write = (name: string, value: boolean | number | string) =>

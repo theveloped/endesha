@@ -16,7 +16,8 @@ from wf.contracts.control import keys as control_keys
 from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.control.messages import AcquireControl
 from wf.contracts.tags import keys
-from wf.contracts.tags.messages import Ack, WriteTag
+from wf.contracts.tags.messages import WriteTag
+from wf.core.envelope import Reply, request as envelope_request
 from wf.core.codec import decode, encode
 from wf.hal.opcua import OpcuaBackend
 from wf.hal.tags_core import TagsCore
@@ -98,11 +99,8 @@ class MiniPlc:
         return fut.result(timeout=5)
 
 
-def _ack(session, key, msg) -> Ack:
-    for reply in session.get(key, payload=encode(msg.to_wire()), timeout=5.0):
-        if reply.ok is not None:
-            return Ack.from_wire(decode(reply.ok.payload))
-    pytest.fail(f"no reply from {key}")
+def _ack(session, key, client_id, msg) -> Reply:
+    return envelope_request(session, key, msg.to_wire(), client_id=client_id, timeout_s=5.0)
 
 
 def _wait(pred, timeout_s=8.0):
@@ -146,7 +144,12 @@ def test_opcua_round_trip(plc):
     try:
         core.start()
         assert _wait(lambda: backend.connected), "never connected"
-        _ack(session, control_keys.cmd_acquire(realm), AcquireControl("op", "alice"))
+        # control still speaks its legacy dialect (envelope migration is per
+        # contract); acquire the lease with a plain query.
+        for _ in session.get(control_keys.cmd_acquire(realm),
+                             payload=encode(AcquireControl("op", "alice").to_wire()),
+                             timeout=3.0):
+            pass
         assert _wait(lambda: core._lease.holds("op"))
 
         # inventory -> auto tags; initial values read
@@ -157,15 +160,15 @@ def test_opcua_round_trip(plc):
         assert _wait(lambda: core.reported("ready") is True)
 
         # typed write: Int16 stays Int16 on the server; string and bool too
-        assert _ack(session, keys.cmd_write(realm, "plc0"), WriteTag("op", "wash_program", 7)).ok
+        assert _ack(session, keys.cmd_write(realm, "plc0"), "op", WriteTag("wash_program", 7)).ok
         assert _wait(lambda: plc.get("WashProgram") == 7)
         assert plc.get_variant_type("WashProgram") == ua.VariantType.Int16
-        assert _ack(session, keys.cmd_write(realm, "plc0"), WriteTag("op", "kommentar", "prog B")).ok
+        assert _ack(session, keys.cmd_write(realm, "plc0"), "op", WriteTag("kommentar", "prog B")).ok
         assert _wait(lambda: plc.get("Kommentar") == "prog B")
-        assert _ack(session, keys.cmd_write(realm, "plc0"), WriteTag("op", "load_request", True)).ok
+        assert _ack(session, keys.cmd_write(realm, "plc0"), "op", WriteTag("load_request", True)).ok
         assert _wait(lambda: plc.get("LoadRequest") is True)
         # read-only stays read-only
-        assert _ack(session, keys.cmd_write(realm, "plc0"), WriteTag("op", "ready", False)).error == "read_only"
+        assert _ack(session, keys.cmd_write(realm, "plc0"), "op", WriteTag("ready", False)).error.reason == "read_only"
 
         # watchdog toggles on the server
         seen = set()

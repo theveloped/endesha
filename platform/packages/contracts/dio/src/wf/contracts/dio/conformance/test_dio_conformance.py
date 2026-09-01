@@ -1,4 +1,10 @@
-"""Conformance tests: dio contract, implementation-agnostic; bus-only."""
+"""Conformance tests: dio contract, implementation-agnostic; bus-only.
+
+Commands speak the wire-contract envelope (``wf.core.envelope``): every
+reply carries ``ok`` plus exactly one of ``value``/``error``, error codes
+come from the closed enum, reasons from the contract's registered list,
+and a request without ``req_id`` is rejected — there is no legacy dialect.
+"""
 
 from __future__ import annotations
 
@@ -8,8 +14,9 @@ import time
 import pytest
 
 from wf.contracts.dio import keys
-from wf.contracts.dio.messages import Ack, ChannelsState, ForceChannel, SetChannel
+from wf.contracts.dio.messages import ERROR_REASONS, ChannelsState, ForceChannel, SetChannel
 from wf.core.codec import decode, encode
+from wf.core.envelope import CODES, Reply, request as envelope_request
 
 from .conftest import collect_samples
 
@@ -21,11 +28,14 @@ def _query_state(session, realm, dio) -> ChannelsState:
     pytest.fail("no reply from dio state/channels")
 
 
-def _ack(session, key, msg) -> Ack:
-    for reply in session.get(key, payload=encode(msg.to_wire()), timeout=5.0):
-        if reply.ok is not None:
-            return Ack.from_wire(decode(reply.ok.payload))
-    pytest.fail(f"no reply from {key}")
+def _call(session, key, client_id, msg) -> Reply:
+    reply = envelope_request(session, key, msg.to_wire(), client_id=client_id, timeout_s=5.0)
+    if not reply.ok and reply.error.reason == "no_reply":
+        pytest.fail(f"no reply from {key}")
+    if not reply.ok:
+        assert reply.error.code in CODES
+        assert reply.error.reason in ERROR_REASONS
+    return reply
 
 
 def _wait_channel(session, realm, dio, name, predicate, timeout_s=3.0):
@@ -55,6 +65,8 @@ def test_alive_token(session, realm, dio):
 
 
 def test_state_stream_and_query_agree(session, realm, dio):
+    """Retained-value rule: querying the key returns the identical payload
+    shape the stream publishes (wire-contract RFC §3.1)."""
     queried = _query_state(session, realm, dio)
     assert queried.channels, "no channels declared"
     samples = collect_samples(
@@ -68,27 +80,76 @@ def test_state_stream_and_query_agree(session, realm, dio):
         assert isinstance(cv.value, (bool, int, float))
 
 
+def test_envelope_shape(session, realm, dio, client_id):
+    """Raw reply is the envelope: ``ok`` plus exactly one of value/error."""
+    req = {"req_id": "conf-shape-1", "client_id": client_id,
+           "args": SetChannel("no_such_channel_x", True).to_wire()}
+    for reply in session.get(keys.cmd_set(realm, dio), payload=encode(req), timeout=5.0):
+        if reply.ok is None:
+            continue
+        wire = decode(reply.ok.payload)
+        assert isinstance(wire, dict) and "ok" in wire
+        assert ("value" in wire) != ("error" in wire)
+        assert wire["error"]["code"] in CODES
+        assert wire["error"]["reason"] in ERROR_REASONS
+        return
+    pytest.fail("no reply from dio cmd/set")
+
+
+def test_missing_req_id_rejected(session, realm, dio):
+    """No legacy dialect: a request without ``req_id`` is ``invalid``."""
+    for reply in session.get(
+        keys.cmd_set(realm, dio),
+        payload=encode({"channel": "whatever", "value": True}),
+        timeout=5.0,
+    ):
+        if reply.ok is None:
+            continue
+        wire = decode(reply.ok.payload)
+        assert wire["ok"] is False and wire["error"]["code"] == "invalid"
+        return
+    pytest.fail("no reply from dio cmd/set")
+
+
 def test_set_input_is_read_only(session, realm, dio, client_id):
     name = _first_input(_query_state(session, realm, dio))
-    ack = _ack(session, keys.cmd_set(realm, dio), SetChannel(client_id, name, True))
-    assert not ack.ok and ack.error == "read_only"
+    reply = _call(session, keys.cmd_set(realm, dio), client_id, SetChannel(name, True))
+    assert not reply.ok and reply.error.reason == "read_only"
+    assert reply.error.code == "invalid"
 
 
 def test_unknown_channel(session, realm, dio, client_id):
-    ack = _ack(
-        session, keys.cmd_set(realm, dio), SetChannel(client_id, "no_such_channel_x", True)
+    reply = _call(
+        session, keys.cmd_set(realm, dio), client_id, SetChannel("no_such_channel_x", True)
     )
-    assert not ack.ok and ack.error.startswith("unknown_channel:")
+    assert not reply.ok and reply.error.reason == "unknown_channel"
+    assert reply.error.code == "not_found"
+    assert reply.error.detail == "no_such_channel_x"
 
 
 def test_set_requires_lease(session, realm, dio):
     name = _first_input(_query_state(session, realm, dio))
-    ack = _ack(session, keys.cmd_set(realm, dio), SetChannel("not-the-holder", name, True))
-    assert not ack.ok and ack.error in ("no_control", "read_only")
+    reply = _call(session, keys.cmd_set(realm, dio), "not-the-holder", SetChannel(name, True))
+    assert not reply.ok and reply.error.reason == "no_control"
+    assert reply.error.code == "conflict"
     outputs = [n for n, cv in _query_state(session, realm, dio).channels.items() if cv.kind in ("do", "ao")]
     if outputs:
-        ack = _ack(session, keys.cmd_force(realm, dio), ForceChannel("not-the-holder", outputs[0], True))
-        assert not ack.ok and ack.error == "no_control"
+        reply = _call(session, keys.cmd_force(realm, dio), "not-the-holder", ForceChannel(outputs[0], True))
+        assert not reply.ok and reply.error.reason == "no_control"
+
+
+def test_resubmission_is_idempotent(session, realm, dio, client_id):
+    """Same ``req_id`` twice -> the original outcome, not a re-execution."""
+    name = _first_input(_query_state(session, realm, dio))
+    args = ForceChannel(name, True).to_wire()
+    first = envelope_request(session, keys.cmd_force(realm, dio), args,
+                             client_id=client_id, req_id="conf-idem-1", timeout_s=5.0)
+    second = envelope_request(session, keys.cmd_force(realm, dio), args,
+                              client_id=client_id, req_id="conf-idem-1", timeout_s=5.0)
+    try:
+        assert first.ok and second.ok
+    finally:
+        _call(session, keys.cmd_force(realm, dio), client_id, ForceChannel(name, None))
 
 
 def test_force_input_roundtrip(session, realm, dio, client_id):
@@ -96,15 +157,15 @@ def test_force_input_roundtrip(session, realm, dio, client_id):
     name = _first_input(state)
     original = state.channels[name].value
     try:
-        assert _ack(
-            session, keys.cmd_force(realm, dio), ForceChannel(client_id, name, not original)
+        assert _call(
+            session, keys.cmd_force(realm, dio), client_id, ForceChannel(name, not original)
         ).ok
         cv = _wait_channel(
             session, realm, dio, name, lambda c: c.forced and c.value == (not original)
         )
         assert cv is not None and cv.forced and cv.value == (not original)
     finally:
-        assert _ack(session, keys.cmd_force(realm, dio), ForceChannel(client_id, name, None)).ok
+        assert _call(session, keys.cmd_force(realm, dio), client_id, ForceChannel(name, None)).ok
     cv = _wait_channel(session, realm, dio, name, lambda c: not c.forced)
     assert cv is not None and not cv.forced
 
@@ -117,8 +178,8 @@ def test_set_output_roundtrip(session, realm, dio, client_id):
     assert state.channels[name].kind == "do", "WF_CONF_DIO_OUTPUT must be a digital output"
     original = bool(state.channels[name].value)
     try:
-        assert _ack(session, keys.cmd_set(realm, dio), SetChannel(client_id, name, not original)).ok
+        assert _call(session, keys.cmd_set(realm, dio), client_id, SetChannel(name, not original)).ok
         cv = _wait_channel(session, realm, dio, name, lambda c: c.value == (not original))
         assert cv is not None and cv.value == (not original)
     finally:
-        _ack(session, keys.cmd_set(realm, dio), SetChannel(client_id, name, original))
+        _call(session, keys.cmd_set(realm, dio), client_id, SetChannel(name, original))

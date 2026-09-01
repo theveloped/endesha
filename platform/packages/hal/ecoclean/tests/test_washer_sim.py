@@ -14,6 +14,7 @@ from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.control.messages import AcquireControl
 from wf.contracts.tags import keys as tags_keys
 from wf.contracts.tags.messages import ForceTag, TagsState
+from wf.core.envelope import request as envelope_request
 from wf.contracts.washer import keys
 from wf.contracts.washer.messages import Ack, Recipe, RecipeReply, RecipeStep, SetRecipe, WasherStatus
 from wf.core.action import ActionClient, ActionRejected
@@ -189,12 +190,14 @@ def test_provided_tags_device_and_fault(rig):
     assert "ready_to_load" not in st.tags  # named -> no auto twin
 
     # force a fault on the read-only PLC line (no lease needed) -> phase fault
-    ack = _query(rig.session, tags_keys.cmd_force(rig.realm, "plc0"), ForceTag("nobody", "general_fault", True).to_wire())
-    assert ack["ok"], ack
+    ack = envelope_request(rig.session, tags_keys.cmd_force(rig.realm, "plc0"),
+                           ForceTag("general_fault", True).to_wire(), client_id="nobody")
+    assert ack.ok, ack.error
     assert _wait(lambda: rig.phase() == "fault")
     with pytest.raises(ActionRejected, match="wrong_phase:fault"):
         rig.action("open_door")
-    _query(rig.session, tags_keys.cmd_force(rig.realm, "plc0"), ForceTag("nobody", "general_fault", None).to_wire())
+    envelope_request(rig.session, tags_keys.cmd_force(rig.realm, "plc0"),
+                     ForceTag("general_fault", None).to_wire(), client_id="nobody")
     assert _wait(lambda: rig.phase() == "ready_to_load")
 
 

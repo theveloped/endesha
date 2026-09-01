@@ -5,6 +5,7 @@
 import { KeyExpr, Sample, Session } from "@eclipse-zenoh/zenoh-ts";
 import { v7 as uuidv7 } from "uuid";
 import { query } from "./bus";
+import { call } from "./envelope";
 import { decodeSample } from "./codec";
 import {
   actionPrefix,
@@ -229,6 +230,8 @@ export async function setTcp(
   return reply as Ack;
 }
 
+// dio/tags commands speak the wire-contract envelope (lib/envelope.ts):
+// they resolve on success and throw EnvelopeError ("code:reason[:detail]").
 export async function dioSet(
   session: Session,
   realm: string,
@@ -236,14 +239,8 @@ export async function dioSet(
   clientId: string,
   channel: string,
   value: boolean | number,
-): Promise<Ack> {
-  const reply = await query(session, dioCmdSet(realm, rid), {
-    client_id: clientId,
-    channel,
-    value,
-  });
-  if (reply === null) throw new Error("no reply from dio cmd/set");
-  return reply as Ack;
+): Promise<void> {
+  await call(session, dioCmdSet(realm, rid), { channel, value }, { clientId });
 }
 
 /** ``value: null`` clears the force. */
@@ -254,14 +251,8 @@ export async function dioForce(
   clientId: string,
   channel: string,
   value: boolean | number | null,
-): Promise<Ack> {
-  const reply = await query(session, dioCmdForce(realm, rid), {
-    client_id: clientId,
-    channel,
-    value,
-  });
-  if (reply === null) throw new Error("no reply from dio cmd/force");
-  return reply as Ack;
+): Promise<void> {
+  await call(session, dioCmdForce(realm, rid), { channel, value }, { clientId });
 }
 
 export async function tagsWrite(
@@ -271,10 +262,8 @@ export async function tagsWrite(
   clientId: string,
   tag: string,
   value: boolean | number | string,
-): Promise<Ack> {
-  const reply = await query(session, tagsCmdWrite(realm, rid), { client_id: clientId, tag, value });
-  if (reply === null) throw new Error("no reply from tags cmd/write");
-  return reply as Ack;
+): Promise<void> {
+  await call(session, tagsCmdWrite(realm, rid), { tag, value }, { clientId });
 }
 
 /** ``value: null`` clears the force. */
@@ -285,10 +274,8 @@ export async function tagsForce(
   clientId: string,
   tag: string,
   value: boolean | number | string | null,
-): Promise<Ack> {
-  const reply = await query(session, tagsCmdForce(realm, rid), { client_id: clientId, tag, value });
-  if (reply === null) throw new Error("no reply from tags cmd/force");
-  return reply as Ack;
+): Promise<void> {
+  await call(session, tagsCmdForce(realm, rid), { tag, value }, { clientId });
 }
 
 export async function programLoad(

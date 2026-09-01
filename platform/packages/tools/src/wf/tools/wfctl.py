@@ -39,12 +39,11 @@ from wf.contracts.washer import keys as washer_keys
 from wf.contracts.washer.messages import Ack as WasherAck
 from wf.contracts.washer.messages import Recipe, RecipeReply, SetRecipe, WasherStatus
 from wf.core.action import ActionClient, ActionRejected
-from wf.contracts.tags.messages import Ack as TagsAck
 from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
 from wf.contracts.program.messages import Ack as ProgramAck
 from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, LogLine, ProgramState
 from wf.contracts.dio.messages import ForceChannel, SetChannel
-from wf.contracts.dio.messages import Ack as DioAck
+from wf.core.envelope import request as envelope_request
 from wf.contracts.control.messages import AcquireControl, ControlAck
 from wf.contracts.camera2d.messages import Ack as CamAck
 from wf.contracts.camera2d.messages import GrabReply
@@ -656,7 +655,7 @@ def cmd_tags_state(session, args) -> int:
     return 0
 
 
-def _tags_cmd(session, args, key, msg_ok):
+def _tags_cmd(session, args, key, args_wire):
     external_cid = args.client_id
     cid = external_cid or str(uuid.uuid4())
     if external_cid is None:
@@ -665,22 +664,18 @@ def _tags_cmd(session, args, key, msg_ok):
             print(f"lease denied: {ack.error}", file=sys.stderr)
             return 1
     try:
-        reply = _query(session, key, msg_ok(cid))
+        reply = envelope_request(session, key, args_wire, client_id=cid)
     finally:
         if external_cid is None:
             _release_lease(session, args, cid)
-    if reply is None:
-        print(f"no reply from {key}", file=sys.stderr)
-        return 1
-    ack = TagsAck.from_wire(reply)
-    print("ok" if ack.ok else f"error: {ack.error}")
-    return 0 if ack.ok else 1
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_tags_write(session, args) -> int:
     value = args.value if args.string else _parse_tag_value(args.value)
     return _tags_cmd(session, args, tags_keys.cmd_write(args.realm, args.tags),
-                     lambda cid: WriteTag(cid, args.tag, value).to_wire())
+                     WriteTag(args.tag, value).to_wire())
 
 
 def cmd_tags_force(session, args) -> int:
@@ -689,15 +684,17 @@ def cmd_tags_force(session, args) -> int:
         return 2
     value = None if args.clear else (args.value if args.string else _parse_tag_value(args.value))
     # read-only tags need no lease: try lease-free first
-    reply = _query(session, tags_keys.cmd_force(args.realm, args.tags), ForceTag(args.client_id or "wfctl", args.tag, value).to_wire())
-    if reply is not None and reply.get("ok"):
+    reply = envelope_request(session, tags_keys.cmd_force(args.realm, args.tags),
+                             ForceTag(args.tag, value).to_wire(),
+                             client_id=args.client_id or "wfctl")
+    if reply.ok:
         print("ok")
         return 0
-    if reply is not None and reply.get("error") != "no_control":
-        print(f"error: {reply.get('error')}")
+    if reply.error.reason != "no_control":
+        print(f"error: {reply.error}")
         return 1
     return _tags_cmd(session, args, tags_keys.cmd_force(args.realm, args.tags),
-                     lambda cid: ForceTag(cid, args.tag, value).to_wire())
+                     ForceTag(args.tag, value).to_wire())
 
 
 def cmd_dio_state(session, args) -> int:
@@ -720,17 +717,14 @@ def cmd_dio_set(session, args) -> int:
             print(f"lease denied: {ack.error}", file=sys.stderr)
             return 1
     try:
-        req = SetChannel(client_id=cid, channel=args.channel, value=_parse_channel_value(args.value))
-        reply = _query(session, dio_keys.cmd_set(args.realm, args.dio), req.to_wire())
+        req = SetChannel(channel=args.channel, value=_parse_channel_value(args.value))
+        reply = envelope_request(session, dio_keys.cmd_set(args.realm, args.dio),
+                                 req.to_wire(), client_id=cid)
     finally:
         if external_cid is None:
             _release_lease(session, args, cid)
-    if reply is None:
-        print("no reply from dio cmd/set", file=sys.stderr)
-        return 1
-    ack = DioAck.from_wire(reply)
-    print("ok" if ack.ok else f"error: {ack.error}")
-    return 0 if ack.ok else 1
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_dio_force(session, args) -> int:
@@ -741,14 +735,15 @@ def cmd_dio_force(session, args) -> int:
     external_cid = args.client_id
 
     def attempt(cid: str):
-        req = ForceChannel(client_id=cid, channel=args.channel, value=value)
-        return _query(session, dio_keys.cmd_force(args.realm, args.dio), req.to_wire())
+        req = ForceChannel(channel=args.channel, value=value)
+        return envelope_request(session, dio_keys.cmd_force(args.realm, args.dio),
+                                req.to_wire(), client_id=cid)
 
     # Forcing an INPUT needs no lease (flagged test override); try that first so
     # it works while a program holds the cell lease. Outputs fall back to a
     # lease-acquiring attempt.
     reply = attempt(external_cid or "wfctl")
-    if reply is not None and not reply.get("ok") and reply.get("error") == "no_control" and external_cid is None:
+    if not reply.ok and reply.error.reason == "no_control" and external_cid is None:
         cid = str(uuid.uuid4())
         ack = _acquire_lease(session, args, cid)
         if not ack.ok:
@@ -758,12 +753,8 @@ def cmd_dio_force(session, args) -> int:
             reply = attempt(cid)
         finally:
             _release_lease(session, args, cid)
-    if reply is None:
-        print("no reply from dio cmd/force", file=sys.stderr)
-        return 1
-    ack = DioAck.from_wire(reply)
-    print("ok" if ack.ok else f"error: {ack.error}")
-    return 0 if ack.ok else 1
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_acquire_control(session, args) -> int:

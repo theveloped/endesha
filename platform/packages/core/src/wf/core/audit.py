@@ -136,14 +136,14 @@ class QueryAudit:
     def _publish(self, recording: _RecordingQuery, t0: int, error: str | None) -> None:
         request = _decoded(recording._query.payload)  # noqa: SLF001
         reply = _decoded(recording.reply_payload) if recording.replied else None
+        # Replies are the wire-contract envelope: `ok` is authoritative.
+        # (Legacy non-envelope replies record ok=None until their contract
+        # migrates — no sniffing, per wire-contract RFC review decision 6.)
         ok = None
         if error is not None:
             ok = False
-        elif isinstance(reply, dict):
-            for field in ("ok", "accepted"):
-                if field in reply:
-                    ok = bool(reply[field])
-                    break
+        elif isinstance(reply, dict) and "ok" in reply:
+            ok = bool(reply["ok"])
         params = str(recording._query.parameters)  # noqa: SLF001
         record = {
             "t": t0,

@@ -52,6 +52,34 @@ export async function subscribeLatest(
 }
 
 /**
+ * Follow a retained key (pub latest-wins + queryable answering the same
+ * payload) with correct seed ordering: subscribe FIRST, then seed with a
+ * query — deltas win over the seed (wire-contract RFC §3.1). Mirrors
+ * wf/core/retained.py.
+ */
+export async function subscribeRetained(
+  session: Session,
+  key: string,
+  onMsg: (msg: unknown) => void,
+  capacity = 4,
+): Promise<Unsubscribe> {
+  let gotDelta = false;
+  const unsubscribe = await subscribeLatest(
+    session,
+    key,
+    (msg) => {
+      gotDelta = true;
+      onMsg(msg);
+    },
+    capacity,
+  );
+  void query(session, key, {}).then((seed) => {
+    if (seed !== null && !gotDelta) onMsg(seed);
+  });
+  return unsubscribe;
+}
+
+/**
  * Like subscribeLatest but delivers the raw Sample — for binary payloads
  * (camera frames) whose payload is not CBOR.
  */

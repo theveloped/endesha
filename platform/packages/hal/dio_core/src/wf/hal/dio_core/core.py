@@ -11,7 +11,6 @@ from __future__ import annotations
 from wf.contracts.control.watcher import LeaseWatcher
 from wf.contracts.dio import keys
 from wf.contracts.dio.messages import (
-    Ack,
     ChannelDef,
     ChannelsState,
     ChannelValue,
@@ -55,18 +54,14 @@ class DioSchema:
         ).to_wire()
 
     @staticmethod
-    def parse_set(payload: dict):
-        req = SetChannel.from_wire(payload)
-        return req.client_id, req.channel, req.value
+    def parse_set(args: dict):
+        req = SetChannel.from_wire(args)
+        return req.channel, req.value
 
     @staticmethod
-    def parse_force(payload: dict):
-        req = ForceChannel.from_wire(payload)
-        return req.client_id, req.channel, req.value
-
-    @staticmethod
-    def ack_wire(ok: bool, error: str | None) -> dict:
-        return Ack(ok=ok, error=error).to_wire()
+    def parse_force(args: dict):
+        req = ForceChannel.from_wire(args)
+        return req.channel, req.value
 
 
 DIO_SCHEMA = DioSchema()

@@ -24,16 +24,15 @@ from wf.contracts.arm.messages import (
     Waypoint,
 )
 from wf.contracts.dio import keys as dio_keys
-from wf.contracts.dio.messages import Ack as DioAck
 from wf.contracts.dio.messages import ChannelsState, ForceChannel, SetChannel
 from wf.contracts.tags import keys as tags_keys
-from wf.contracts.tags.messages import Ack as TagsAck
 from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
 from wf.contracts.washer import keys as washer_keys
 from wf.contracts.washer.messages import Ack as WasherAck
 from wf.contracts.washer.messages import Recipe, RecipeReply, RecipeSchema, SetRecipe, WasherStatus
 from wf.core.action import ActionClient, ActionRejected
 from wf.core.codec import decode, encode
+from wf.core.envelope import request as envelope_request
 from wf.core.log import get_logger
 from wf.services.config import keys as config_keys
 
@@ -280,13 +279,10 @@ class _TableProxy(DeviceProxy):
         """-> ``{name: value_object_with_.value}``."""  # pragma: no cover - abstract
         raise NotImplementedError
 
-    def _set_wire(self, name: str, value) -> dict:  # pragma: no cover - abstract
+    def _set_args(self, name: str, value) -> dict:  # pragma: no cover - abstract
         raise NotImplementedError
 
-    def _force_wire(self, name: str, value) -> dict:  # pragma: no cover - abstract
-        raise NotImplementedError
-
-    def _parse_ack(self, payload: dict):  # pragma: no cover - abstract
+    def _force_args(self, name: str, value) -> dict:  # pragma: no cover - abstract
         raise NotImplementedError
 
     def __init__(self, session, realm, rid, client_id):
@@ -397,23 +393,23 @@ class _TableProxy(DeviceProxy):
 
     def set(self, name: str, value) -> None:
         _check()
-        reply = _query(self.session, self._set_key(), self._set_wire(name, value))
-        if reply is None:
-            raise ProgramError(f"{self.contract}_set:{self.rid}.{name}:no_reply")
-        ack = self._parse_ack(reply)
-        if not ack.ok:
-            raise ProgramError(f"{self.contract}_set:{self.rid}.{name}:{ack.error}")
+        reply = envelope_request(
+            self.session, self._set_key(), self._set_args(name, value),
+            client_id=self.client_id,
+        )
+        if not reply.ok:
+            raise ProgramError(f"{self.contract}_set:{self.rid}.{name}:{reply.error}")
 
     def force(self, name: str, value) -> None:
         """Override a reported value (``None`` clears). Meant for simulation
         scenarios / tests, not production logic."""
         _check()
-        reply = _query(self.session, self._force_key(), self._force_wire(name, value))
-        if reply is None:
-            raise ProgramError(f"{self.contract}_force:{self.rid}.{name}:no_reply")
-        ack = self._parse_ack(reply)
-        if not ack.ok:
-            raise ProgramError(f"{self.contract}_force:{self.rid}.{name}:{ack.error}")
+        reply = envelope_request(
+            self.session, self._force_key(), self._force_args(name, value),
+            client_id=self.client_id,
+        )
+        if not reply.ok:
+            raise ProgramError(f"{self.contract}_force:{self.rid}.{name}:{reply.error}")
 
     def pulse(self, name: str, seconds: float = 0.2) -> None:
         self.set(name, True)
@@ -445,14 +441,11 @@ class DioProxy(_TableProxy):
     def _parse_state(self, payload: dict) -> dict:
         return ChannelsState.from_wire(payload).channels
 
-    def _set_wire(self, name: str, value) -> dict:
-        return SetChannel(self.client_id, name, value).to_wire()
+    def _set_args(self, name: str, value) -> dict:
+        return SetChannel(name, value).to_wire()
 
-    def _force_wire(self, name: str, value) -> dict:
-        return ForceChannel(self.client_id, name, value).to_wire()
-
-    def _parse_ack(self, payload: dict):
-        return DioAck.from_wire(payload)
+    def _force_args(self, name: str, value) -> dict:
+        return ForceChannel(name, value).to_wire()
 
 
 class TagsProxy(_TableProxy):
@@ -474,14 +467,11 @@ class TagsProxy(_TableProxy):
     def _parse_state(self, payload: dict) -> dict:
         return TagsState.from_wire(payload).tags
 
-    def _set_wire(self, name: str, value) -> dict:
-        return WriteTag(self.client_id, name, value).to_wire()
+    def _set_args(self, name: str, value) -> dict:
+        return WriteTag(name, value).to_wire()
 
-    def _force_wire(self, name: str, value) -> dict:
-        return ForceTag(self.client_id, name, value).to_wire()
-
-    def _parse_ack(self, payload: dict):
-        return TagsAck.from_wire(payload)
+    def _force_args(self, name: str, value) -> dict:
+        return ForceTag(name, value).to_wire()
 
     def write(self, name: str, value) -> None:
         self.set(name, value)

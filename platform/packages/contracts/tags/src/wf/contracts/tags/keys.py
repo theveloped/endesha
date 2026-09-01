@@ -1,9 +1,16 @@
-"""The `tags` contract key space::
+"""The `tags` contract key space (wire-contract RFC)::
 
-    {realm}/tags/{rid}/state/tags     pub latest-wins, on change + 1 Hz keepalive (+ queryable)
-    {realm}/tags/{rid}/cmd/write      queryable WriteTag -> Ack   (rw tags only; lease-gated)
-    {realm}/tags/{rid}/cmd/force      queryable ForceTag -> Ack   (any tag; rw tags lease-gated)
+    {realm}/tags/{rid}/state/tags     retained: pub latest-wins (on change +
+                                      1 Hz keepalive) + queryable answering
+                                      the identical payload
+    {realm}/tags/{rid}/cmd/write      envelope queryable, args WriteTag
+                                      (rw tags only; lease-gated)
+    {realm}/tags/{rid}/cmd/force     envelope queryable, args ForceTag
+                                      (any tag; rw tags lease-gated)
     {realm}/tags/{rid}/alive          liveliness token
+
+``cmd/*`` requests/replies are the wire-contract envelope
+(``wf.core.envelope``); the acting ``client_id`` travels top-level.
 """
 
 from __future__ import annotations

@@ -16,7 +16,8 @@ from wf.contracts.control import keys as control_keys
 from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.control.messages import AcquireControl
 from wf.contracts.dio import keys as dio_keys
-from wf.contracts.dio.messages import Ack, ChannelsState, ForceChannel, SetChannel
+from wf.contracts.dio.messages import ChannelsState, ForceChannel, SetChannel
+from wf.core.envelope import Reply, request as envelope_request
 from wf.core.codec import decode, encode
 from wf.hal.arm_core import ArmCore
 from wf.hal.arm_sim.backend import SimArmBackend
@@ -38,11 +39,8 @@ PROVIDES = {
 }
 
 
-def _ack(session, key, msg) -> Ack:
-    for reply in session.get(key, payload=encode(msg.to_wire()), timeout=3.0):
-        if reply.ok is not None:
-            return Ack.from_wire(decode(reply.ok.payload))
-    pytest.fail(f"no reply from {key}")
+def _ack(session, key, client_id, msg) -> Reply:
+    return envelope_request(session, key, msg.to_wire(), client_id=client_id, timeout_s=3.0)
 
 
 def _state(session, realm) -> ChannelsState:
@@ -76,7 +74,12 @@ def test_arm_process_serves_dio_device(tmp_path):
     core = ArmCore(session, realm, "r1", params, SimArmBackend(HOME_Q))
     try:
         core.start()
-        _ack(session, control_keys.cmd_acquire(realm), AcquireControl("op", "alice"))
+        # control still speaks its legacy dialect (envelope migration is per
+        # contract); acquire the lease with a plain query.
+        for _ in session.get(control_keys.cmd_acquire(realm),
+                             payload=encode(AcquireControl("op", "alice").to_wire()),
+                             timeout=3.0):
+            pass
         assert _wait(lambda: core._lease.holds("op"))
 
         # Named channels + auto channels for every unmapped physical point.
@@ -98,23 +101,23 @@ def test_arm_process_serves_dio_device(tmp_path):
             arm_keys.state_io(realm, "r1"), lambda s: seen.append(IoState.from_wire(decode(s.payload)))
         )
         try:
-            assert _ack(session, dio_keys.cmd_set(realm, "io0"), SetChannel("op", "clamp", True)).ok
+            assert _ack(session, dio_keys.cmd_set(realm, "io0"), "op", SetChannel("clamp", True)).ok
             assert _wait(lambda: any(io.do_ >> 1 & 1 for io in seen))
             assert _wait(lambda: _state(session, realm).channels["clamp"].value is True)
             # raw pin do2 via its auto name
-            assert _ack(session, dio_keys.cmd_set(realm, "io0"), SetChannel("op", "do2", True)).ok
+            assert _ack(session, dio_keys.cmd_set(realm, "io0"), "op", SetChannel("do2", True)).ok
             assert _wait(lambda: any(io.do_ >> 2 & 1 for io in seen))
         finally:
             sub.undeclare()
 
         # sim DIs are static zeros -> force drives them
-        assert _ack(session, dio_keys.cmd_force(realm, "io0"), ForceChannel("op", "part_present", True)).ok
+        assert _ack(session, dio_keys.cmd_force(realm, "io0"), "op", ForceChannel("part_present", True)).ok
         cv = _state(session, realm).channels["part_present"]
         assert cv.value is True and cv.forced
 
         # lease-gated
-        ack = _ack(session, dio_keys.cmd_set(realm, "io0"), SetChannel("intruder", "clamp", False))
-        assert not ack.ok and ack.error == "no_control"
+        ack = _ack(session, dio_keys.cmd_set(realm, "io0"), "intruder", SetChannel("clamp", False))
+        assert not ack.ok and ack.error.reason == "no_control"
     finally:
         core.shutdown()
         time.sleep(0.1)  # let the sim tick thread observe the stop before the session closes

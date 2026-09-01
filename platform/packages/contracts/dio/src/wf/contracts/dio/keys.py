@@ -1,14 +1,19 @@
-"""The `dio` contract key space (program-layer RFC §2.2)::
+"""The `dio` contract key space (program-layer RFC §2.2, wire-contract RFC)::
 
-    {realm}/dio/{rid}/state/channels   pub latest-wins, on change + 1 Hz keepalive
-    {realm}/dio/{rid}/cmd/set          queryable SetChannel   -> Ack  (outputs only)
-    {realm}/dio/{rid}/cmd/force        queryable ForceChannel -> Ack  (any channel)
+    {realm}/dio/{rid}/state/channels   retained: pub latest-wins (on change +
+                                       1 Hz keepalive) + queryable answering
+                                       the identical payload
+    {realm}/dio/{rid}/cmd/set          envelope queryable, args SetChannel
+                                       (outputs only)
+    {realm}/dio/{rid}/cmd/force        envelope queryable, args ForceChannel
+                                       (any channel)
     {realm}/dio/{rid}/alive            liveliness token
 
-``set`` and forcing an OUTPUT are guarded by the cell-level control lease
-(``wf.contracts.control``); requests carry the ``client_id`` that must hold it.
-Forcing an INPUT is ungated (flagged test override, works while a program
-holds the lease).
+``cmd/*`` requests/replies are the wire-contract envelope
+(``wf.core.envelope``): the acting ``client_id`` travels top-level in the
+request. ``set`` and forcing an OUTPUT are guarded by the cell-level control
+lease (``wf.contracts.control``). Forcing an INPUT is ungated (flagged test
+override, works while a program holds the lease).
 """
 
 from __future__ import annotations

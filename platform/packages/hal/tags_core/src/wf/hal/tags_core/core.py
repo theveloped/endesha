@@ -15,7 +15,6 @@ from __future__ import annotations
 from wf.contracts.control.watcher import LeaseWatcher
 from wf.contracts.tags import keys
 from wf.contracts.tags.messages import (
-    Ack,
     ForceTag,
     TagDef,
     TagsState,
@@ -107,18 +106,14 @@ class TagsSchema:
         ).to_wire()
 
     @staticmethod
-    def parse_set(payload: dict):
-        req = WriteTag.from_wire(payload)
-        return req.client_id, req.tag, req.value
+    def parse_set(args: dict):
+        req = WriteTag.from_wire(args)
+        return req.tag, req.value
 
     @staticmethod
-    def parse_force(payload: dict):
-        req = ForceTag.from_wire(payload)
-        return req.client_id, req.tag, req.value
-
-    @staticmethod
-    def ack_wire(ok: bool, error: str | None) -> dict:
-        return Ack(ok=ok, error=error).to_wire()
+    def parse_force(args: dict):
+        req = ForceTag.from_wire(args)
+        return req.tag, req.value
 
 
 TAGS_SCHEMA = TagsSchema()

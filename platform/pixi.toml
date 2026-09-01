@@ -95,4 +95,5 @@ pytest = ">=8"
 
 [tasks]
 test = "python -m pytest"
+docs-check = "python scripts/check_docs.py"
 sync-assets = { cmd = "node scripts/sync-assets.mjs", cwd = "web" }

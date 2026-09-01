@@ -218,47 +218,47 @@ class ChannelsState:
 
 @dataclass
 class SetChannel:
-    """``cmd/set`` request: write an OUTPUT channel. Lease-guarded."""
+    """``cmd/set`` envelope ``args``: write an OUTPUT channel. Lease-guarded —
+    the acting ``client_id`` travels top-level in the envelope request
+    (wire-contract RFC §4.1), not here."""
 
-    client_id: str
     channel: str
     value: bool | float
 
     def to_wire(self) -> dict:
-        return {"client_id": self.client_id, "channel": self.channel, "value": self.value}
+        return {"channel": self.channel, "value": self.value}
 
     @classmethod
     def from_wire(cls, d: dict) -> "SetChannel":
-        return cls(client_id=d["client_id"], channel=d["channel"], value=d["value"])
+        return cls(channel=d["channel"], value=d["value"])
 
 
 @dataclass
 class ForceChannel:
-    """``cmd/force`` request: override ANY channel's reported value (``value``)
-    or clear the override (``value: null``). Lease-guarded."""
+    """``cmd/force`` envelope ``args``: override ANY channel's reported value
+    (``value``) or clear the override (``value: null``). Forcing an output is
+    lease-guarded; forcing an input is not."""
 
-    client_id: str
     channel: str
     value: bool | float | None
 
     def to_wire(self) -> dict:
-        return {"client_id": self.client_id, "channel": self.channel, "value": self.value}
+        return {"channel": self.channel, "value": self.value}
 
     @classmethod
     def from_wire(cls, d: dict) -> "ForceChannel":
-        return cls(client_id=d["client_id"], channel=d["channel"], value=d.get("value"))
+        return cls(channel=d["channel"], value=d.get("value"))
 
 
-@dataclass
-class Ack:
-    """Reply payload for cmd queryables (contract-local by decision, like camera2d)."""
-
-    ok: bool
-    error: str | None = None
-
-    def to_wire(self) -> dict:
-        return {"ok": bool(self.ok), "error": self.error}
-
-    @classmethod
-    def from_wire(cls, d: dict) -> "Ack":
-        return cls(ok=d["ok"], error=d.get("error"))
+#: Registered ``reason`` values this contract's providers may emit in the
+#: envelope's error branch (wire-contract RFC §5); conformance asserts
+#: every emitted error uses one of these.
+ERROR_REASONS = (
+    "bad_request",
+    "unknown_channel",
+    "no_control",
+    "read_only",
+    "forced",
+    "bad_value",
+    "write_failed",
+)

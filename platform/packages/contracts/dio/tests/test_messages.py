@@ -6,7 +6,6 @@ import pytest
 
 from wf.contracts.dio import keys
 from wf.contracts.dio.messages import (
-    Ack,
     ChannelDef,
     ChannelsState,
     ChannelValue,
@@ -24,12 +23,10 @@ from wf.contracts.dio.messages import (
         ChannelValue(kind="ai", value=4.2, forced=True),
         ChannelValue(kind="do", value=False, address={"bank": "tool", "pin": 2}, auto=True),
         ChannelsState(t=1, channels={"a": ChannelValue("do", False), "p": ChannelValue("ai", 1.5, True)}),
-        SetChannel(client_id="c1", channel="clamp", value=True),
-        SetChannel(client_id="c1", channel="valve", value=0.5),
-        ForceChannel(client_id="c1", channel="part_present", value=True),
-        ForceChannel(client_id="c1", channel="part_present", value=None),
-        Ack(ok=True),
-        Ack(ok=False, error="no_control"),
+        SetChannel(channel="clamp", value=True),
+        SetChannel(channel="valve", value=0.5),
+        ForceChannel(channel="part_present", value=True),
+        ForceChannel(channel="part_present", value=None),
     ],
     ids=lambda m: type(m).__name__,
 )

@@ -169,40 +169,42 @@ class TagsState:
 
 @dataclass
 class WriteTag:
-    client_id: str
+    """``cmd/write`` envelope ``args`` — the acting ``client_id`` travels
+    top-level in the envelope request (wire-contract RFC §4.1)."""
+
     tag: str
     value: object
 
     def to_wire(self) -> dict:
-        return {"client_id": self.client_id, "tag": self.tag, "value": self.value}
+        return {"tag": self.tag, "value": self.value}
 
     @classmethod
     def from_wire(cls, d: dict) -> "WriteTag":
-        return cls(client_id=d["client_id"], tag=d["tag"], value=d["value"])
+        return cls(tag=d["tag"], value=d["value"])
 
 
 @dataclass
 class ForceTag:
-    client_id: str
+    """``cmd/force`` envelope ``args``; ``value: None`` clears the force."""
+
     tag: str
     value: object  # None clears
 
     def to_wire(self) -> dict:
-        return {"client_id": self.client_id, "tag": self.tag, "value": self.value}
+        return {"tag": self.tag, "value": self.value}
 
     @classmethod
     def from_wire(cls, d: dict) -> "ForceTag":
-        return cls(client_id=d["client_id"], tag=d["tag"], value=d.get("value"))
+        return cls(tag=d["tag"], value=d.get("value"))
 
 
-@dataclass
-class Ack:
-    ok: bool
-    error: str | None = None
-
-    def to_wire(self) -> dict:
-        return {"ok": bool(self.ok), "error": self.error}
-
-    @classmethod
-    def from_wire(cls, d: dict) -> "Ack":
-        return cls(ok=d["ok"], error=d.get("error"))
+#: Registered envelope error ``reason`` values (wire-contract RFC §5).
+ERROR_REASONS = (
+    "bad_request",
+    "unknown_channel",
+    "no_control",
+    "read_only",
+    "forced",
+    "bad_value",
+    "write_failed",
+)

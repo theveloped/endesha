@@ -12,7 +12,8 @@ from wf.contracts.control import keys as control_keys
 from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.control.messages import AcquireControl
 from wf.contracts.tags import keys
-from wf.contracts.tags.messages import Ack, ForceTag, TagsState, WriteTag
+from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
+from wf.core.envelope import Reply, request as envelope_request
 from wf.core.codec import decode, encode
 from wf.hal.sim_tags import SimTagsBackend
 from wf.hal.tags_core import TagsCore
@@ -38,11 +39,8 @@ PARAMS = {
 }
 
 
-def _ack(session, key, msg) -> Ack:
-    for reply in session.get(key, payload=encode(msg.to_wire()), timeout=3.0):
-        if reply.ok is not None:
-            return Ack.from_wire(decode(reply.ok.payload))
-    pytest.fail(f"no reply from {key}")
+def _ack(session, key, client_id, msg) -> Reply:
+    return envelope_request(session, key, msg.to_wire(), client_id=client_id, timeout_s=3.0)
 
 
 def _state(session, realm) -> TagsState:
@@ -71,7 +69,12 @@ def stack():
     backend = SimTagsBackend(PARAMS)
     core = TagsCore(session, realm, "plc0", PARAMS, backend)
     core.start()
-    _ack(session, control_keys.cmd_acquire(realm), AcquireControl("op", "alice"))
+    # control still speaks its legacy dialect (envelope migration is per
+    # contract); acquire the lease with a plain query.
+    for _ in session.get(control_keys.cmd_acquire(realm),
+                         payload=encode(AcquireControl("op", "alice").to_wire()),
+                         timeout=3.0):
+        pass
     assert _wait(lambda: core._lease.holds("op"))
     yield session, realm, core, backend
     core.shutdown()
@@ -97,30 +100,30 @@ def test_resolution_named_and_auto(stack):
 
 def test_write_typed_and_read_only(stack):
     session, realm, core, backend = stack
-    assert _ack(session, keys.cmd_write(realm, "plc0"), WriteTag("op", "wash_program", 7)).ok
+    assert _ack(session, keys.cmd_write(realm, "plc0"), "op", WriteTag("wash_program", 7)).ok
     assert core.reported("wash_program") == 7
-    ack = _ack(session, keys.cmd_write(realm, "plc0"), WriteTag("op", "wash_program", 2.5))
-    assert not ack.ok and "expects an int" in ack.error
-    ack = _ack(session, keys.cmd_write(realm, "plc0"), WriteTag("op", "ready_to_load", True))
-    assert not ack.ok and ack.error == "read_only"
-    assert _ack(session, keys.cmd_write(realm, "plc0"), WriteTag("op", "kommentar", "prog A")).ok
+    ack = _ack(session, keys.cmd_write(realm, "plc0"), "op", WriteTag("wash_program", 2.5))
+    assert not ack.ok and ack.error.reason == "bad_value" and "expects an int" in ack.error.detail
+    ack = _ack(session, keys.cmd_write(realm, "plc0"), "op", WriteTag("ready_to_load", True))
+    assert not ack.ok and ack.error.reason == "read_only"
+    assert _ack(session, keys.cmd_write(realm, "plc0"), "op", WriteTag("kommentar", "prog A")).ok
     assert core.reported("kommentar") == "prog A"
-    ack = _ack(session, keys.cmd_write(realm, "plc0"), WriteTag("intruder", "load_request", True))
-    assert not ack.ok and ack.error == "no_control"
+    ack = _ack(session, keys.cmd_write(realm, "plc0"), "intruder", WriteTag("load_request", True))
+    assert not ack.ok and ack.error.reason == "no_control"
 
 
 def test_force_policy_and_script(stack):
     session, realm, core, backend = stack
     # read-only tag: force needs no lease
-    assert _ack(session, keys.cmd_force(realm, "plc0"), ForceTag("nobody", "ready_to_load", True)).ok
+    assert _ack(session, keys.cmd_force(realm, "plc0"), "nobody", ForceTag("ready_to_load", True)).ok
     assert core.reported("ready_to_load") is True and _state(session, realm).tags["ready_to_load"].forced
     # rw tag: force needs the lease
-    ack = _ack(session, keys.cmd_force(realm, "plc0"), ForceTag("nobody", "load_request", True))
-    assert not ack.ok and ack.error == "no_control"
-    assert _ack(session, keys.cmd_force(realm, "plc0"), ForceTag("op", "load_request", True)).ok
-    ack = _ack(session, keys.cmd_write(realm, "plc0"), WriteTag("op", "load_request", False))
-    assert not ack.ok and ack.error == "forced"
-    assert _ack(session, keys.cmd_force(realm, "plc0"), ForceTag("op", "load_request", None)).ok
+    ack = _ack(session, keys.cmd_force(realm, "plc0"), "nobody", ForceTag("load_request", True))
+    assert not ack.ok and ack.error.reason == "no_control"
+    assert _ack(session, keys.cmd_force(realm, "plc0"), "op", ForceTag("load_request", True)).ok
+    ack = _ack(session, keys.cmd_write(realm, "plc0"), "op", WriteTag("load_request", False))
+    assert not ack.ok and ack.error.reason == "forced"
+    assert _ack(session, keys.cmd_force(realm, "plc0"), "op", ForceTag("load_request", None)).ok
     # the script drove DoorOpen (auto tag door_open) high
     assert _wait(lambda: core.reported("door_open") is True, timeout_s=3.0)
 

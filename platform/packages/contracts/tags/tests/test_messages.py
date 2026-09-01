@@ -6,7 +6,6 @@ import pytest
 
 from wf.contracts.tags import keys
 from wf.contracts.tags.messages import (
-    Ack,
     ForceTag,
     TagDef,
     TagsState,
@@ -23,9 +22,8 @@ from wf.contracts.tags.messages import (
         TagValue(type="bool", value=True, access="r"),
         TagValue(type="int", value=3, access="rw", forced=True, address={"node": "ns=4;i=1"}, auto=True),
         TagsState(t=1, tags={"a": TagValue("string", "x"), "b": TagValue("float", 1.5, "rw")}),
-        WriteTag(client_id="c", tag="load_request", value=True),
-        ForceTag(client_id="c", tag="ready", value=None),
-        Ack(ok=False, error="read_only"),
+        WriteTag(tag="load_request", value=True),
+        ForceTag(tag="ready", value=None),
     ],
     ids=lambda m: type(m).__name__,
 )

@@ -21,7 +21,8 @@ import yaml
 
 from wf.contracts.control.watcher import LeaseWatcher
 from wf.core.audit import QueryAudit
-from wf.core.codec import decode, encode
+from wf.core.codec import encode
+from wf.core.envelope import RecentReplies, Request, fail, ok_value, parse_request
 from wf.core.log import get_logger
 from wf.core.time import now_ns
 
@@ -78,9 +79,10 @@ class Schema(Protocol):
     def parse(self, raw: object) -> dict[str, ChannelDefLike]: ...
     def auto_def(self, kind: str, address: dict) -> ChannelDefLike: ...
     def state_wire(self, t: int, values: list[tuple[ChannelDefLike, Any, bool]]) -> dict: ...
-    def parse_set(self, payload: dict) -> tuple[str | None, str, Any]: ...
-    def parse_force(self, payload: dict) -> tuple[str | None, str, Any]: ...
-    def ack_wire(self, ok: bool, error: str | None) -> dict: ...
+    #: envelope ``args`` -> (channel/tag name, value); replies are the
+    #: wire-contract envelope, built by the core, not the schema.
+    def parse_set(self, args: dict) -> tuple[str, Any]: ...
+    def parse_force(self, args: dict) -> tuple[str, Any]: ...
 
 
 def _address_key(address: dict) -> tuple:
@@ -112,6 +114,7 @@ class ChannelsCore:
         self.backend = backend
         self.schema = schema
         self._audit = QueryAudit(session, realm, f"{schema.contract}:{rid}")
+        self._recent = RecentReplies()
         self._on_change = on_change
         self._poll_s = 1.0 / float(params.get("poll_hz", _DEFAULT_POLL_HZ))
         # Named channels first (cell.yaml order), then one auto channel per raw
@@ -318,79 +321,93 @@ class ChannelsCore:
                 last_pub = now
 
     # ── queryables ───────────────────────────────────────────────────────
+    # Replies are the wire-contract envelope; the state query is a retained
+    # read and answers with the identical published payload (unenveloped).
 
-    def _reply(self, query, ok: bool, error: str | None = None) -> None:
-        query.reply(str(query.key_expr), encode(self.schema.ack_wire(ok, error)))
+    def _reply(self, query, wire: dict) -> None:
+        query.reply(str(query.key_expr), encode(wire))
 
     def _on_state_query(self, query) -> None:
         query.reply(str(query.key_expr), encode(self.snapshot_wire()))
 
-    def _guard(self, client_id, name: str, *, lease: bool = True):
-        ch = self.channels.get(name)
-        if ch is None:
-            return None, f"unknown_channel:{name}"
-        if lease and not self._lease.holds(client_id):
-            return None, "no_control"
-        return ch, None
+    def _serve(self, query, op) -> None:
+        """Envelope boilerplate: parse the request, serve idempotent
+        resubmissions from the recent-replies ring, reply the op's wire."""
+        try:
+            req = parse_request(query)
+        except Exception as exc:  # noqa: BLE001
+            self._reply(query, fail("invalid", "bad_request", repr(exc)))
+            return
+        wire = self._recent.get(req.req_id)
+        if wire is None:
+            wire = op(req)
+            self._recent.put(req.req_id, wire)
+        self._reply(query, wire)
 
     def _on_set(self, query) -> None:
+        self._serve(query, self._do_set)
+
+    def _on_force(self, query) -> None:
+        self._serve(query, self._do_force)
+
+    def _do_set(self, req: Request) -> dict:
         try:
-            client_id, name, value = self.schema.parse_set(decode(query.payload))
-        except Exception as exc:
-            self._reply(query, False, f"bad_request:{exc!r}")
-            return
-        ch, err = self._guard(client_id, name)
-        if err is not None:
-            self._reply(query, False, err)
-            return
+            name, value = self.schema.parse_set(req.args)
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_request", repr(exc))
+        ch = self.channels.get(name)
+        if ch is None:
+            return fail("not_found", "unknown_channel", name)
+        if not self._lease.holds(req.client_id):
+            return fail("conflict", "no_control")
         if not ch.writable:
-            self._reply(query, False, "read_only")
-            return
+            return fail("invalid", "read_only", name)
         with self._lock:
             if name in self._forced:
-                self._reply(query, False, "forced")
-                return
+                return fail("conflict", "forced", name)
         try:
             value = ch.coerce(value)
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_value", str(exc))
+        try:
             self.backend.write(ch, ch.to_raw(value))
-        except Exception as exc:
-            self._reply(query, False, str(exc))
-            return
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "write_failed", str(exc))
         with self._lock:
             self._hw[name] = value
             self.changed.notify_all()
         self.publish()
-        self._reply(query, True)
+        return ok_value()
 
-    def _on_force(self, query) -> None:
+    def _do_force(self, req: Request) -> dict:
         try:
-            client_id, name, value = self.schema.parse_force(decode(query.payload))
-        except Exception as exc:
-            self._reply(query, False, f"bad_request:{exc!r}")
-            return
-        ch0 = self.channels.get(name)
-        ch, err = self._guard(client_id, name, lease=ch0 is None or ch0.writable)
-        if err is not None:
-            self._reply(query, False, err)
-            return
+            name, value = self.schema.parse_force(req.args)
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_request", repr(exc))
+        ch = self.channels.get(name)
+        if ch is None:
+            return fail("not_found", "unknown_channel", name)
+        if ch.writable and not self._lease.holds(req.client_id):
+            return fail("conflict", "no_control")
         if value is None:
             with self._lock:
                 self._forced.pop(name, None)
                 self.changed.notify_all()
             self.publish()
-            self._reply(query, True)
-            return
+            return ok_value()
         try:
             value = ch.coerce(value)
-            if ch.writable:
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_value", str(exc))
+        if ch.writable:
+            try:
                 self.backend.write(ch, ch.to_raw(value))
-        except Exception as exc:
-            self._reply(query, False, str(exc))
-            return
+            except Exception as exc:  # noqa: BLE001
+                return fail("internal", "write_failed", str(exc))
         with self._lock:
             self._forced[name] = value
             if ch.writable:
                 self._hw[name] = value
             self.changed.notify_all()
         self.publish()
-        self._reply(query, True)
+        return ok_value()

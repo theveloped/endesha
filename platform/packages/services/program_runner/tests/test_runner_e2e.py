@@ -22,6 +22,7 @@ from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.control.messages import ControlOwnerState
 from wf.contracts.dio import keys as dio_keys
 from wf.contracts.dio.messages import ChannelsState, ForceChannel
+from wf.core.envelope import request as envelope_request
 from wf.contracts.program import keys
 from wf.contracts.program.messages import Ack, Catalog, EventRequest, LoadRequest, ProgramState
 from wf.core.codec import decode, encode
@@ -171,8 +172,9 @@ def _clamp(session, realm):
 
 
 def _force_part(session, realm, value):
-    ack = _ack(session, dio_keys.cmd_force(realm, "io0"), ForceChannel("tester", "part_present", value).to_wire())
-    assert ack.ok, ack.error
+    reply = envelope_request(session, dio_keys.cmd_force(realm, "io0"),
+                             ForceChannel("part_present", value).to_wire(), client_id="tester")
+    assert reply.ok, reply.error
 
 
 @pytest.fixture

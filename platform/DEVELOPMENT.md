@@ -278,6 +278,7 @@ load `ecoclean_cycle` and confirm the operator steps on the HMI page.
 
 ```powershell
 pixi run python -m pytest
+pixi run docs-check
 
 Push-Location web
 npx tsc -b
