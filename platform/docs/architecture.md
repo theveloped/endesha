@@ -90,7 +90,7 @@ envelope** (`wf.core.envelope` ↔ `web/src/lib/envelope.ts`): request
 recent-replies ring), reply `{ok, value|goal|error}` with the closed
 8-code error enum and per-contract registered reasons; field conventions
 in [wire-vocabulary.md](wire-vocabulary.md). Migration is
-contract-by-contract (seam #14) — dio, tags, control, washer commands, the program runner and config speak it today; camera2d and arm
+contract-by-contract (seam #14) — everything except the arm speaks it today; arm (direct cmds + the action pattern)
 still use their legacy dialects. Long-running operations use the
 **action pattern**
 ([core/action.py](../packages/core/src/wf/core/action.py)): goal queryable →
@@ -352,7 +352,7 @@ should either close it or consciously leave it.
 | 11 | `web/tests/` is empty; the CBOR wire gate and lint/tsc are the only web verification, and the gate is not in CI (no CI exists yet). | wants fixing eventually |
 | 12 | Web fallback constants when no host API answers: `CELL_NAME="dev-cell"`, `RID="r1"`, `CID="cam0"`. | accepted |
 | 13 | Orphaned `deploy/programs/__pycache__/ui_made_532*.pyc` from a deleted UI-authored program. | trivial cleanup |
-| 14 | Envelope migration ([ADR-0013](decisions/0013-reply-envelope.md)) in progress: **dio + tags** (shared `ChannelsCore`), **control**, **washer** (commands; its door/wash actions await the arm/action step), **program** (all runner commands), and **config** (set/delete; reads stay glob queryables) speak it, with conformance enforcement on dio and control; `camera2d` and `arm` still reply legacy dialects (their audit records show `ok: null` until migrated — no sniffing, no backcompat). | in progress, per RFC §9 |
+| 14 | Envelope migration ([ADR-0013](decisions/0013-reply-envelope.md)) in progress: **dio + tags** (shared `ChannelsCore`), **control**, **washer** (commands; its door/wash actions await the arm/action step), **program** (all runner commands), **config** (set/delete; reads stay glob queryables), and **camera2d** (cmds + producer election, in both the Python cores and the TS headless service; frame-shaped replies stay raw-bytes+attachment) speak it, with conformance enforcement on dio, control and camera2d; only `arm` still replies legacy dialects (their audit records show `ok: null` until migrated — no sniffing, no backcompat). | in progress, per RFC §9 |
 
 ## 13. Keeping this document honest
 

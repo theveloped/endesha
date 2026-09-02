@@ -682,12 +682,6 @@ export interface ProducerOwnerState {
   owner: ProducerGrant | null;
 }
 
-export interface ProducerAck {
-  ok: boolean;
-  owner: ProducerGrant | null;
-  error: string | null;
-}
-
 export interface ProducerDemand {
   t: WireTimestamp;
   stream: {

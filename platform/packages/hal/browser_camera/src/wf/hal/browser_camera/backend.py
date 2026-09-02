@@ -7,12 +7,12 @@ import threading
 from wf.contracts.camera2d import keys
 from wf.contracts.camera2d.messages import (
     ENCODING_JPEG,
-    ProducerAck,
     ProducerFrame,
     ProducerGrant,
 )
 from wf.core.camera_info import CameraInfo
 from wf.core.codec import decode, encode
+from wf.core.envelope import RecentReplies, Request, fail, ok_value, serve_query
 from wf.core.lease import FencedLease
 from wf.core.log import get_logger
 from wf.core.time import now_ns
@@ -30,6 +30,7 @@ class BrowserCameraBackend:
         self.cid = cid
         self.params = params
         self._lease = FencedLease(params.get("producer_lease_ttl_s", 10.0))
+        self._recent = RecentReplies()
         self._core = None
         self._stream = None
         self._lock = threading.Lock()
@@ -133,30 +134,25 @@ class BrowserCameraBackend:
         }
 
     def _on_acquire(self, query) -> None:
-        key = str(query.key_expr)
-        try:
-            req = decode(query.payload) if query.payload is not None else {}
-            owner, error = self._lease.acquire(req["client_id"], req.get("user", "operator"))
-            self._publish_owner()
-            current = owner if owner is not None else self._lease.owner()
-            ack = ProducerAck(
-                ok=error is None,
-                owner=None if current is None else ProducerGrant.from_wire(current),
-                error=error,
-            )
-            query.reply(key, encode(ack.to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(ProducerAck(ok=False, error=repr(exc)).to_wire()))
+        serve_query(query, self._do_acquire, recent=self._recent)
+
+    def _do_acquire(self, req: Request) -> dict:
+        if req.client_id is None:
+            return fail("invalid", "bad_request", "client_id required")
+        owner, error = self._lease.acquire(req.client_id, str(req.args.get("user", "operator")))
+        self._publish_owner()
+        if error is not None:
+            detail = error.split(":", 1)[1] if ":" in error else error
+            return fail("conflict", "held_by", detail)
+        return ok_value({"owner": dict(owner)})
 
     def _on_release(self, query) -> None:
-        key = str(query.key_expr)
-        try:
-            req = decode(query.payload) if query.payload is not None else {}
-            self._lease.release(req.get("client_id"))
-            self._publish_owner()
-            query.reply(key, encode(ProducerAck(ok=True).to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(ProducerAck(ok=False, error=repr(exc)).to_wire()))
+        serve_query(query, self._do_release, recent=self._recent)
+
+    def _do_release(self, req: Request) -> dict:
+        self._lease.release(req.client_id)
+        self._publish_owner()
+        return ok_value()
 
     def _on_ingress(self, sample) -> None:
         try:

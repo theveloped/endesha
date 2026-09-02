@@ -43,7 +43,6 @@ from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, Lo
 from wf.contracts.dio.messages import ForceChannel, SetChannel
 from wf.core.envelope import request as envelope_request
 from wf.contracts.control.messages import ControlOwnerState
-from wf.contracts.camera2d.messages import Ack as CamAck
 from wf.contracts.camera2d.messages import GrabReply
 from wf.core.action import ActionClient, ActionRejected
 from wf.core.codec import decode, encode
@@ -1019,16 +1018,13 @@ def cmd_cam_grab(session, args) -> int:
     if args.roi is not None:
         spec["roi"] = args.roi
     # A SingleFrame grab takes ~1 s; allow for it.
-    reply = _query(
+    reply = envelope_request(
         session, cam_keys.cmd_grab(args.realm, args.cid), spec, timeout_s=10.0
     )
-    if reply is None:
-        print("no reply from cmd/grab", file=sys.stderr)
+    if not reply.ok:
+        print(f"error: {reply.error}", file=sys.stderr)
         return 1
-    grab = GrabReply.from_wire(reply)
-    if not grab.ok or grab.data is None or grab.header is None:
-        print(grab.error or "grab failed", file=sys.stderr)
-        return 1
+    grab = GrabReply.from_wire(reply.value)
     with open(args.out, "wb") as f:
         f.write(grab.data)
     print(json.dumps(grab.header.to_wire()))
@@ -1039,7 +1035,7 @@ def cmd_cam_grab(session, args) -> int:
 def cmd_cam_stream(session, args) -> int:
     if args.action == "stop":
         key = cam_keys.cmd_stream_stop(args.realm, args.cid)
-        reply = _query(session, key, {})
+        reply = envelope_request(session, key, {})
     else:
         # Send only the explicitly-passed fields; the driver merges them
         # over its cell.yaml stream_defaults.
@@ -1055,13 +1051,9 @@ def cmd_cam_stream(session, args) -> int:
         if args.raw:
             params["encoding"] = "BayerRG8"
         key = cam_keys.cmd_stream_start(args.realm, args.cid)
-        reply = _query(session, key, params)
-    if reply is None:
-        print(f"no reply from {key}", file=sys.stderr)
-        return 1
-    ack = CamAck.from_wire(reply)
-    print(json.dumps(ack.to_wire()))
-    return 0 if ack.ok else 1
+        reply = envelope_request(session, key, params)
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def main(argv=None) -> int:

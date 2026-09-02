@@ -24,9 +24,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { query, subscribeLatest, subscribeRaw, watchAlive, type Unsubscribe } from "../lib/bus";
+import { subscribeLatest, subscribeRaw, watchAlive, type Unsubscribe } from "../lib/bus";
+import { call } from "../lib/envelope";
 import { camAlive, camCmd, camImage, camStatus } from "../lib/config";
-import { asBigInt, type Ack, type CameraStatus, type FrameHeader, type GrabReply } from "../lib/messages";
+import { asBigInt, type CameraStatus, type FrameHeader } from "../lib/messages";
 import type { BrowserProducerState } from "../lib/camera2d/producer";
 
 const KV_CLASS =
@@ -127,18 +128,11 @@ export default function CamerasPage({
     return () => clearInterval(timer);
   }, []);
 
-  const send = async (action: string, payload: unknown, timeoutMs = 5000) => {
+  const send = async (action: string, payload: Record<string, unknown>, timeoutMs = 5000) => {
     if (session === null) return;
     setCmdError(null);
     try {
-      const reply = (await query(
-        session,
-        camCmd(realm, action),
-        payload,
-        timeoutMs,
-      )) as Ack | null;
-      if (reply === null) setCmdError(`no reply from cmd/${action}`);
-      else if (!reply.ok) setCmdError(reply.error ?? `cmd/${action} failed`);
+      await call(session, camCmd(realm, action), payload, { timeoutMs });
     } catch (e) {
       setCmdError(e instanceof Error ? e.message : String(e));
     }
@@ -150,14 +144,9 @@ export default function CamerasPage({
     try {
       // The grabbed frame arrives through the SAME image subscription (the
       // driver publishes every grab) — the reply is only for error display.
-      const reply = (await query(
-        session,
-        camCmd(realm, "grab"),
-        { encoding: "jpeg", quality: 95 },
-        15000,
-      )) as GrabReply | null;
-      if (reply === null) setCmdError("no reply from cmd/grab");
-      else if (!reply.ok) setCmdError(reply.error ?? "grab failed");
+      await call(session, camCmd(realm, "grab"), { encoding: "jpeg", quality: 95 }, {
+        timeoutMs: 15000,
+      });
     } catch (e) {
       setCmdError(e instanceof Error ? e.message : String(e));
     }

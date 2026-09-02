@@ -12,6 +12,7 @@ import {
   type RawPublisher,
   type Unsubscribe,
 } from "../bus";
+import { call } from "../envelope";
 import {
   camProducerCmd,
   camProducerDemand,
@@ -20,7 +21,6 @@ import {
   camProducerRender,
 } from "../config";
 import type {
-  ProducerAck,
   ProducerDemand,
   ProducerGrant,
   ProducerOwnerState,
@@ -77,9 +77,7 @@ export function useBrowserCameraProducer(
     const currentSession = session;
     const currentRealm = realm;
     if (currentSession !== null && currentRealm !== null) {
-      void query(currentSession, camProducerCmd(currentRealm, "release"), {
-        client_id: clientId,
-      }).catch(() => undefined);
+void call(currentSession, camProducerCmd(currentRealm, "release"), {}, { clientId }).catch(() => {});
     }
     pip?.close();
   }, [clientId, realm, session]);
@@ -190,18 +188,25 @@ export function useBrowserCameraProducer(
     if (mode === "stopped" || session === null || realm === null || !enabled) return;
     let disposed = false;
     const acquire = async () => {
-      const response = (await query(session, camProducerCmd(realm, "acquire"), {
-        client_id: clientId,
-        user,
-      })) as ProducerAck | null;
-      if (disposed) return;
-      if (response === null || !response.ok || response.owner === null) {
-        setError(response?.error ?? "browser camera provider unavailable");
-        setOwner(response?.owner ?? null);
-        return;
+      try {
+        const value = (await call(
+          session,
+          camProducerCmd(realm, "acquire"),
+          { user },
+          { clientId },
+        )) as { owner?: ProducerGrant };
+        if (disposed) return;
+        if (value.owner === undefined) {
+          setError("browser camera provider unavailable");
+          setOwner(null);
+          return;
+        }
+        setOwner(value.owner);
+        setError(null);
+      } catch (e) {
+        if (disposed) return;
+        setError(e instanceof Error ? e.message : String(e));
       }
-      setOwner(response.owner);
-      setError(null);
     };
     void acquire();
     const timer = setInterval(() => void acquire(), 3000);

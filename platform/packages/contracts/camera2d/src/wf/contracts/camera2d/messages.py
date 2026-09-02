@@ -19,25 +19,6 @@ ENCODINGS = (ENCODING_BAYER_RG8, ENCODING_JPEG, ENCODING_MONO8)
 
 
 @dataclass
-class Ack:
-    """Reply payload for cmd queryables.
-
-    Duplicated from the arm contract by decision — contracts stay
-    independent; hoisting Ack into wf.core is a later cross-cutting refactor.
-    """
-
-    ok: bool
-    error: str | None = None
-
-    def to_wire(self) -> dict:
-        return {"ok": bool(self.ok), "error": self.error}
-
-    @classmethod
-    def from_wire(cls, d: dict) -> "Ack":
-        return cls(ok=d["ok"], error=d.get("error"))
-
-
-@dataclass
 class FrameHeader:
     """CBOR attachment on every frame topic; embedded in GrabReply.
 
@@ -132,31 +113,6 @@ class ProducerGrant:
             epoch=d["epoch"],
             granted_at=d["granted_at"],
             expires_at=d["expires_at"],
-        )
-
-
-@dataclass
-class ProducerAck:
-    """Reply from producer acquire/release queryables."""
-
-    ok: bool
-    owner: ProducerGrant | None = None
-    error: str | None = None
-
-    def to_wire(self) -> dict:
-        return {
-            "ok": bool(self.ok),
-            "owner": None if self.owner is None else self.owner.to_wire(),
-            "error": self.error,
-        }
-
-    @classmethod
-    def from_wire(cls, d: dict) -> "ProducerAck":
-        owner = d.get("owner")
-        return cls(
-            ok=d["ok"],
-            owner=None if owner is None else ProducerGrant.from_wire(owner),
-            error=d.get("error"),
         )
 
 
@@ -345,34 +301,18 @@ class ConfigureCmd:
 
 @dataclass
 class GrabReply:
-    """``cmd/grab`` CBOR reply (single payload, no attachment).
+    """``cmd/grab`` envelope ``value``: the captured frame — header + image
+    bytes (the same frame is also published on the image topic)."""
 
-    Duplicates the frame published on the ``image`` topic so the synchronous
-    caller never races a subscription. ``data`` is a CBOR byte string.
-    """
-
-    ok: bool
-    error: str | None = None
-    header: FrameHeader | None = None
-    data: bytes | None = None  # image bytes
+    header: FrameHeader
+    data: bytes
 
     def to_wire(self) -> dict:
-        return {
-            "ok": bool(self.ok),
-            "error": self.error,
-            "header": None if self.header is None else self.header.to_wire(),
-            "data": self.data,
-        }
+        return {"header": self.header.to_wire(), "data": self.data}
 
     @classmethod
     def from_wire(cls, d: dict) -> "GrabReply":
-        header = d.get("header")
-        return cls(
-            ok=d["ok"],
-            error=d.get("error"),
-            header=None if header is None else FrameHeader.from_wire(header),
-            data=d.get("data"),
-        )
+        return cls(header=FrameHeader.from_wire(d["header"]), data=d["data"])
 
 
 @dataclass
@@ -415,3 +355,15 @@ class CameraStatus:
             achieved_rate_hz=d["achieved_rate_hz"],
             error=d.get("error"),
         )
+
+
+#: Registered envelope error ``reason`` values (wire-contract RFC §5).
+ERROR_REASONS = (
+    "bad_request",
+    "streaming",
+    "unsupported_encoding",
+    "grab_failed",
+    "stream_failed",
+    "configure_failed",
+    "held_by",
+)

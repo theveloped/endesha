@@ -29,14 +29,25 @@ export function opticalFrame(cid: string): string {
   return `camera2d/${cid}/optical`;
 }
 
-// ── Ack ──────────────────────────────────────────────────────────────────
-export interface Ack {
-  ok: boolean;
-  error: string | null;
+// ── Envelope (wire-contract RFC §4–§5; mirrors wf/core/envelope.py) ──────
+export function okWire(value: WireMap = {}): WireMap {
+  return { ok: true, value };
 }
 
-export function ackWire(ok: boolean, error: string | null = null): WireMap {
-  return { ok, error };
+export function failWire(code: string, reason: string, detail?: string): WireMap {
+  const error: WireMap = { code, reason };
+  if (detail !== undefined) error.detail = detail;
+  return { ok: false, error };
+}
+
+/** Parse an envelope request; throws when req_id is missing (no legacy dialect). */
+export function parseRequest(payload: Record<string, unknown> | null): {
+  reqId: string;
+  args: Record<string, unknown>;
+} {
+  const reqId = payload?.req_id;
+  if (typeof reqId !== "string") throw new Error("missing req_id");
+  return { reqId, args: (payload?.args ?? {}) as Record<string, unknown> };
 }
 
 // ── FrameSpec / StreamParams (parsed from cmd payloads) ────────────────────
@@ -171,14 +182,9 @@ export function frameHeaderWire(hdr: FrameHeaderInit): WireMap {
   return d;
 }
 
-// ── GrabReply ──────────────────────────────────────────────────────────────
-export function grabReplyWire(
-  ok: boolean,
-  error: string | null,
-  header: WireMap | null,
-  data: Uint8Array | null,
-): WireMap {
-  return { ok, error, header, data };
+// ── GrabReply (cmd/grab envelope value) ────────────────────────────────────
+export function grabValueWire(header: WireMap, data: Uint8Array): WireMap {
+  return { header, data };
 }
 
 // ── CameraStatus ───────────────────────────────────────────────────────────

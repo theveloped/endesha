@@ -8,40 +8,33 @@ import pytest
 
 from wf.contracts.camera2d import keys
 from wf.contracts.camera2d.messages import (
-    Ack,
+    ERROR_REASONS,
     CameraStatus,
     ENCODING_BAYER_RG8,
     ENCODING_JPEG,
     FrameSpec,
     GrabReply,
 )
-from wf.core.codec import decode, encode
+from wf.core.codec import decode
+from wf.core.envelope import CODES, Reply, request as envelope_request
 
 from .conftest import collect_frames, collect_samples, first_sample
 
 _JPEG_SOI = b"\xff\xd8"
 
 
-def _query(session, key: str, payload: dict, timeout_s: float = 5.0) -> dict | None:
-    replies = session.get(key, payload=encode(payload), timeout=timeout_s)
-    for reply in replies:
-        if reply.ok is not None:
-            return decode(reply.ok.payload)
-    return None
-
-
-def _query_ack(session, key: str, payload: dict, timeout_s: float = 5.0) -> Ack:
-    reply = _query(session, key, payload, timeout_s=timeout_s)
-    if reply is None:
+def _cmd(session, key: str, args: dict, timeout_s: float = 5.0) -> Reply:
+    reply = envelope_request(session, key, args, timeout_s=timeout_s)
+    if not reply.ok and reply.error.reason == "no_reply":
         pytest.fail(f"no reply from {key}")
-    return Ack.from_wire(reply)
+    if not reply.ok:
+        assert reply.error.code in CODES
+        assert reply.error.reason in ERROR_REASONS
+    return reply
 
 
-def _grab(session, realm: str, cid: str, spec: dict) -> GrabReply:
-    reply = _query(session, keys.cmd_grab(realm, cid), spec, timeout_s=15.0)
-    if reply is None:
-        pytest.fail("no reply from cmd/grab")
-    return GrabReply.from_wire(reply)
+def _grab(session, realm: str, cid: str, spec: dict) -> Reply:
+    return _cmd(session, keys.cmd_grab(realm, cid), spec, timeout_s=15.0)
 
 
 def test_alive_token(session, realm, cid):
@@ -67,14 +60,14 @@ def test_grab_roundtrip(session, realm, cid):
     # Subscriber FIRST: the grab must also appear on the image topic.
     sub = session.declare_subscriber(keys.image(realm, cid), on_sample)
     try:
-        grab = _grab(
+        reply = _grab(
             session,
             realm,
             cid,
             FrameSpec(encoding=ENCODING_JPEG, quality=90).to_wire(),
         )
-        assert grab.ok, grab.error
-        assert grab.header is not None
+        assert reply.ok, reply.error
+        grab = GrabReply.from_wire(reply.value)
         assert grab.header.w > 0 and grab.header.h > 0
         assert grab.header.encoding == ENCODING_JPEG
         assert grab.data, "empty grab data"
@@ -101,33 +94,35 @@ def test_grab_roundtrip(session, realm, cid):
 
 
 def test_grab_spec_variants(session, realm, cid):
-    full = _grab(session, realm, cid, {"encoding": ENCODING_JPEG, "quality": 80})
-    assert full.ok, full.error
+    full_reply = _grab(session, realm, cid, {"encoding": ENCODING_JPEG, "quality": 80})
+    assert full_reply.ok, full_reply.error
+    full = GrabReply.from_wire(full_reply.value)
 
-    half = _grab(
+    half_reply = _grab(
         session, realm, cid, {"encoding": ENCODING_JPEG, "quality": 80, "scale": 0.5}
     )
-    assert half.ok, half.error
+    assert half_reply.ok, half_reply.error
+    half = GrabReply.from_wire(half_reply.value)
     assert abs(half.header.w - full.header.w / 2) <= 1
     assert abs(half.header.h - full.header.h / 2) <= 1
 
     bad = _grab(session, realm, cid, {"encoding": ENCODING_BAYER_RG8, "scale": 0.5})
     assert bad.ok is False
-    assert bad.error, "expected the FrameSpec validation error string"
+    assert bad.error.reason in ("bad_request", "unsupported_encoding"), bad.error
 
 
 def test_stream_lifecycle(session, realm, cid):
     # Pin a deterministic 20 ms exposure: a dark-scene auto-exposure (90 ms
     # observed live) caps the sensor below the requested 10 fps, which would
     # fail the rate check for environmental — not contractual — reasons.
-    ack = _query_ack(
+    ack = _cmd(
         session,
         keys.cmd_configure(realm, cid),
         {"auto_exposure": False, "exposure_us": 20_000.0},
     )
     assert ack.ok, ack.error
     try:
-        ack = _query_ack(
+        ack = _cmd(
             session,
             keys.cmd_stream_start(realm, cid),
             {"rate_hz": 10, "scale": 0.25, "encoding": ENCODING_JPEG},
@@ -156,9 +151,9 @@ def test_stream_lifecycle(session, realm, cid):
             # Grab is rejected while streaming.
             grab = _grab(session, realm, cid, {"encoding": ENCODING_JPEG})
             assert grab.ok is False
-            assert grab.error
+            assert grab.error.reason == "streaming", grab.error
         finally:
-            ack = _query_ack(session, keys.cmd_stream_stop(realm, cid), {})
+            ack = _cmd(session, keys.cmd_stream_stop(realm, cid), {})
             assert ack.ok, ack.error
 
         time.sleep(0.5)
@@ -166,10 +161,10 @@ def test_stream_lifecycle(session, realm, cid):
         assert not late, f"frames still flowing after stream_stop: {len(late)}"
 
         # stream_stop is idempotent.
-        ack = _query_ack(session, keys.cmd_stream_stop(realm, cid), {})
+        ack = _cmd(session, keys.cmd_stream_stop(realm, cid), {})
         assert ack.ok, ack.error
     finally:
-        ack = _query_ack(
+        ack = _cmd(
             session, keys.cmd_configure(realm, cid), {"auto_exposure": True}
         )
         assert ack.ok, ack.error
@@ -182,7 +177,7 @@ def test_configure_roundtrip(session, realm, cid):
     assert status.exposure_us is not None, "no exposure in status"
     target = float(status.exposure_us)
 
-    ack = _query_ack(
+    ack = _cmd(
         session,
         keys.cmd_configure(realm, cid),
         {"auto_exposure": False, "exposure_us": target},
@@ -206,7 +201,7 @@ def test_configure_roundtrip(session, realm, cid):
             f"exposure {seen} did not settle at {target}"
         )
     finally:
-        ack = _query_ack(
+        ack = _cmd(
             session, keys.cmd_configure(realm, cid), {"auto_exposure": True}
         )
         assert ack.ok, ack.error

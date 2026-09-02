@@ -3,7 +3,6 @@
 import pytest
 
 from wf.contracts.camera2d.messages import (
-    Ack,
     CameraStatus,
     ConfigureCmd,
     ENCODING_BAYER_RG8,
@@ -11,7 +10,6 @@ from wf.contracts.camera2d.messages import (
     FrameHeader,
     FrameSpec,
     GrabReply,
-    ProducerAck,
     ProducerFrame,
     ProducerGrant,
     StreamParams,
@@ -59,7 +57,6 @@ GRANT = ProducerGrant(
 @pytest.mark.parametrize(
     "msg",
     [
-        Ack(ok=False, error="nope"),
         HEADER,
         HEADER_POSED,
         FrameSpec(scale=0.5, roi=[10, 20, 640, 480], encoding=ENCODING_JPEG, quality=80),
@@ -67,10 +64,8 @@ GRANT = ProducerGrant(
         StreamParams(rate_hz=30.0, scale=0.25, encoding=ENCODING_JPEG, quality=75),
         ConfigureCmd(exposure_us=4000.0, auto_gain=True, wb_red=1.2),
         ConfigureCmd(),
-        GrabReply(ok=True, header=HEADER, data=b"\xff\xd8spam"),
-        GrabReply(ok=False, error="camera is streaming - stop the stream first"),
+        GrabReply(header=HEADER, data=b"\xff\xd8spam"),
         GRANT,
-        ProducerAck(ok=True, owner=GRANT),
         ProducerFrame(
             client_id="browser-1",
             authority_id="backend-1",
@@ -161,7 +156,7 @@ def test_frameheader_rejects_bad_encoding():
 
 
 def test_grabreply_data_survives_cbor():
-    reply = GrabReply(ok=True, header=HEADER, data=b"\xff\xd8\x00\x01\x02jpegbytes")
+    reply = GrabReply(header=HEADER, data=b"\xff\xd8\x00\x01\x02jpegbytes")
     wire = decode(encode(reply.to_wire()))
     parsed = GrabReply.from_wire(wire)
     assert parsed == reply

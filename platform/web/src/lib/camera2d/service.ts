@@ -24,15 +24,17 @@ import { camAlive, camCmd, camImage, camStatus } from "../config";
 import type { CameraStatus, Pose, StreamParams } from "../messages";
 import { encodeWire } from "./cbor";
 import {
-  ackWire,
   cameraStatusWire,
   ENCODING_JPEG,
+  failWire,
   type FrameSpec,
   frameHeaderWire,
-  grabReplyWire,
+  grabValueWire,
+  okWire,
   opticalFrame,
   parseConfigureCmd,
   parseFrameSpec,
+  parseRequest,
   parseStreamParams,
   streamParamsWire,
   type WireMap,
@@ -195,66 +197,93 @@ export class Camera2dService {
     });
   }
 
+  // ── envelope boilerplate (mirrors wf.core.envelope.serve_query) ─────────
+  private recentReplies = new Map<string, Uint8Array>();
+
+  private async serveEnvelope(
+    query: Query,
+    op: (args: Record<string, unknown>) => Promise<WireMap>,
+  ): Promise<void> {
+    let reqId: string;
+    let args: Record<string, unknown>;
+    try {
+      const parsed = parseRequest(queryPayload(query) as Record<string, unknown> | null);
+      reqId = parsed.reqId;
+      args = parsed.args;
+    } catch (e) {
+      await replyBytes(query, encodeWire(failWire("invalid", "bad_request", errMsg(e))));
+      return;
+    }
+    let wire = this.recentReplies.get(reqId);
+    if (wire === undefined) {
+      wire = encodeWire(await op(args));
+      this.recentReplies.set(reqId, wire);
+      if (this.recentReplies.size > 256) {
+        const oldest = this.recentReplies.keys().next().value;
+        if (oldest !== undefined) this.recentReplies.delete(oldest);
+      }
+    }
+    await replyBytes(query, wire);
+  }
+
   // ── grab ─────────────────────────────────────────────────────────────────
 
   private async onGrab(query: Query): Promise<void> {
-    if (this.streamParams !== null) {
-      await replyBytes(
-        query,
-        encodeWire(grabReplyWire(false, "camera is streaming - stop the stream first", null, null)),
-      );
-      return;
-    }
-    let spec: FrameSpec;
-    try {
-      spec = parseFrameSpec(queryPayload(query) as Record<string, unknown>, this.grabDefaults);
-    } catch (e) {
-      await replyBytes(query, encodeWire(grabReplyWire(false, errMsg(e), null, null)));
-      return;
-    }
-    if (spec.encoding !== ENCODING_JPEG) {
-      await replyBytes(
-        query,
-        encodeWire(
-          grabReplyWire(false, `encoding ${spec.encoding} not supported by sim renderer`, null, null),
-        ),
-      );
-      return;
-    }
-    try {
-      const { header, data } = await this.renderAndPublish(spec);
-      await replyBytes(query, encodeWire(grabReplyWire(true, null, header, data)));
-    } catch (e) {
-      await replyBytes(query, encodeWire(grabReplyWire(false, errMsg(e), null, null)));
-    }
+    await this.serveEnvelope(query, async (args) => {
+      if (this.streamParams !== null) {
+        return failWire("conflict", "streaming", "stop the stream first");
+      }
+      let spec: FrameSpec;
+      try {
+        spec = parseFrameSpec(args, this.grabDefaults);
+      } catch (e) {
+        return failWire("invalid", "bad_request", errMsg(e));
+      }
+      if (spec.encoding !== ENCODING_JPEG) {
+        return failWire(
+          "invalid",
+          "unsupported_encoding",
+          `encoding ${spec.encoding} not supported by sim renderer`,
+        );
+      }
+      try {
+        const { header, data } = await this.renderAndPublish(spec);
+        return okWire(grabValueWire(header, data));
+      } catch (e) {
+        return failWire("internal", "grab_failed", errMsg(e));
+      }
+    });
   }
 
   // ── streaming ──────────────────────────────────────────────────────────
 
   private async onStreamStart(query: Query): Promise<void> {
-    let sp: StreamParams;
-    try {
-      sp = parseStreamParams(queryPayload(query) as Record<string, unknown>, this.streamDefaults);
-    } catch (e) {
-      await replyBytes(query, encodeWire(ackWire(false, errMsg(e))));
-      return;
-    }
-    if (sp.encoding !== ENCODING_JPEG) {
-      await replyBytes(
-        query,
-        encodeWire(ackWire(false, `encoding ${sp.encoding} not supported by sim renderer`)),
-      );
-      return;
-    }
-    this.stopStream(); // restart with new params if already streaming
-    this.streamParams = sp;
-    this.scheduleStreamTick(sp, performance.now());
-    await replyBytes(query, encodeWire(ackWire(true)));
+    await this.serveEnvelope(query, async (args) => {
+      let sp: StreamParams;
+      try {
+        sp = parseStreamParams(args, this.streamDefaults);
+      } catch (e) {
+        return failWire("invalid", "bad_request", errMsg(e));
+      }
+      if (sp.encoding !== ENCODING_JPEG) {
+        return failWire(
+          "invalid",
+          "unsupported_encoding",
+          `encoding ${sp.encoding} not supported by sim renderer`,
+        );
+      }
+      this.stopStream(); // restart with new params if already streaming
+      this.streamParams = sp;
+      this.scheduleStreamTick(sp, performance.now());
+      return okWire();
+    });
   }
 
   private async onStreamStop(query: Query): Promise<void> {
-    this.stopStream(); // idempotent
-    await replyBytes(query, encodeWire(ackWire(true)));
+    await this.serveEnvelope(query, async () => {
+      this.stopStream(); // idempotent
+      return okWire();
+    });
   }
 
   private stopStream(): void {
@@ -289,14 +318,16 @@ export class Camera2dService {
   // ── configure (virtual exposure/gain) ────────────────────────────────────
 
   private async onConfigure(query: Query): Promise<void> {
-    try {
-      const cmd = parseConfigureCmd(queryPayload(query) as Record<string, unknown>);
-      if (cmd.exposure_us !== null) this.exposureUs = cmd.exposure_us;
-      if (cmd.gain_db !== null) this.gainDb = cmd.gain_db;
-      await replyBytes(query, encodeWire(ackWire(true)));
-    } catch (e) {
-      await replyBytes(query, encodeWire(ackWire(false, errMsg(e))));
-    }
+    await this.serveEnvelope(query, async (args) => {
+      try {
+        const cmd = parseConfigureCmd(args);
+        if (cmd.exposure_us !== null) this.exposureUs = cmd.exposure_us;
+        if (cmd.gain_db !== null) this.gainDb = cmd.gain_db;
+        return okWire();
+      } catch (e) {
+        return failWire("invalid", "bad_request", errMsg(e));
+      }
+    });
   }
 
   // ── status (1 Hz) ────────────────────────────────────────────────────────

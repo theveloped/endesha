@@ -1,4 +1,12 @@
-"""The `camera2d` contract key space (design §4.1/§4.3)."""
+"""The `camera2d` contract key space (design §4.1/§4.3, wire-contract RFC).
+
+``cmd/*`` (grab / configure / stream_start / stream_stop) and the producer
+election (``producer/cmd/acquire`` / ``release``) are envelope queryables
+(``wf.core.envelope``). Frame-shaped exchanges are exempt from the envelope
+like streams: the ``image`` topic and the per-client ``producer/.../render``
+reply carry raw image bytes as the zenoh payload with a CBOR header as the
+attachment.
+"""
 
 from __future__ import annotations
 

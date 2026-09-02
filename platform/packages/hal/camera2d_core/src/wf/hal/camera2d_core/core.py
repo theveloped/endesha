@@ -24,7 +24,6 @@ from wf.contracts.arm import keys as arm_keys
 from wf.contracts.arm.messages import FlangeState
 from wf.contracts.camera2d import keys
 from wf.contracts.camera2d.messages import (
-    Ack,
     CameraStatus,
     ConfigureCmd,
     FrameHeader,
@@ -33,6 +32,7 @@ from wf.contracts.camera2d.messages import (
     StreamParams,
 )
 from wf.core.codec import decode, encode
+from wf.core.envelope import RecentReplies, Request, fail, ok_value, serve_query
 from wf.core.frames import (
     make_transform,
     quaternion_to_rotation_matrix,
@@ -88,6 +88,7 @@ class Camera2dCore:
         self._queryables: list = []
 
     # ── lifecycle ────────────────────────────────────────────────────────
+        self._recent = RecentReplies()
 
     def start(self) -> None:
         self._queryables = [
@@ -208,69 +209,68 @@ class Camera2dCore:
     # ── grab ─────────────────────────────────────────────────────────────
 
     def _on_grab(self, query) -> None:
-        key = str(query.key_expr)
+        serve_query(query, self._do_grab, recent=self._recent)
 
-        def fail(error: str) -> None:
-            query.reply(key, encode(GrabReply(ok=False, error=error).to_wire()))
-
+    def _do_grab(self, req: Request) -> dict:
         if self.backend.active_stream() is not None:
-            fail("camera is streaming - stop the stream first")
-            return
+            return fail("conflict", "streaming", "stop the stream first")
         try:
-            payload = decode(query.payload) if query.payload is not None else {}
-            spec = FrameSpec.from_wire({**self.params["grab_defaults"], **payload})
-        except Exception as exc:
-            fail(str(exc))
-            return
+            spec = FrameSpec.from_wire({**self.params["grab_defaults"], **req.args})
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_request", str(exc))
         try:
             captured = self.backend.grab(spec)
-            # Publish on the image topic exactly like a stream frame (grabs are
-            # recorded + pipeline-consumable — design §5.5), then duplicate into
-            # the synchronous reply.
-            header = self.publish_frame(captured)
-            query.reply(
-                key,
-                encode(GrabReply(ok=True, header=header, data=captured.data).to_wire()),
-            )
-        except Exception as exc:
-            fail(repr(exc))
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "grab_failed", repr(exc))
+        # Publish on the image topic exactly like a stream frame (grabs are
+        # recorded + pipeline-consumable — design §5.5), then duplicate into
+        # the synchronous reply.
+        header = self.publish_frame(captured)
+        return ok_value(GrabReply(header=header, data=captured.data).to_wire())
 
     # ── streaming ─────────────────────────────────────────────────────────
 
     def _on_stream_start(self, query) -> None:
-        key = str(query.key_expr)
+        serve_query(query, self._do_stream_start, recent=self._recent)
+
+    def _do_stream_start(self, req: Request) -> dict:
         try:
-            payload = decode(query.payload) if query.payload is not None else {}
-            sp = StreamParams.from_wire({**self.params["stream_defaults"], **payload})
-        except Exception as exc:
-            query.reply(key, encode(Ack(ok=False, error=str(exc)).to_wire()))
-            return
+            sp = StreamParams.from_wire({**self.params["stream_defaults"], **req.args})
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_request", str(exc))
         try:
             self.backend.start_stream(sp)
-            query.reply(key, encode(Ack(ok=True).to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(Ack(ok=False, error=repr(exc)).to_wire()))
+        except ValueError as exc:
+            return fail("invalid", "unsupported_encoding", str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "stream_failed", repr(exc))
+        return ok_value()
 
     def _on_stream_stop(self, query) -> None:
-        key = str(query.key_expr)
+        serve_query(query, self._do_stream_stop, recent=self._recent)
+
+    def _do_stream_stop(self, req: Request) -> dict:
         try:
             self.backend.stop_stream()  # idempotent — ok even when idle
-            query.reply(key, encode(Ack(ok=True).to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(Ack(ok=False, error=repr(exc)).to_wire()))
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "stream_failed", repr(exc))
+        return ok_value()
 
     # ── configure ──────────────────────────────────────────────────────
 
     def _on_configure(self, query) -> None:
-        key = str(query.key_expr)
+        serve_query(query, self._do_configure, recent=self._recent)
+
+    def _do_configure(self, req: Request) -> dict:
         try:
-            cmd = ConfigureCmd.from_wire(
-                decode(query.payload) if query.payload is not None else {}
-            )
+            cmd = ConfigureCmd.from_wire(req.args)
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_request", str(exc))
+        try:
             self.backend.configure(cmd)
-            query.reply(key, encode(Ack(ok=True).to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(Ack(ok=False, error=repr(exc)).to_wire()))
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "configure_failed", repr(exc))
+        return ok_value()
 
     # ── status (1 Hz) ────────────────────────────────────────────────────
 
