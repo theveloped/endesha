@@ -7,9 +7,9 @@ door and a wash cycle — Ecoclean class machines)::
     {realm}/washer/{rid}/action/start_wash   action  {client_id, program?}  -> door closed + cycle started
     {realm}/washer/{rid}/action/reset        action  {client_id}            -> handshake lines cleared, faults acknowledged
     {realm}/washer/{rid}/action/cancel       action cancel (a moving door stops: permission released)
-    {realm}/washer/{rid}/cmd/stop_door       queryable {client_id}         -> Ack   (immediate: release permission)
-    {realm}/washer/{rid}/cmd/get_recipe      queryable {}                  -> Recipe (the machine's current wash program)
-    {realm}/washer/{rid}/cmd/set_recipe      queryable {client_id, recipe} -> Ack   (lease-gated)
+    {realm}/washer/{rid}/cmd/stop_door       envelope queryable, args {}   -> value {} (immediate: release permission; lease-gated)
+    {realm}/washer/{rid}/cmd/get_recipe      envelope queryable, args {}   -> value RecipeReply {recipe, schema?}
+    {realm}/washer/{rid}/cmd/set_recipe      envelope queryable, args SetRecipe {recipe} (lease-gated; invalid:bad_recipe, busy:washing)
     {realm}/washer/{rid}/alive               liveliness token
 
 Actions are goals (they take seconds: door travel, handshakes) so a program's

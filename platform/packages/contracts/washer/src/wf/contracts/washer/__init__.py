@@ -4,7 +4,7 @@ from . import keys
 from .messages import (
     DOOR_STATES,
     PHASES,
-    Ack,
+    ERROR_REASONS,
     ParamSpec,
     Recipe,
     RecipeReply,
@@ -18,7 +18,7 @@ __all__ = [
     "keys",
     "DOOR_STATES",
     "PHASES",
-    "Ack",
+    "ERROR_REASONS",
     "ParamSpec",
     "Recipe",
     "RecipeReply",

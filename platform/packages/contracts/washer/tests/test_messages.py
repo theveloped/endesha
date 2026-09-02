@@ -39,6 +39,6 @@ def test_recipe_round_trip_and_validation():
     assert schema.validate(Recipe(params={"foo": 1})) == "bad_recipe:unknown param foo"
     assert schema.validate(Recipe(params={"rpm": 10})) == "bad_recipe:rpm > 9"
     assert schema.validate(Recipe(steps=[RecipeStep(), RecipeStep(), RecipeStep()])) == "bad_recipe:at most 2 steps"
-    reply = RecipeReply.from_wire(RecipeReply(True, recipe=r, schema=schema).to_wire())
+    reply = RecipeReply.from_wire(RecipeReply(recipe=r, schema=schema).to_wire())
     assert reply.recipe == r and reply.schema.params["rpm"].max == 9
-    assert SetRecipe.from_wire(SetRecipe("op", r).to_wire()).recipe == r
+    assert SetRecipe.from_wire(SetRecipe(r).to_wire()).recipe == r

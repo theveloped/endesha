@@ -33,7 +33,6 @@ from typing import Callable
 from wf.contracts.control.watcher import LeaseWatcher
 from wf.contracts.washer import keys
 from wf.contracts.washer.messages import (
-    Ack,
     Recipe,
     RecipeReply,
     RecipeStep,
@@ -42,6 +41,7 @@ from wf.contracts.washer.messages import (
 )
 from wf.core.action import ActionServer, GoalHandle
 from wf.core.codec import decode, encode
+from wf.core.envelope import RecentReplies, Request, fail, ok_value, serve_query
 from wf.core.log import get_logger
 from wf.core.time import now_ns
 from wf.hal.tags_core import TagsBackend, TagsCore
@@ -73,6 +73,7 @@ class WasherCore:
         self.settle_s = float(params.get("settle_s", 0.5))
 
         self._lease = LeaseWatcher(session, realm)
+        self._recent = RecentReplies()
 
         # ── the provided raw tags device ─────────────────────────────────
         provides = params.get("provides") or {}
@@ -438,20 +439,16 @@ class WasherCore:
         query.reply(str(query.key_expr), encode(payload))
 
     def _on_stop_door(self, query) -> None:
-        try:
-            req = decode(query.payload) or {}
-        except Exception as exc:
-            self._reply(query, Ack(False, f"bad_request:{exc!r}").to_wire())
-            return
-        if not self._lease.holds(req.get("client_id")):
-            self._reply(query, Ack(False, "no_control").to_wire())
-            return
+        serve_query(query, self._do_stop_door, recent=self._recent)
+
+    def _do_stop_door(self, req: Request) -> dict:
+        if not self._lease.holds(req.client_id):
+            return fail("conflict", "no_control")
         try:
             self.write("PermissionToClose", False)
         except Exception as exc:
-            self._reply(query, Ack(False, str(exc)).to_wire())
-            return
-        self._reply(query, Ack(True).to_wire())
+            return fail("internal", "write_failed", str(exc))
+        return ok_value()
 
     def read_recipe(self) -> Recipe:
         steps: list[RecipeStep] = []
@@ -476,32 +473,33 @@ class WasherCore:
         self.write(inv.RECIPE_NAME_DISPLAY, recipe.name)
 
     def _on_get_recipe(self, query) -> None:
+        serve_query(query, self._do_get_recipe)
+
+    def _do_get_recipe(self, req: Request) -> dict:
         try:
             recipe = self.read_recipe()
         except Exception as exc:
-            self._reply(query, RecipeReply(False, str(exc), schema=inv.RECIPE_SCHEMA).to_wire())
-            return
-        self._reply(query, RecipeReply(True, recipe=recipe, schema=inv.RECIPE_SCHEMA).to_wire())
+            return fail("internal", "read_failed", str(exc))
+        return ok_value(RecipeReply(recipe=recipe, schema=inv.RECIPE_SCHEMA).to_wire())
 
     def _on_set_recipe(self, query) -> None:
+        serve_query(query, self._do_set_recipe, recent=self._recent)
+
+    def _do_set_recipe(self, req: Request) -> dict:
         try:
-            req = SetRecipe.from_wire(decode(query.payload))
+            args = SetRecipe.from_wire(req.args)
         except Exception as exc:
-            self._reply(query, Ack(False, f"bad_request:{exc!r}").to_wire())
-            return
+            return fail("invalid", "bad_request", repr(exc))
         if not self._lease.holds(req.client_id):
-            self._reply(query, Ack(False, "no_control").to_wire())
-            return
-        err = inv.RECIPE_SCHEMA.validate(req.recipe)
+            return fail("conflict", "no_control")
+        err = inv.RECIPE_SCHEMA.validate(args.recipe)
         if err is not None:
-            self._reply(query, Ack(False, err).to_wire())
-            return
+            # validate() reports "bad_recipe:<what>"
+            return fail("invalid", "bad_recipe", err.removeprefix("bad_recipe:"))
         if self.status.phase == "washing":
-            self._reply(query, Ack(False, "busy:washing").to_wire())
-            return
+            return fail("busy", "washing")
         try:
-            self.write_recipe(req.recipe)
+            self.write_recipe(args.recipe)
         except Exception as exc:
-            self._reply(query, Ack(False, str(exc)).to_wire())
-            return
-        self._reply(query, Ack(True).to_wire())
+            return fail("internal", "write_failed", str(exc))
+        return ok_value()

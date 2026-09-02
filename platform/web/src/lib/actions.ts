@@ -164,16 +164,13 @@ export async function washerCancel(session: Session, realm: string, rid: string,
   return cancelGoalAt(session, washerActionPrefix(realm, rid), goalId);
 }
 
-export async function washerStopDoor(session: Session, realm: string, rid: string, clientId: string): Promise<Ack> {
-  const reply = await query(session, washerCmdStopDoor(realm, rid), { client_id: clientId });
-  if (reply === null) throw new Error("no reply from washer cmd/stop_door");
-  return reply as Ack;
+// Washer commands speak the envelope: resolve on success, throw EnvelopeError.
+export async function washerStopDoor(session: Session, realm: string, rid: string, clientId: string): Promise<void> {
+  await call(session, washerCmdStopDoor(realm, rid), {}, { clientId });
 }
 
 export async function washerGetRecipe(session: Session, realm: string, rid: string): Promise<RecipeReply> {
-  const reply = await query(session, washerCmdGetRecipe(realm, rid), {});
-  if (reply === null) throw new Error("no reply from washer cmd/get_recipe");
-  return reply as RecipeReply;
+  return (await call(session, washerCmdGetRecipe(realm, rid), {})) as unknown as RecipeReply;
 }
 
 export async function washerSetRecipe(
@@ -182,10 +179,8 @@ export async function washerSetRecipe(
   rid: string,
   clientId: string,
   recipe: Recipe,
-): Promise<Ack> {
-  const reply = await query(session, washerCmdSetRecipe(realm, rid), { client_id: clientId, recipe }, 15000);
-  if (reply === null) throw new Error("no reply from washer cmd/set_recipe");
-  return reply as Ack;
+): Promise<void> {
+  await call(session, washerCmdSetRecipe(realm, rid), { recipe }, { clientId, timeoutMs: 15000 });
 }
 
 export async function setDo(

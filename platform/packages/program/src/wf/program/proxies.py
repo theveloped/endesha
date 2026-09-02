@@ -28,7 +28,6 @@ from wf.contracts.dio.messages import ChannelsState, ForceChannel, SetChannel
 from wf.contracts.tags import keys as tags_keys
 from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
 from wf.contracts.washer import keys as washer_keys
-from wf.contracts.washer.messages import Ack as WasherAck
 from wf.contracts.washer.messages import Recipe, RecipeReply, RecipeSchema, SetRecipe, WasherStatus
 from wf.core.action import ActionClient, ActionRejected
 from wf.core.codec import decode, encode
@@ -634,44 +633,37 @@ class WasherProxy(DeviceProxy):
 
     def stop_door(self) -> None:
         _check()
-        reply = _query(self.session, washer_keys.cmd_stop_door(self.realm, self.rid), {"client_id": self.client_id})
-        if reply is None:
-            raise ProgramError(f"washer_stop_door:{self.rid}:no_reply")
-        ack = WasherAck.from_wire(reply)
-        if not ack.ok:
-            raise ProgramError(f"washer_stop_door:{self.rid}:{ack.error}")
+        reply = envelope_request(self.session, washer_keys.cmd_stop_door(self.realm, self.rid),
+                                 {}, client_id=self.client_id)
+        if not reply.ok:
+            raise ProgramError(f"washer_stop_door:{self.rid}:{reply.error}")
+
+    def _query_recipe(self) -> RecipeReply:
+        reply = envelope_request(self.session, washer_keys.cmd_get_recipe(self.realm, self.rid), {})
+        if not reply.ok:
+            raise ProgramError(f"washer_get_recipe:{self.rid}:{reply.error}")
+        return RecipeReply.from_wire(reply.value)
 
     def get_recipe(self) -> Recipe:
         _check()
-        reply = _query(self.session, washer_keys.cmd_get_recipe(self.realm, self.rid), {})
-        if reply is None:
-            raise ProgramError(f"washer_get_recipe:{self.rid}:no_reply")
-        rr = RecipeReply.from_wire(reply)
-        if not rr.ok or rr.recipe is None:
-            raise ProgramError(f"washer_get_recipe:{self.rid}:{rr.error}")
-        return rr.recipe
+        return self._query_recipe().recipe
 
     def recipe_schema(self) -> RecipeSchema:
         _check()
-        reply = _query(self.session, washer_keys.cmd_get_recipe(self.realm, self.rid), {})
-        if reply is None:
-            raise ProgramError(f"washer_get_recipe:{self.rid}:no_reply")
-        rr = RecipeReply.from_wire(reply)
-        if rr.schema is None:
+        schema = self._query_recipe().schema
+        if schema is None:
             raise ProgramError(f"washer_get_recipe:{self.rid}:no_schema")
-        return rr.schema
+        return schema
 
     def set_recipe(self, recipe: Recipe | dict) -> None:
         _check()
         if isinstance(recipe, dict):
             recipe = Recipe.from_wire(recipe)
-        reply = _query(self.session, washer_keys.cmd_set_recipe(self.realm, self.rid),
-                       SetRecipe(self.client_id, recipe).to_wire(), timeout_s=15.0)
-        if reply is None:
-            raise ProgramError(f"washer_set_recipe:{self.rid}:no_reply")
-        ack = WasherAck.from_wire(reply)
-        if not ack.ok:
-            raise ProgramError(f"washer_set_recipe:{self.rid}:{ack.error}")
+        reply = envelope_request(self.session, washer_keys.cmd_set_recipe(self.realm, self.rid),
+                                 SetRecipe(recipe).to_wire(), client_id=self.client_id,
+                                 timeout_s=15.0)
+        if not reply.ok:
+            raise ProgramError(f"washer_set_recipe:{self.rid}:{reply.error}")
 
 
 PROXIES: dict[str, type[DeviceProxy]] = {

@@ -249,10 +249,6 @@ function RecipeEditor({
     setMsg(null);
     try {
       const reply = await washerGetRecipe(session, realm, rid);
-      if (!reply.ok || reply.recipe === undefined) {
-        setMsg(`read failed: ${reply.error ?? "unknown"}`);
-        return;
-      }
       setSchema(reply.schema ?? null);
       setDraft(reply.recipe);
       setDirty(false);
@@ -266,11 +262,7 @@ function RecipeEditor({
     if (draft === null) return;
     setMsg(null);
     try {
-      const ack = await washerSetRecipe(session, realm, rid, clientId, draft);
-      if (!ack.ok) {
-        setMsg(`write failed: ${ack.error ?? "unknown"}`);
-        return;
-      }
+      await washerSetRecipe(session, realm, rid, clientId, draft);
       setMsg("written to the machine");
       setDirty(false);
     } catch (e) {

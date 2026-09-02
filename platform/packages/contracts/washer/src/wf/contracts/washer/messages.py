@@ -245,15 +245,14 @@ class RecipeSchema:
 
 @dataclass
 class RecipeReply:
-    ok: bool
-    error: str | None = None
-    recipe: Recipe | None = None
+    """``cmd/get_recipe`` envelope ``value``: the machine's current recipe
+    plus (when the HAL knows it) the editing schema."""
+
+    recipe: Recipe
     schema: RecipeSchema | None = None
 
     def to_wire(self) -> dict:
-        d: dict = {"ok": bool(self.ok), "error": self.error}
-        if self.recipe is not None:
-            d["recipe"] = self.recipe.to_wire()
+        d: dict = {"recipe": self.recipe.to_wire()}
         if self.schema is not None:
             d["schema"] = self.schema.to_wire()
         return d
@@ -261,34 +260,32 @@ class RecipeReply:
     @classmethod
     def from_wire(cls, d: dict) -> "RecipeReply":
         return cls(
-            ok=bool(d.get("ok", False)),
-            error=d.get("error"),
-            recipe=Recipe.from_wire(d["recipe"]) if d.get("recipe") is not None else None,
+            recipe=Recipe.from_wire(d["recipe"]),
             schema=RecipeSchema.from_wire(d["schema"]) if d.get("schema") is not None else None,
         )
 
 
 @dataclass
 class SetRecipe:
-    client_id: str
+    """``cmd/set_recipe`` envelope ``args`` — the acting ``client_id``
+    travels top-level in the envelope request (wire-contract RFC §4.1)."""
+
     recipe: Recipe
 
     def to_wire(self) -> dict:
-        return {"client_id": self.client_id, "recipe": self.recipe.to_wire()}
+        return {"recipe": self.recipe.to_wire()}
 
     @classmethod
     def from_wire(cls, d: dict) -> "SetRecipe":
-        return cls(client_id=d["client_id"], recipe=Recipe.from_wire(d["recipe"]))
+        return cls(recipe=Recipe.from_wire(d["recipe"]))
 
 
-@dataclass
-class Ack:
-    ok: bool
-    error: str | None = None
-
-    def to_wire(self) -> dict:
-        return {"ok": bool(self.ok), "error": self.error}
-
-    @classmethod
-    def from_wire(cls, d: dict) -> "Ack":
-        return cls(ok=bool(d.get("ok", False)), error=d.get("error"))
+#: Registered envelope error ``reason`` values (wire-contract RFC §5).
+ERROR_REASONS = (
+    "bad_request",
+    "no_control",
+    "bad_recipe",
+    "washing",
+    "read_failed",
+    "write_failed",
+)

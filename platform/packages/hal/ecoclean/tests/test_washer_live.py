@@ -190,8 +190,9 @@ def test_live_handshake_against_opcua_server():
         assert seen == {True, False}
 
         # recipe read from the real nodes
-        reply = RecipeReply.from_wire(_query(session, keys.cmd_get_recipe(realm, "washer0"), {}))
-        assert reply.ok and reply.recipe.name == "Standard"
+        reply = RecipeReply.from_wire(
+            envelope_request(session, keys.cmd_get_recipe(realm, "washer0"), {}).value)
+        assert reply.recipe.name == "Standard"
         assert reply.recipe.steps[0].cleaning == 2 and reply.recipe.steps[0].time_s == 45
         assert reply.recipe.params["rpm"] == 5
 

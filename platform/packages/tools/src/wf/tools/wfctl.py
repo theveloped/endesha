@@ -36,7 +36,6 @@ from wf.contracts.dio import keys as dio_keys
 from wf.contracts.program import keys as program_keys
 from wf.contracts.tags import keys as tags_keys
 from wf.contracts.washer import keys as washer_keys
-from wf.contracts.washer.messages import Ack as WasherAck
 from wf.contracts.washer.messages import Recipe, RecipeReply, SetRecipe, WasherStatus
 from wf.core.action import ActionClient, ActionRejected
 from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
@@ -577,28 +576,22 @@ def cmd_washer_stop_door(session, args) -> int:
             print(f"lease denied: {ack.error}", file=sys.stderr)
             return 1
     try:
-        reply = _query(session, washer_keys.cmd_stop_door(args.realm, args.washer), {"client_id": cid})
+        reply = envelope_request(session, washer_keys.cmd_stop_door(args.realm, args.washer),
+                                 {}, client_id=cid)
     finally:
         if external_cid is None:
             _release_lease(session, args, cid)
-    if reply is None:
-        print("no reply", file=sys.stderr)
-        return 1
-    ack = WasherAck.from_wire(reply)
-    print("ok" if ack.ok else f"error: {ack.error}")
-    return 0 if ack.ok else 1
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_washer_recipe(session, args) -> int:
     if args.set is None:
-        reply = _query(session, washer_keys.cmd_get_recipe(args.realm, args.washer), {})
-        if reply is None:
-            print("no reply", file=sys.stderr)
+        reply = envelope_request(session, washer_keys.cmd_get_recipe(args.realm, args.washer), {})
+        if not reply.ok:
+            print(f"error: {reply.error}", file=sys.stderr)
             return 1
-        rr = RecipeReply.from_wire(reply)
-        if not rr.ok or rr.recipe is None:
-            print(f"error: {rr.error}", file=sys.stderr)
-            return 1
+        rr = RecipeReply.from_wire(reply.value)
         if args.json:
             print(json.dumps(rr.recipe.to_wire(), indent=2))
             return 0
@@ -622,16 +615,13 @@ def cmd_washer_recipe(session, args) -> int:
             print(f"lease denied: {ack.error}", file=sys.stderr)
             return 1
     try:
-        reply = _query(session, washer_keys.cmd_set_recipe(args.realm, args.washer), SetRecipe(cid, recipe).to_wire(), timeout_s=15.0)
+        reply = envelope_request(session, washer_keys.cmd_set_recipe(args.realm, args.washer),
+                                 SetRecipe(recipe).to_wire(), client_id=cid, timeout_s=15.0)
     finally:
         if external_cid is None:
             _release_lease(session, args, cid)
-    if reply is None:
-        print("no reply", file=sys.stderr)
-        return 1
-    ack = WasherAck.from_wire(reply)
-    print("ok" if ack.ok else f"error: {ack.error}")
-    return 0 if ack.ok else 1
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_tags_state(session, args) -> int:

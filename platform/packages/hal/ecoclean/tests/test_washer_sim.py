@@ -15,7 +15,7 @@ from wf.contracts.tags import keys as tags_keys
 from wf.contracts.tags.messages import ForceTag, TagsState
 from wf.core.envelope import request as envelope_request
 from wf.contracts.washer import keys
-from wf.contracts.washer.messages import Ack, Recipe, RecipeReply, RecipeStep, SetRecipe, WasherStatus
+from wf.contracts.washer.messages import Recipe, RecipeReply, RecipeStep, SetRecipe, WasherStatus
 from wf.core.action import ActionClient, ActionRejected
 from wf.core.codec import decode, encode
 from wf.hal.ecoclean import EcocleanSimBackend, WasherCore
@@ -143,11 +143,11 @@ def _cancel_case(rig):
     # reset re-arms permission -> the door finishes its travel
     assert rig.action("reset")["state"] == "succeeded"
     assert _wait(lambda: rig.phase() == "door_open", timeout_s=8.0)
-    # stop_door is a plain lease-gated command
-    ack = Ack.from_wire(_query(rig.session, keys.cmd_stop_door(rig.realm, "washer0"), {"client_id": "op"}))
+    # stop_door is a plain lease-gated envelope command
+    ack = envelope_request(rig.session, keys.cmd_stop_door(rig.realm, "washer0"), {}, client_id="op")
     assert ack.ok and rig.core.get("PermissionToClose") is False
-    ack = Ack.from_wire(_query(rig.session, keys.cmd_stop_door(rig.realm, "washer0"), {"client_id": "bob"}))
-    assert ack.error == "no_control"
+    ack = envelope_request(rig.session, keys.cmd_stop_door(rig.realm, "washer0"), {}, client_id="bob")
+    assert not ack.ok and ack.error.reason == "no_control"
 
 
 def test_lease_gating(rig):
@@ -157,15 +157,18 @@ def test_lease_gating(rig):
 
 
 def test_recipe_round_trip_and_validation(rig):
-    reply = RecipeReply.from_wire(_query(rig.session, keys.cmd_get_recipe(rig.realm, "washer0"), {}))
-    assert reply.ok and reply.recipe.name == "Standard" and reply.schema.steps == 10
+    reply = RecipeReply.from_wire(
+        envelope_request(rig.session, keys.cmd_get_recipe(rig.realm, "washer0"), {}).value)
+    assert reply.recipe.name == "Standard" and reply.schema.steps == 10
     assert reply.recipe.steps[0] == RecipeStep(cleaning=1, time_s=60)
     assert reply.recipe.params["rpm"] == 4
 
     new = Recipe(name="Quick", steps=[RecipeStep(1, 20, 2, 0, True), RecipeStep(4, 40)], params={"rpm": 6, "swing_angle": 45})
-    ack = Ack.from_wire(_query(rig.session, keys.cmd_set_recipe(rig.realm, "washer0"), SetRecipe("op", new).to_wire()))
-    assert ack.ok, ack
-    reply = RecipeReply.from_wire(_query(rig.session, keys.cmd_get_recipe(rig.realm, "washer0"), {}))
+    ack = envelope_request(rig.session, keys.cmd_set_recipe(rig.realm, "washer0"),
+                           SetRecipe(new).to_wire(), client_id="op")
+    assert ack.ok, ack.error
+    reply = RecipeReply.from_wire(
+        envelope_request(rig.session, keys.cmd_get_recipe(rig.realm, "washer0"), {}).value)
     assert reply.recipe.name == "Quick"
     assert reply.recipe.steps[:2] == new.steps and reply.recipe.steps[2] == RecipeStep()
     assert reply.recipe.params["rpm"] == 6 and reply.recipe.params["swing_angle"] == 45
@@ -175,10 +178,13 @@ def test_recipe_round_trip_and_validation(rig):
     assert st.tags["programmfolgen_0_zeit"].value == 20 and st.tags["kommentar"].value == "Quick"
 
     bad = Recipe(name="Bad", steps=[RecipeStep(1, 5000)])
-    ack = Ack.from_wire(_query(rig.session, keys.cmd_set_recipe(rig.realm, "washer0"), SetRecipe("op", bad).to_wire()))
-    assert ack.error == "bad_recipe:steps[0].time_s > 600"
-    ack = Ack.from_wire(_query(rig.session, keys.cmd_set_recipe(rig.realm, "washer0"), SetRecipe("bob", new).to_wire()))
-    assert ack.error == "no_control"
+    ack = envelope_request(rig.session, keys.cmd_set_recipe(rig.realm, "washer0"),
+                           SetRecipe(bad).to_wire(), client_id="op")
+    assert not ack.ok and ack.error.reason == "bad_recipe"
+    assert ack.error.detail == "steps[0].time_s > 600"
+    ack = envelope_request(rig.session, keys.cmd_set_recipe(rig.realm, "washer0"),
+                           SetRecipe(new).to_wire(), client_id="bob")
+    assert not ack.ok and ack.error.reason == "no_control"
 
 
 def test_provided_tags_device_and_fault(rig):

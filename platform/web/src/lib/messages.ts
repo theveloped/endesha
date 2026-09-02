@@ -310,10 +310,9 @@ export interface RecipeSchema {
   params: Record<string, ParamSpec>;
 }
 
+/** cmd/get_recipe envelope value. */
 export interface RecipeReply {
-  ok: boolean;
-  error: string | null;
-  recipe?: Recipe;
+  recipe: Recipe;
   schema?: RecipeSchema;
 }
 
