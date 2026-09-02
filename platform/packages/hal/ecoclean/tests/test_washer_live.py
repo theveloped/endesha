@@ -157,7 +157,7 @@ def test_live_handshake_against_opcua_server():
 
         # open_door: PermissionToClose + LoadRequest reach the server; we play the PLC
         client = ActionClient(session, keys.action_prefix(realm, "washer0"), "open_door")
-        goal = client.send({"client_id": "op"})
+        goal = client.send({}, client_id="op")
         assert _wait(lambda: plc.get("LoadRequest") is True and plc.get("PermissionToClose") is True)
         assert _wait(lambda: status().detail == "waiting for door open")
         plc.set("DoorClosed", False)
@@ -165,13 +165,13 @@ def test_live_handshake_against_opcua_server():
         assert _wait(lambda: status().door == "moving")
         plc.set("DoorOpen", True)
         res = goal.result(timeout_s=10.0)
-        assert res["state"] == "succeeded", res
+        assert res.ok, res.error
         assert _wait(lambda: status().phase == "door_open")
         assert _wait(lambda: plc.get("PermissionToClose") is False)
 
         # start_wash with a program number: typed Int16 write on the real node
         client = ActionClient(session, keys.action_prefix(realm, "washer0"), "start_wash")
-        goal = client.send({"client_id": "op", "program": 2})
+        goal = client.send({"program": 2}, client_id="op")
         assert _wait(lambda: plc.get("WashProgram") == 2 and plc.get("LoadComplete") is True)
         assert plc.vtype("WashProgram") == ua.VariantType.Int16
         plc.set("DoorOpen", False)
@@ -179,7 +179,7 @@ def test_live_handshake_against_opcua_server():
         assert _wait(lambda: plc.get("LoadComplete") is False)
         plc.set("ReadyToLoad", False)
         plc.set("WashingInProgress", True)
-        assert goal.result(timeout_s=10.0)["state"] == "succeeded"
+        assert goal.result(timeout_s=10.0).ok
         assert _wait(lambda: status().phase == "washing")
 
         # watchdog toggles on the server

@@ -310,11 +310,9 @@ export default function OperatePage({
         }
         const handle = await sendExecutePath(session, realm, [wp], { clientId });
         const result = await handle.result;
-        if (result.state !== "succeeded")
+        if (!result.ok)
           setError(
-            result.error === null
-              ? result.state
-              : `${result.state}: ${result.error}`,
+            `${result.error?.reason ?? "failed"}${result.error?.detail ? `: ${result.error.detail}` : ""}`,
           );
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));

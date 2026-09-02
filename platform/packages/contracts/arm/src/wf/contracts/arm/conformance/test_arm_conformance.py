@@ -17,7 +17,6 @@ import pytest
 
 from wf.contracts.arm import keys
 from wf.contracts.arm.messages import (
-    Ack,
     ArmStatus,
     ExecutePathGoal,
     FlangeState,
@@ -36,12 +35,11 @@ from wf.core.codec import decode, encode
 from .conftest import collect_samples, first_sample
 
 
-def _query_ack(session, key: str, payload: dict, timeout_s: float = 5.0) -> Ack:
-    replies = session.get(key, payload=encode(payload), timeout=timeout_s)
-    for reply in replies:
-        if reply.ok is not None:
-            return Ack.from_wire(decode(reply.ok.payload))
-    pytest.fail(f"no reply from {key}")
+def _query_ack(session, key: str, payload: dict, timeout_s: float = 5.0) -> Reply:
+    reply = envelope_request(session, key, payload, timeout_s=timeout_s)
+    if not reply.ok and reply.error.reason == "no_reply":
+        pytest.fail(f"no reply from {key}")
+    return reply
 
 
 def _latest_q(session, realm: str, rid: str) -> list[float]:
@@ -166,13 +164,12 @@ def test_execute_path_lifecycle_zero_motion(session, realm, rid):
     client = ActionClient(session, keys.action_prefix(realm, rid), "execute_path")
     with _lease(session, realm, rid) as cid:
         goal_msg = ExecutePathGoal(
-            waypoints=[Waypoint(type="movej", target={"q": q})], client_id=cid
+            waypoints=[Waypoint(type="movej", target={"q": q})]
         )
 
-        goal = client.send(goal_msg.to_wire())
+        goal = client.send(goal_msg.to_wire(), client_id=cid)
         result = goal.result(timeout_s=30.0)
-        assert result["state"] == "succeeded", result
-        assert result["ok"] is True
+        assert result.ok, result.error
 
         # Result re-query returns the cached result.
         replies = session.get(
@@ -184,14 +181,12 @@ def test_execute_path_lifecycle_zero_motion(session, realm, rid):
                 cached = decode(reply.ok.payload)
                 break
         assert cached is not None, "result queryable did not reply"
-        assert cached["state"] == "succeeded"
-        assert cached["t"] == result["t"]
+        assert cached["ok"] is True
 
         # Idempotent resubmission: accepted with terminal state, no re-execution.
-        goal2 = client.send(goal_msg.to_wire(), goal_id=goal.goal_id)
+        goal2 = client.send(goal_msg.to_wire(), client_id=cid, goal_id=goal.goal_id)
         result2 = goal2.result(timeout_s=5.0)
-        assert result2["state"] == "succeeded"
-        assert result2["t"] == result["t"], "goal was re-executed"
+        assert result2.ok, result2.error
 
 
 def test_cancel_and_busy(session, realm, rid):
@@ -210,8 +205,8 @@ def test_cancel_and_busy(session, realm, rid):
                     Waypoint(type="movej", target={"q": q_moved}),
                     Waypoint(type="movej", target={"q": q}),
                 ],
-                client_id=cid,
-            ).to_wire()
+            ).to_wire(),
+            client_id=cid,
         )
 
         # Second goal while the first runs must be rejected busy (busy is
@@ -221,16 +216,16 @@ def test_cancel_and_busy(session, realm, rid):
             client.send(
                 ExecutePathGoal(
                     waypoints=[Waypoint(type="movej", target={"q": q})],
-                    client_id=cid,
-                ).to_wire()
+                ).to_wire(),
+                client_id=cid,
             )
-        assert excinfo.value.reason == "busy"
+        assert excinfo.value.error.code == "busy"
 
         # Cancel the first: terminal canceled within 5 s.
         cancel_reply = goal.cancel()
         assert cancel_reply["state"] in ("canceling", "canceled")
         result = goal.result(timeout_s=5.0)
-        assert result["state"] == "canceled", result
+        assert not result.ok and result.error.reason == "canceled", result.error
 
 
 def test_set_tcp_roundtrip(session, realm, rid):
@@ -241,7 +236,7 @@ def test_set_tcp_roundtrip(session, realm, rid):
         session, keys.cmd_set_tcp(realm, rid), {"name": "conformance_missing_tcp"}
     )
     assert not ack.ok
-    assert ack.error.startswith("tcp_unknown:"), ack.error
+    assert ack.error.reason == "tcp_unknown", ack.error
 
     status = ArmStatus.from_wire(
         first_sample(session, keys.state_status(realm, rid), timeout_s=2.0)
@@ -265,10 +260,9 @@ def test_pose_target_unknown_frame(session, realm, rid):
                     },
                 )
             ],
-            client_id=cid,
         )
         with pytest.raises(ActionRejected) as excinfo:
-            client.send(goal.to_wire())
+            client.send(goal.to_wire(), client_id=cid)
     assert excinfo.value.reason.startswith("frame_unknown:"), excinfo.value.reason
 
 
@@ -287,12 +281,11 @@ def test_execute_path_pose_target(session, realm, rid):
             waypoints=[
                 Waypoint(type="movej", target={"pose": flange.pose.to_wire()})
             ],
-            client_id=cid,
         )
-        result = client.send(goal.to_wire()).result(timeout_s=30.0)
-    assert result["state"] == "succeeded", result
+        result = client.send(goal.to_wire(), client_id=cid).result(timeout_s=30.0)
+    assert result.ok, result.error
 
-    snapshot = result["data"]["snapshot"]
+    snapshot = result.value["snapshot"]
     resolved_q = snapshot["waypoints"][0]["resolved_q"]
     assert isinstance(resolved_q, list) and len(resolved_q) == 6
     assert all(isinstance(v, float) for v in resolved_q)

@@ -443,7 +443,9 @@ def test_provided_device_cannot_be_switched(tmp_path):
     cell = load_cell(_write(tmp_path, _PROVIDES_CELL))
     svc = SupervisorService.__new__(SupervisorService)
     svc.cell = cell
-    assert svc._set_source_reply("io0", "sim") == {"ok": False, "error": "provided_by:r1"}
+    reply = svc._set_source_reply("io0", "sim")
+    assert reply["ok"] is False
+    assert reply["error"]["reason"] == "provided_by" and reply["error"]["detail"] == "r1"
 
 
 @pytest.mark.parametrize(

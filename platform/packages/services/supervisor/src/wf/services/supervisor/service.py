@@ -25,6 +25,8 @@ from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.supervisor import keys as sup_keys
 from wf.core.audit import QueryAudit
 from wf.core.codec import decode, encode
+from wf.core.envelope import RecentReplies, Request, fail, ok_value, serve_query
+from wf.contracts.supervisor.messages import SetSource
 from wf.core.log import get_logger
 from wf.core.session import declare_alive, open_session
 from wf.core.time import now_ns
@@ -66,6 +68,7 @@ class SupervisorService:
         self._logs = LogHub(session, realm, node)
         self._events = EventLog(session, realm, node)
         self._audit = QueryAudit(session, realm, "supervisor")
+        self._recent = RecentReplies()
         self._procs = ProcManager(on_line=self._logs.line)
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -246,29 +249,25 @@ class SupervisorService:
         self._reply_dict(query, self._devices_payload())
 
     def _on_set_source(self, query: zenoh.Query) -> None:
-        request: dict = {}
-        if query.payload is not None:
-            try:
-                decoded = decode(query.payload)
-                if isinstance(decoded, dict):
-                    request = decoded
-            except Exception:  # noqa: BLE001
-                pass
-        self._reply_dict(
-            query,
-            self._set_source_reply(request.get("device_id"), request.get("source")),
-        )
+        serve_query(query, self._do_set_source, recent=self._recent)
+
+    def _do_set_source(self, req: Request) -> dict:
+        try:
+            cmd = SetSource.from_wire(req.args)
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_request", repr(exc))
+        return self._set_source_reply(cmd.device_id, cmd.source)
 
     def _set_source_reply(self, device_id, source) -> dict:
         """Cold-switch a device and restart its selected provider."""
         if not isinstance(device_id, str) or device_id not in self.cell["resources"]:
             for host, res in self.cell["resources"].items():
                 if device_id in (res.get("provides") or {}):
-                    return {"ok": False, "error": f"provided_by:{host}"}
-            return {"ok": False, "error": f"unknown_device:{device_id}"}
+                    return fail("conflict", "provided_by", host)
+            return fail("not_found", "unknown_device", str(device_id))
         sources = self.cell["resources"].get(device_id, {}).get("sources", {})
         if source != "off" and source not in sources:
-            return {"ok": False, "error": f"no_source:{device_id}:{source}"}
+            return fail("invalid", "no_source", f"{device_id}:{source}")
 
         error = None
         with self._lock:
@@ -287,13 +286,8 @@ class SupervisorService:
         self._publish_devices()
         self._publish_descriptor()
         if error:
-            return {
-                "ok": False,
-                "error": error,
-                "device_id": device_id,
-                "source": source,
-            }
-        return {"ok": True, "device_id": device_id, "source": source}
+            return fail("internal", "spawn_failed", error)
+        return ok_value({"device_id": device_id, "source": source})
 
     def _start_reaper(self) -> None:
         self._reaper = threading.Thread(

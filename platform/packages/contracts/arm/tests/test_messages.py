@@ -5,7 +5,6 @@ import pytest
 import math
 
 from wf.contracts.arm.messages import (
-    Ack,
     ArmStatus,
     ExecutePathGoal,
     FlangeState,
@@ -42,13 +41,8 @@ POSE = Pose(frame="arm/r1/base", xyz=[0.1, -0.2, 0.3], quat=[0.0, 0.0, 0.0, 1.0]
             state_rate_hz=200.0,
         ),
         SetDo(bank="standard", pin=1, value=True),
-        Ack(ok=False, error="nope"),
         Waypoint(type="movej", target={"q": [0.0] * 6}, speed=1.0, blend_radius=0.01),
         ExecutePathGoal(waypoints=[Waypoint(type="movej", target={"q": [1.0] * 6})]),
-        ExecutePathGoal(
-            waypoints=[Waypoint(type="movej", target={"q": [1.0] * 6})],
-            client_id="lease-1",
-        ),
         Freedom(dof="yaw"),
         Freedom(dof="pitch", frame="tool", min=-1.0, max=1.0, step=0.1),
         Freedom(dof="z", min=-0.05, max=0.05, step=0.01),

@@ -315,8 +315,8 @@ class WasherCore:
             "reset": None,
         }[name]
 
-        def accept(goal: dict) -> str | None:
-            if not self._lease.holds(goal.get("client_id")):
+        def accept(goal: dict, client_id: str | None = None) -> str | None:
+            if not self._lease.holds(client_id):
                 return "no_control"
             st = self.status
             if not st.connected:

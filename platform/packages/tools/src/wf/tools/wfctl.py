@@ -23,7 +23,6 @@ from wf.core.cad_object import ObjectDef, instantiate
 
 from wf.contracts.arm import keys
 from wf.contracts.arm.messages import (
-    Ack,
     ArmStatus,
     ExecutePathGoal,
     JogCommand,
@@ -156,13 +155,9 @@ def cmd_status(session, args) -> int:
 
 def cmd_set_do(session, args) -> int:
     req = SetDo(bank=args.bank, pin=args.pin, value=bool(args.value))
-    reply = _query(session, keys.cmd_set_do(args.realm, args.rid), req.to_wire())
-    if reply is None:
-        print("no reply from cmd/set_do", file=sys.stderr)
-        return 1
-    ack = Ack.from_wire(reply)
-    print(json.dumps(ack.to_wire()))
-    return 0 if ack.ok else 1
+    reply = envelope_request(session, keys.cmd_set_do(args.realm, args.rid), req.to_wire())
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def _parse_joints(args) -> list[float]:
@@ -220,7 +215,7 @@ def _send_goal(session, args, waypoints: list[Waypoint]) -> int:
             print(f"control lease unavailable: {ack.error}", file=sys.stderr)
             return 1
 
-    goal_msg = ExecutePathGoal(waypoints=waypoints, client_id=cid)
+    goal_msg = ExecutePathGoal(waypoints=waypoints)
     client = ActionClient(
         session, keys.action_prefix(args.realm, args.rid), "execute_path"
     )
@@ -235,15 +230,16 @@ def _send_goal(session, args, waypoints: list[Waypoint]) -> int:
     try:
         try:
             goal = client.send(
-                goal_msg.to_wire(), goal_id=args.goal_id, on_feedback=on_feedback
+                goal_msg.to_wire(), client_id=cid, goal_id=args.goal_id,
+                on_feedback=on_feedback
             )
         except ActionRejected as exc:
             print(f"rejected: {exc.reason}", file=sys.stderr)
             return 1
         print(f"accepted goal_id={goal.goal_id}", flush=True)
         result = goal.result(timeout_s=120.0)
-        print(json.dumps(result))
-        return 0 if result.get("state") == "succeeded" else 1
+        print(json.dumps(result.value if result.ok else {"error": str(result.error)}))
+        return 0 if result.ok else 1
     finally:
         if owned:
             _release_lease(session, args, cid)
@@ -285,28 +281,17 @@ def cmd_cancel(session, args) -> int:
 
 
 def cmd_stop(session, args) -> int:
-    reply = _query(session, keys.cmd_stop(args.realm, args.rid), {})
-    if reply is None:
-        print("no reply from cmd/stop", file=sys.stderr)
-        return 1
-    ack = Ack.from_wire(reply)
-    print(json.dumps(ack.to_wire()))
-    return 0 if ack.ok else 1
+    reply = envelope_request(session, keys.cmd_stop(args.realm, args.rid), {})
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_clear_pstop(session, args) -> int:
-    reply = _query(
+    reply = envelope_request(
         session, keys.cmd_clear_protective_stop(args.realm, args.rid), {}
     )
-    if reply is None:
-        print("no reply from cmd/clear_protective_stop", file=sys.stderr)
-        return 1
-    ack = Ack.from_wire(reply)
-    print(json.dumps(ack.to_wire()))
-    return 0 if ack.ok else 1
-
-
-_CART_AXES = {"x": 0, "y": 1, "z": 2, "rx": 3, "ry": 4, "rz": 5}
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def _parse_channel_value(text: str):
@@ -791,13 +776,9 @@ def cmd_jog(session, args) -> int:
 
 
 def cmd_set_tcp(session, args) -> int:
-    reply = _query(session, keys.cmd_set_tcp(args.realm, args.rid), {"name": args.name})
-    if reply is None:
-        print("no reply from cmd/set_tcp", file=sys.stderr)
-        return 1
-    ack = Ack.from_wire(reply)
-    print(json.dumps(ack.to_wire()))
-    return 0 if ack.ok else 1
+    reply = envelope_request(session, keys.cmd_set_tcp(args.realm, args.rid), {"name": args.name})
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_pose(session, args) -> int:

@@ -21,7 +21,6 @@ import numpy as np
 
 from wf.contracts.arm import keys
 from wf.contracts.arm.messages import (
-    Ack,
     ArmStatus,
     ExecutePathGoal,
     FlangeState,
@@ -36,6 +35,7 @@ from wf.contracts.arm.messages import (
 from wf.core.audit import QueryAudit
 from wf.core.action import ActionServer, GoalHandle
 from wf.core.codec import decode, encode
+from wf.core.envelope import RecentReplies, Request, fail, ok_value, serve_query
 from wf.core.frames import (
     make_transform,
     quaternion_to_rotation_matrix,
@@ -140,6 +140,7 @@ class ArmCore:
         self._pub_status = session.declare_publisher(keys.state_status(realm, rid))
 
         self._audit = QueryAudit(session, realm, f"arm:{rid}")
+        self._recent = RecentReplies()
         self.action_server = ActionServer(session, keys.action_prefix(realm, rid), audit=self._audit)
         self._queryables: list = []
         self._jog_sub = None
@@ -331,64 +332,66 @@ class ArmCore:
     # ── cmd queryables ─────────────────────────────────────────────────────
 
     def _on_set_do(self, query) -> None:
-        key = str(query.key_expr)
+        serve_query(query, self._do_set_do, recent=self._recent)
+
+    def _do_set_do(self, req: Request) -> dict:
         try:
-            req = SetDo.from_wire(decode(query.payload))
-            self.backend.set_do(req.bank, req.pin, req.value)
-            query.reply(key, encode(Ack(ok=True).to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(Ack(ok=False, error=str(exc)).to_wire()))
+            cmd = SetDo.from_wire(req.args)
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_request", repr(exc))
+        try:
+            self.backend.set_do(cmd.bank, cmd.pin, cmd.value)
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "set_do_failed", str(exc))
+        return ok_value()
 
     def _on_stop(self, query) -> None:
+        serve_query(query, self._do_stop, recent=self._recent)
+
+    def _do_stop(self, req: Request) -> dict:
         """Out-of-band stop: abort the active goal and clear an armed jog."""
-        key = str(query.key_expr)
         self._external_stop.set()
         with self._jog_lock:
             self._jog_cmd = None  # disarm any active jog
         try:
             self.backend.stop()
-        except Exception as exc:
-            query.reply(key, encode(Ack(ok=False, error=repr(exc)).to_wire()))
-            return
-        query.reply(key, encode(Ack(ok=True).to_wire()))
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "stop_failed", repr(exc))
+        return ok_value()
 
     def _on_clear_protective_stop(self, query) -> None:
-        key = str(query.key_expr)
+        serve_query(query, self._do_clear_protective_stop, recent=self._recent)
+
+    def _do_clear_protective_stop(self, req: Request) -> dict:
         try:
             self.backend.clear_protective_stop()
-            query.reply(key, encode(Ack(ok=True).to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(Ack(ok=False, error=repr(exc)).to_wire()))
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "clear_failed", repr(exc))
+        return ok_value()
 
     def _on_set_tcp(self, query) -> None:
+        serve_query(query, self._do_set_tcp, recent=self._recent)
+
+    def _do_set_tcp(self, req: Request) -> dict:
         """Select the active TCP from the config store (cached at selection
         time — a later store edit does not retroactively change the offset)."""
-        key = str(query.key_expr)
+        name = req.args.get("name")
+        if not isinstance(name, str) or not name:
+            return fail("invalid", "bad_request", "name required")
         try:
-            name = decode(query.payload)["name"]
             try:
                 tcp_def = fetch_tcp(self.session, self.rid, name)
             except Exception:
-                query.reply(
-                    key, encode(Ack(ok=False, error="config_unavailable").to_wire())
-                )
-                return
+                return fail("unavailable", "config_unavailable")
             if tcp_def is None:
-                query.reply(
-                    key, encode(Ack(ok=False, error=f"tcp_unknown:{name}").to_wire())
-                )
-                return
+                return fail("not_found", "tcp_unknown", name)
             if not tcp_def.get("selectable_as_tcp"):
-                query.reply(
-                    key,
-                    encode(Ack(ok=False, error=f"tcp_not_selectable:{name}").to_wire()),
-                )
-                return
+                return fail("invalid", "tcp_not_selectable", name)
             with self._tcp_lock:
                 self._active_tcp = (name, tcp_transform(tcp_def))
-            query.reply(key, encode(Ack(ok=True).to_wire()))
-        except Exception as exc:
-            query.reply(key, encode(Ack(ok=False, error=repr(exc)).to_wire()))
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "set_tcp_failed", repr(exc))
+        return ok_value()
 
     # ── hold-to-jog ──────────────────────────────────────────────────────
 
@@ -495,14 +498,13 @@ class ArmCore:
 
     # ── execute_path action ──────────────────────────────────────────────
 
-    def _accept_execute_path(self, goal: dict) -> str | None:
+    def _accept_execute_path(self, goal: dict, client_id: str | None = None) -> str | None:
         block = self.backend.motion_block_reason(for_goal=True)
         if block:
             return block
         if self.jog_active:
             return "jog_active"
-        cid = goal.get("client_id") if isinstance(goal, dict) else None
-        if not cid or not self._lease.holds(cid):
+        if not client_id or not self._lease.holds(client_id):
             return "no_control"
         q_start = self.backend.latest_q()
         if q_start is None:

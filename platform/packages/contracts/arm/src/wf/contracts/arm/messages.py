@@ -294,21 +294,6 @@ class SetDo:
 
 
 @dataclass
-class Ack:
-    """Reply payload for cmd queryables."""
-
-    ok: bool
-    error: str | None = None
-
-    def to_wire(self) -> dict:
-        return {"ok": bool(self.ok), "error": self.error}
-
-    @classmethod
-    def from_wire(cls, d: dict) -> "Ack":
-        return cls(ok=d["ok"], error=d.get("error"))
-
-
-@dataclass
 class Waypoint:
     """A waypoint of an ``execute_path`` goal.
 
@@ -407,23 +392,51 @@ class JogCommand:
 class ExecutePathGoal:
     """``execute_path`` action goal.
 
-    Feedback ``data``: ``{"current_wp": int}``. Result ``data``: ``{}`` on
-    success. ``client_id`` (additive) names the lease holder authorizing the
-    motion; the driver rejects ``execute_path`` without a valid lease.
+    Feedback ``detail``: ``{"current_wp": int}``. The lease holder's
+    ``client_id`` travels top-level in the envelope request (wire-contract
+    RFC §4.1); the driver rejects ``execute_path`` without a valid lease.
     """
 
     waypoints: list[Waypoint] = field(default_factory=list)
-    client_id: str | None = None
 
     def to_wire(self) -> dict:
-        return {
-            "waypoints": [wp.to_wire() for wp in self.waypoints],
-            "client_id": self.client_id,
-        }
+        return {"waypoints": [wp.to_wire() for wp in self.waypoints]}
 
     @classmethod
     def from_wire(cls, d: dict) -> "ExecutePathGoal":
-        return cls(
-            waypoints=[Waypoint.from_wire(w) for w in d["waypoints"]],
-            client_id=d.get("client_id"),
-        )
+        return cls(waypoints=[Waypoint.from_wire(w) for w in d["waypoints"]])
+
+
+#: Registered envelope error ``reason`` values (wire-contract RFC §5) —
+#: direct commands, goal-accept rejections, and terminal result reasons.
+ERROR_REASONS = (
+    "bad_request",
+    "no_control",
+    "jog_active",
+    "no_joint_state",
+    "goal_active",
+    "accept_error",
+    "estop",
+    "protective_stop",
+    "not_connected",
+    "empty_path",
+    "bad_goal",
+    "frame_unknown",
+    "ik_failure",
+    "target_outside_limits",
+    "unsupported_constraint",
+    "unsupported_waypoint_type",
+    "collision",
+    "joint_limits",
+    "canceled",
+    "failed",
+    "aborted",
+    "unknown_goal",
+    "config_unavailable",
+    "tcp_unknown",
+    "tcp_not_selectable",
+    "set_do_failed",
+    "stop_failed",
+    "clear_failed",
+    "set_tcp_failed",
+)

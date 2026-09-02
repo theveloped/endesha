@@ -5,7 +5,7 @@
 import { KeyExpr, Sample, Session } from "@eclipse-zenoh/zenoh-ts";
 import { v7 as uuidv7 } from "uuid";
 import { query } from "./bus";
-import { call } from "./envelope";
+import { call, EnvelopeError, type Envelope } from "./envelope";
 import { decodeSample } from "./codec";
 import {
   actionPrefix,
@@ -35,12 +35,10 @@ import {
   supervisorCmdSetSource,
 } from "./config";
 import type {
-  Ack,
   ProgramSaveReply,
   ProgramSourceReply,
   CancelReply,
   GoalFeedback,
-  GoalReply,
   GoalResult,
   Recipe,
   RecipeReply,
@@ -50,7 +48,8 @@ import type {
 
 export interface GoalHandle {
   goalId: string;
-  /** Resolves with the terminal result published on {prefix}/{goal_id}/result. */
+  /** Resolves with the parsed terminal result envelope from
+   * {prefix}/{goal_id}/result. */
   result: Promise<GoalResult>;
 }
 
@@ -63,17 +62,20 @@ export async function sendExecutePath(
     clientId,
   }: { onFeedback?: (fb: GoalFeedback) => void; clientId?: string } = {},
 ): Promise<GoalHandle> {
-  return sendGoal(session, actionPrefix(realm), "execute_path", { waypoints, client_id: clientId ?? null }, { onFeedback });
+  return sendGoal(session, actionPrefix(realm), "execute_path", { waypoints }, { onFeedback, clientId });
 }
 
-/** Submit a goal to `{prefix}/{name}` and return a handle whose `result`
- * resolves with the terminal result (any action server, any contract). */
+/** Submit an envelope goal to `{prefix}/{name}` and return a handle whose
+ * `result` resolves with the terminal result envelope (any action server,
+ * any contract). Throws EnvelopeError on rejection. The goal id is the
+ * request's req_id, so the subscribers can be declared BEFORE the query —
+ * early samples are not lost. */
 export async function sendGoal(
   session: Session,
   prefix: string,
   name: string,
   goal: Record<string, unknown>,
-  { onFeedback }: { onFeedback?: (fb: GoalFeedback) => void } = {},
+  { onFeedback, clientId }: { onFeedback?: (fb: GoalFeedback) => void; clientId?: string } = {},
 ): Promise<GoalHandle> {
   const goalId = uuidv7();
 
@@ -100,7 +102,12 @@ export async function sendGoal(
     {
       handler: (sample: Sample) => {
         try {
-          resolveResult(decodeSample(sample) as GoalResult);
+          const wire = decodeSample(sample) as Envelope;
+          resolveResult({
+            ok: wire.ok,
+            value: wire.value ?? {},
+            error: wire.error ?? null,
+          });
         } catch (e) {
           console.error("result decode failed:", e);
         }
@@ -113,20 +120,20 @@ export async function sendGoal(
   };
   void result.then(undeclareBoth);
 
-  let reply: GoalReply | null;
+  let reply: Envelope;
   try {
-    reply = (await query(session, `${prefix}/${name}`, { goal_id: goalId, goal })) as GoalReply | null;
+    const wire: Record<string, unknown> = { req_id: goalId, args: goal };
+    if (clientId !== undefined) wire.client_id = clientId;
+    const raw = await query(session, `${prefix}/${name}`, wire);
+    if (raw === null) throw new Error(`no reply from action server for ${name}`);
+    reply = raw as Envelope;
   } catch (e) {
     undeclareBoth();
     throw e;
   }
-  if (reply === null) {
+  if (!reply.ok || reply.goal === undefined) {
     undeclareBoth();
-    throw new Error(`no reply from action server for ${name}`);
-  }
-  if (!reply.accepted) {
-    undeclareBoth();
-    throw new Error(reply.reason ?? "rejected");
+    throw new EnvelopeError(reply.error ?? { code: "internal", reason: "bad_envelope" });
   }
   return { goalId, result };
 }
@@ -140,9 +147,7 @@ export async function cancelGoal(
 }
 
 export async function cancelGoalAt(session: Session, prefix: string, goalId: string): Promise<CancelReply> {
-  const reply = await query(session, `${prefix}/cancel`, { goal_id: goalId });
-  if (reply === null) throw new Error(`no cancel reply for goal ${goalId}`);
-  return reply as CancelReply;
+  return (await call(session, `${prefix}/cancel`, { goal_id: goalId })) as unknown as CancelReply;
 }
 
 // ── washer ──────────────────────────────────────────────────────────────────
@@ -157,7 +162,7 @@ export async function washerAction(
   name: WasherAction,
   goal: Record<string, unknown> = {},
 ): Promise<GoalHandle> {
-  return sendGoal(session, washerActionPrefix(realm, rid), name, { client_id: clientId, ...goal });
+  return sendGoal(session, washerActionPrefix(realm, rid), name, goal, { clientId });
 }
 
 export async function washerCancel(session: Session, realm: string, rid: string, goalId: string): Promise<CancelReply> {
@@ -188,40 +193,27 @@ export async function setDo(
   realm: string,
   pin: number,
   value: boolean,
-): Promise<Ack> {
-  const reply = await query(session, cmdSetDo(realm), {
-    bank: "standard",
-    pin,
-    value,
-  });
-  if (reply === null) throw new Error("no reply from cmd/set_do");
-  return reply as Ack;
+): Promise<void> {
+  await call(session, cmdSetDo(realm), { bank: "standard", pin, value });
 }
 
-export async function stop(session: Session, realm: string): Promise<Ack> {
-  const reply = await query(session, cmdStop(realm), {});
-  if (reply === null) throw new Error("no reply from cmd/stop");
-  return reply as Ack;
+export async function stop(session: Session, realm: string): Promise<void> {
+  await call(session, cmdStop(realm), {});
 }
 
 export async function clearProtectiveStop(
   session: Session,
   realm: string,
-): Promise<Ack> {
-  const reply = await query(session, cmdClearProtectiveStop(realm), {});
-  if (reply === null)
-    throw new Error("no reply from cmd/clear_protective_stop");
-  return reply as Ack;
+): Promise<void> {
+  await call(session, cmdClearProtectiveStop(realm), {});
 }
 
 export async function setTcp(
   session: Session,
   realm: string,
   name: string,
-): Promise<Ack> {
-  const reply = await query(session, cmdSetTcp(realm), { name });
-  if (reply === null) throw new Error("no reply from cmd/set_tcp");
-  return reply as Ack;
+): Promise<void> {
+  await call(session, cmdSetTcp(realm), { name });
 }
 
 // dio/tags commands speak the wire-contract envelope (lib/envelope.ts):
@@ -368,11 +360,8 @@ export async function setDeviceSource(
   deviceId: string,
   source: string,
 ): Promise<SetSourceReply> {
-  const reply = await query(session, supervisorCmdSetSource(realm), {
+  return (await call(session, supervisorCmdSetSource(realm), {
     device_id: deviceId,
     source,
-  });
-  if (reply === null)
-    throw new Error("no reply from supervisor cmd/set_source (supervisor running?)");
-  return reply as SetSourceReply;
+  })) as unknown as SetSourceReply;
 }

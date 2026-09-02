@@ -15,7 +15,6 @@ from typing import Callable
 
 from wf.contracts.arm import keys as arm_keys
 from wf.contracts.arm.messages import (
-    Ack as ArmAck,
     ArmStatus,
     ExecutePathGoal,
     Freedom,
@@ -200,9 +199,9 @@ class ArmProxy(DeviceProxy):
 
     def _execute(self, waypoints: list[Waypoint], timeout_s: float) -> dict:
         _check()
-        goal_msg = ExecutePathGoal(waypoints=waypoints, client_id=self.client_id)
+        goal_msg = ExecutePathGoal(waypoints=waypoints)
         try:
-            goal = self._client.send(goal_msg.to_wire())
+            goal = self._client.send(goal_msg.to_wire(), client_id=self.client_id)
         except ActionRejected as exc:
             raise ProgramError(f"motion_rejected:{exc.reason}") from exc
         except TimeoutError as exc:
@@ -228,9 +227,9 @@ class ArmProxy(DeviceProxy):
                 unregister()
         if ctx is not None and ctx.cancelled:
             raise ActionCancelled(ctx.state_id)
-        if result.get("state") != "succeeded":
-            raise ProgramError(f"motion_failed:{result.get('state')}:{result.get('error')}")
-        return result
+        if not result.ok:
+            raise ProgramError(f"motion_failed:{result.error}")
+        return result.value
 
     @staticmethod
     def _cancel_goal(goal) -> None:
@@ -241,15 +240,14 @@ class ArmProxy(DeviceProxy):
 
     def set_tcp(self, name: str) -> None:
         _check()
-        reply = _query(self.session, arm_keys.cmd_set_tcp(self.realm, self.rid), {"name": name})
-        if reply is None:
-            raise ProgramError("set_tcp:no_reply")
-        ack = ArmAck.from_wire(reply)
-        if not ack.ok:
-            raise ProgramError(f"set_tcp:{ack.error}")
+        reply = envelope_request(self.session, arm_keys.cmd_set_tcp(self.realm, self.rid),
+                                 {"name": name}, client_id=self.client_id)
+        if not reply.ok:
+            raise ProgramError(f"set_tcp:{reply.error}")
 
     def stop(self) -> None:
-        _query(self.session, arm_keys.cmd_stop(self.realm, self.rid), {})
+        envelope_request(self.session, arm_keys.cmd_stop(self.realm, self.rid),
+                         {}, client_id=self.client_id)
 
 
 # ── dio ────────────────────────────────────────────────────────────────────
@@ -601,7 +599,7 @@ class WasherProxy(DeviceProxy):
         _check()
         client = ActionClient(self.session, washer_keys.action_prefix(self.realm, self.rid), name)
         try:
-            g = client.send({"client_id": self.client_id, **goal})
+            g = client.send(dict(goal), client_id=self.client_id)
         except ActionRejected as exc:
             raise ProgramError(f"washer_{name}:{self.rid}:rejected:{exc.reason}") from exc
         except TimeoutError as exc:
@@ -625,9 +623,9 @@ class WasherProxy(DeviceProxy):
                 unregister()
         if ctx is not None and ctx.cancelled:
             raise ActionCancelled(ctx.state_id)
-        if result.get("state") != "succeeded":
-            raise ProgramError(f"washer_{name}:{self.rid}:{result.get('state')}:{result.get('error')}")
-        return result
+        if not result.ok:
+            raise ProgramError(f"washer_{name}:{self.rid}:{result.error}")
+        return result.value
 
     # ── commands ─────────────────────────────────────────────────────────
 

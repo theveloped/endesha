@@ -134,7 +134,6 @@ def _free_yaw_goal(fk, free=None):
         "quat": rotation_matrix_to_quaternion(T[:3, :3]),
     }
     return {
-        "client_id": "c1",
         "waypoints": [
             {"type": "movej",
              "target": {"pose": pose, "free": free or {"dof": "yaw"}}}
@@ -154,7 +153,7 @@ def test_loose_goal_uses_nominal_when_feasible(fk, collision):
 
     # Accept must be FAST: it defers sampling/IK to execute (no candidates yet),
     # so it never blocks the client's query timeout.
-    reason = core._accept_execute_path(goal)
+    reason = core._accept_execute_path(goal, "c1")
     assert reason is None
     entry = goal["_resolution"]["waypoints"][-1]
     assert "candidates" not in entry  # deferred to execute
@@ -178,7 +177,7 @@ def test_loose_goal_unreachable_fails_in_execute(fk, collision):
     # Push the target far out of reach: no yaw sample can be solved.
     goal["waypoints"][0]["target"]["pose"]["xyz"] = [5.0, 0.0, 0.0]
 
-    assert core._accept_execute_path(goal) is None  # accepted (deferred)
+    assert core._accept_execute_path(goal, "c1") is None  # accepted (deferred)
     handle = _FakeHandle(goal)
     core._execute_path(handle)
     assert handle.failed == "no_feasible_goal:0"
@@ -196,7 +195,7 @@ def test_loose_goal_all_finals_blocked_fails_in_execute(fk, collision):
     core = _core(fk, collision, scene=[blocker])
     goal = _free_yaw_goal(fk, free=_COARSE_YAW)
 
-    assert core._accept_execute_path(goal) is None  # accepted (deferred)
+    assert core._accept_execute_path(goal, "c1") is None  # accepted (deferred)
     handle = _FakeHandle(goal)
     core._execute_path(handle)
     assert handle.failed == "no_feasible_goal:0"
@@ -215,7 +214,6 @@ def _movel_goal(fk, dx=0.08):
         "quat": rotation_matrix_to_quaternion(T[:3, :3]),
     }
     return {
-        "client_id": "c1",
         "waypoints": [{"type": "movel", "target": {"pose": pose}}],
     }
 
@@ -224,7 +222,7 @@ def test_movel_accepts_and_executes_straight_line(fk, collision):
     core = _core(fk, collision)
     goal = _movel_goal(fk)
 
-    reason = core._accept_execute_path(goal)
+    reason = core._accept_execute_path(goal, "c1")
     assert reason is None
     assert goal["_resolution"]["waypoints"][0]["type"] == "movel"
 
@@ -258,7 +256,6 @@ def _path_loose_goal(fk, dx=0.06):
         "quat": rotation_matrix_to_quaternion(T[:3, :3]),
     }
     return {
-        "client_id": "c1",
         "waypoints": [
             {"type": "movel", "target": {"pose": pose, "free": {"dof": "yaw"}}}
         ],
@@ -269,7 +266,7 @@ def test_path_loose_accepts_and_executes(fk, collision):
     core = _core(fk, collision)
     goal = _path_loose_goal(fk)
 
-    reason = core._accept_execute_path(goal)
+    reason = core._accept_execute_path(goal, "c1")
     assert reason is None
     assert "path_loose" in goal["_resolution"]["waypoints"][-1]
 
@@ -298,7 +295,7 @@ def test_path_loose_unreachable_fails_in_execute(fk, collision):
     goal["waypoints"][0]["target"]["pose"]["xyz"] = [5.0, 0.0, 0.0]
     # Accept defers (fast); the movel fallback finds no feasible orientation to
     # an unreachable goal and fails in execute.
-    assert core._accept_execute_path(goal) is None
+    assert core._accept_execute_path(goal, "c1") is None
     handle = _FakeHandle(goal)
     core._execute_path(handle)
     assert handle.failed == "movel:no_feasible_path"

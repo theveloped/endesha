@@ -219,8 +219,7 @@ export default function MotionPanel({
     if (session === null) return;
     setTcpError(null);
     try {
-      const ack = await setTcp(session, realm, name);
-      if (!ack.ok) setTcpError(ack.error ?? "set_tcp failed");
+      await setTcp(session, realm, name);
     } catch (e) {
       setTcpError(e instanceof Error ? e.message : String(e));
     }
@@ -311,9 +310,9 @@ export default function MotionPanel({
       setGoal({ goalId: handle.goalId, state: "accepted", progress: 0 });
       const result: GoalResult = await handle.result;
       setOutcome(
-        result.error === null
-          ? `terminal: ${result.state}`
-          : `terminal: ${result.state} — ${result.error}`,
+        result.ok
+          ? "terminal: succeeded"
+          : `terminal: ${result.error?.reason ?? "failed"}${result.error?.detail ? ` — ${result.error.detail}` : ""}`,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -336,8 +335,7 @@ export default function MotionPanel({
   const doStop = async () => {
     if (session === null) return;
     try {
-      const ack = await stop(session, realm);
-      if (!ack.ok) setError(ack.error ?? "stop failed");
+      await stop(session, realm);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

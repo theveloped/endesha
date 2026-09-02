@@ -113,7 +113,7 @@ export function WasherCard({
       setGoal({ id: handle.goalId, name });
       const result = await handle.result;
       setGoal(null);
-      if (result.state !== "succeeded") setError(`${name}: ${result.state}${result.error ? ` (${result.error})` : ""}`);
+      if (!result.ok) setError(`${name}: ${result.error?.reason ?? "failed"}${result.error?.detail ? ` (${result.error.detail})` : ""}`);
     } catch (e) {
       setGoal(null);
       setError(`${name}: ${String(e)}`);

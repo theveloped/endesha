@@ -75,9 +75,9 @@ class Rig:
     def phase(self) -> str:
         return self.status().phase
 
-    def action(self, name, *, client_id="op", timeout_s=20.0, **goal) -> dict:
+    def action(self, name, *, client_id="op", timeout_s=20.0, **goal):
         client = ActionClient(self.session, keys.action_prefix(self.realm, "washer0"), name)
-        g = client.send({"client_id": client_id, **goal})
+        g = client.send(dict(goal), client_id=client_id)
         return g.result(timeout_s=timeout_s)
 
 
@@ -93,7 +93,7 @@ def test_full_cycle(rig):
     st = rig.status()
     assert st.door == "closed" and st.connected and st.auto and st.program == "Standard"
 
-    assert rig.action("open_door")["state"] == "succeeded"
+    assert rig.action("open_door").ok
     assert rig.phase() == "door_open"
     # the handshake left the machine as the old controller did
     assert rig.core.get("LoadRequest") is True and rig.core.get("PermissionToClose") is False
@@ -103,19 +103,19 @@ def test_full_cycle(rig):
         rig.action("open_door")
 
     res = rig.action("start_wash", program=3)
-    assert res["state"] == "succeeded", res
+    assert res.ok, res.error
     assert rig.phase() == "washing"
     assert rig.status().program_no == 3
     assert rig.core.get("LoadComplete") is False  # cleared once the door closed
     # recipe: steps 1 (60 s) + 2 (30 s) => 90 s * 0.05 = 4.5 s
     assert _wait(lambda: rig.phase() == "ready_to_unload", timeout_s=15.0)
 
-    assert rig.action("open_door")["state"] == "succeeded"
+    assert rig.action("open_door").ok
     assert rig.phase() == "door_open"
     assert rig.status().ready_to_load and not rig.status().ready_to_unload
     assert rig.core.get("UnLoadComplete") is False and rig.core.get("LoadRequest") is True
 
-    assert rig.action("close_door")["state"] == "succeeded"
+    assert rig.action("close_door").ok
     assert rig.phase() == "ready_to_load"
 
 
@@ -130,18 +130,18 @@ def test_cancel_stops_the_door_and_stop_door_cmd():
 def _cancel_case(rig):
     assert _wait(lambda: rig.phase() == "ready_to_load")
     client = ActionClient(rig.session, keys.action_prefix(rig.realm, "washer0"), "open_door")
-    goal = client.send({"client_id": "op"})
+    goal = client.send({}, client_id="op")
     assert _wait(lambda: rig.status().door == "moving", timeout_s=5.0)
     goal.cancel()
     res = goal.result(timeout_s=5.0)
-    assert res["state"] == "canceled"
+    assert not res.ok and res.error.reason == "canceled"
     # permission released -> door stays where it is
     assert rig.core.get("PermissionToClose") is False
     time.sleep(0.3)
     assert rig.status().door == "moving" and rig.phase() == "door_moving"
     assert rig.status().sequence is None
     # reset re-arms permission -> the door finishes its travel
-    assert rig.action("reset")["state"] == "succeeded"
+    assert rig.action("reset").ok
     assert _wait(lambda: rig.phase() == "door_open", timeout_s=8.0)
     # stop_door is a plain lease-gated envelope command
     ack = envelope_request(rig.session, keys.cmd_stop_door(rig.realm, "washer0"), {}, client_id="op")
@@ -211,11 +211,11 @@ def test_sim_fault_injection_and_reset():
     rig = Rig({**PARAMS, "fault_at_s": 20})
     try:
         assert _wait(lambda: rig.phase() == "ready_to_load")
-        assert rig.action("open_door")["state"] == "succeeded"
-        assert rig.action("start_wash")["state"] == "succeeded"
+        assert rig.action("open_door").ok
+        assert rig.action("start_wash").ok
         assert _wait(lambda: rig.phase() == "fault", timeout_s=10.0)
         assert rig.status().fault_code == 42
-        assert rig.action("reset")["state"] == "succeeded"
+        assert rig.action("reset").ok
         assert _wait(lambda: not rig.status().fault)
     finally:
         rig.close()

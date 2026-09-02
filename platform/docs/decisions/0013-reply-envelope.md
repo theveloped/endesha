@@ -1,7 +1,7 @@
 # ADR-0013 — Five interaction shapes; one reply envelope
 
 Date: 2026-09-01 (wire-contract RFC, reviewed) · Status: accepted,
-implementation in progress (all contracts except arm landed) · Supersedes the
+implemented on every contract (2026-09-02; TS codegen pending) · Supersedes the
 shape taxonomy of [ADR-0001](0001-zenoh-bus-is-the-api.md) (its
 bus-is-the-API core stands)
 

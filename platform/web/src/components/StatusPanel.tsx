@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { Ack, ArmStatus, FlangeState } from "../lib/messages";
+import type { ArmStatus, FlangeState } from "../lib/messages";
 
 const KV_CLASS =
   "grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-sm tabular-nums";
@@ -23,7 +23,7 @@ interface StatusPanelProps {
   jointsCountRef: RefObject<number>;
   flangeRef: RefObject<FlangeState | null>;
   /** Re-arm: unlock a protective stop (stop-induced or manual). */
-  onClearProtectiveStop: () => Promise<Ack>;
+  onClearProtectiveStop: () => Promise<void>;
 }
 
 export default function StatusPanel({
@@ -43,8 +43,7 @@ export default function StatusPanel({
     setClearing(true);
     setClearError(null);
     try {
-      const ack = await onClearProtectiveStop();
-      if (!ack.ok) setClearError(ack.error ?? "clear failed");
+      await onClearProtectiveStop();
     } catch (e) {
       setClearError(e instanceof Error ? e.message : String(e));
     } finally {

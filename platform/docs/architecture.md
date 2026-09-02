@@ -89,14 +89,16 @@ envelope** (`wf.core.envelope` ↔ `web/src/lib/envelope.ts`): request
 `{req_id, client_id?, args}` (idempotent resubmission via a
 recent-replies ring), reply `{ok, value|goal|error}` with the closed
 8-code error enum and per-contract registered reasons; field conventions
-in [wire-vocabulary.md](wire-vocabulary.md). Migration is
-contract-by-contract (seam #14) — everything except the arm speaks it today; arm (direct cmds + the action pattern)
-still use their legacy dialects. Long-running operations use the
-**action pattern**
-([core/action.py](../packages/core/src/wf/core/action.py)): goal queryable →
-client-generated UUIDv7 `goal_id`; feedback on `…/{goal_id}/feedback`;
-result published *and* queryable (source of truth, `unknown_goal` after a
-60 s TTL); one shared `…/cancel` queryable. The action server is strictly
+in [wire-vocabulary.md](wire-vocabulary.md). Every command queryable on
+the bus speaks it (migration completed 2026-09-02). Long-running
+operations use the **action pattern**
+([core/action.py](../packages/core/src/wf/core/action.py)): the goal
+submission is an envelope request whose `req_id` becomes the goal id; the
+accept reply is the `goal` branch with self-describing
+feedback/result/cancel keys; feedback carries `{t, seq, goal_id, state,
+progress, detail}`; the result is a retained key whose payload is
+recursively the envelope (`not_found:unknown_goal` after a 60 s TTL); one
+shared `…/cancel` envelope queryable. The action server is strictly
 serial: at most one active goal across all actions of a resource; a second
 goal is rejected `busy`. Wire format is CBOR throughout
 ([core/codec.py](../packages/core/src/wf/core/codec.py)); all timestamps are
@@ -341,7 +343,7 @@ should either close it or consciously leave it.
 | # | Seam | Status |
 |---|---|---|
 | 1 | `POST /cells/<id>/activate` without a runtime falls back to `sorted(runtimes)[0]` — for the ecoclean cell that is **`live`** (the real OPC-UA washer). | **wants fixing** (add `default.yaml` or refuse to default to live) |
-| 3 | Conformance suites exist only for arm / camera2d / dio; control, program, tags, washer have none; `supervisor` has no `messages.py` (inline dicts). | wants fixing, incremental |
+| 3 | Conformance suites exist for arm / camera2d / dio / control; program, tags, washer still have none. `supervisor/messages.py` now types `SetSource`; its retained payloads (descriptor, devices, rings) remain inline dicts until the codegen step. | wants fixing, incremental |
 | 4 | No camera2d program proxy — programs cannot grab images yet. | accepted until the vision RFC lands |
 | 5 | Stale `"live"` realm defaults linger in the two conformance conftests and the recorder (`start_stack.ps1` overrides); `wfctl` docstring says live, code says cell. | wants fixing, trivial |
 | 6 | Action-server driver-restart semantics (design v5 App. A `aborted {cause: driver_restart}`) are an explicit phase-1 no-op — no goal persistence. | accepted |
@@ -352,7 +354,6 @@ should either close it or consciously leave it.
 | 11 | `web/tests/` is empty; the CBOR wire gate and lint/tsc are the only web verification, and the gate is not in CI (no CI exists yet). | wants fixing eventually |
 | 12 | Web fallback constants when no host API answers: `CELL_NAME="dev-cell"`, `RID="r1"`, `CID="cam0"`. | accepted |
 | 13 | Orphaned `deploy/programs/__pycache__/ui_made_532*.pyc` from a deleted UI-authored program. | trivial cleanup |
-| 14 | Envelope migration ([ADR-0013](decisions/0013-reply-envelope.md)) in progress: **dio + tags** (shared `ChannelsCore`), **control**, **washer** (commands; its door/wash actions await the arm/action step), **program** (all runner commands), **config** (set/delete; reads stay glob queryables), and **camera2d** (cmds + producer election, in both the Python cores and the TS headless service; frame-shaped replies stay raw-bytes+attachment) speak it, with conformance enforcement on dio, control and camera2d; only `arm` still replies legacy dialects (their audit records show `ok: null` until migrated — no sniffing, no backcompat). | in progress, per RFC §9 |
 
 ## 13. Keeping this document honest
 

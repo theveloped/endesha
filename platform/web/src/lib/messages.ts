@@ -1,3 +1,5 @@
+import type { WireError } from "./envelope";
+
 // TS mirrors of the normative wire dicts in
 // platform/packages/contracts/arm/src/wf/contracts/arm/messages.py
 // (hand-written; codegen is a later design phase).
@@ -480,33 +482,25 @@ export function isTerminal(state: string): boolean {
   return TERMINAL_STATES[state] === true;
 }
 
-export interface GoalReply {
-  goal_id: string;
-  accepted: boolean;
-  reason: string | null;
-  state: GoalStateWire;
-}
-
 export interface GoalFeedback {
   t: WireTimestamp;
+  seq: number;
   goal_id: string;
   state: GoalStateWire;
   progress: number;
-  data: { current_wp?: number };
+  detail: { current_wp?: number };
 }
 
+/** Parsed terminal outcome of a goal (the retained result envelope). */
 export interface GoalResult {
-  t: WireTimestamp;
-  goal_id: string;
-  state: GoalStateWire;
   ok: boolean;
-  error: string | null;
-  data: Record<string, unknown>;
+  value: Record<string, unknown>;
+  error: WireError | null;
 }
 
+/** cancel envelope value. */
 export interface CancelReply {
-  goal_id: string;
-  state: GoalStateWire;
+  state: GoalStateWire | "unknown_goal";
 }
 
 // Replay control plane (wf/services/recording/replayer.py).
@@ -698,10 +692,8 @@ export interface ProducerDemand {
   gain_db: number;
 }
 
-/** supervisor/cmd/set_source reply: `{ok, device_id?, source?, error?}`. */
+/** supervisor/cmd/set_source envelope value. */
 export interface SetSourceReply {
-  ok: boolean;
-  device_id?: string;
-  source?: string;
-  error?: string;
+  device_id: string;
+  source: string;
 }

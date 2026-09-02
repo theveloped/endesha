@@ -975,7 +975,8 @@ class ProgramRunner:
             if entry is None or entry.get("contract") != "arm":
                 continue
             try:
-                self.session.get(arm_keys.cmd_stop(self.realm, rid), payload=encode({}), timeout=2.0)
+                envelope_request(self.session, arm_keys.cmd_stop(self.realm, rid),
+                                 {}, timeout_s=2.0)
             except Exception:
                 _log.debug("arm stop failed", exc_info=True)
 

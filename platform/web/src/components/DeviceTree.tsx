@@ -137,8 +137,7 @@ export default function DeviceTree({
     if (session === null) return;
     setPending(id);
     try {
-      const reply = await setDeviceSource(session, realm, id, mode);
-      if (!reply.ok) console.error("set_source failed:", reply.error);
+      await setDeviceSource(session, realm, id, mode);
     } catch (e) {
       console.error("set_source error:", e);
     } finally {

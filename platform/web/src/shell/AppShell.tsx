@@ -199,8 +199,10 @@ function Workspace({
           { clientId: runtime.clientId },
         );
         const result = await handle.result;
-        if (result.state !== "succeeded") {
-          setDragError(result.error === null ? result.state : `${result.state}: ${result.error}`);
+        if (!result.ok) {
+          setDragError(
+            `${result.error?.reason ?? "failed"}${result.error?.detail ? `: ${result.error.detail}` : ""}`,
+          );
         }
       } catch (reason) {
         setDragError(reason instanceof Error ? reason.message : String(reason));
