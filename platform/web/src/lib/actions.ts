@@ -342,36 +342,22 @@ export async function releaseControl(
   await call(session, controlCmdRelease(realm), {}, { clientId });
 }
 
+/** config/cmd/set envelope value. */
 export interface ConfigSetReply {
-  ok: boolean;
-  revision: number | null;
-  error: string | null;
+  revision: number;
 }
 
+// Config writes speak the envelope: resolve on success, throw EnvelopeError.
 export async function configSet(
   session: Session,
   key: string,
   value: unknown,
 ): Promise<ConfigSetReply> {
-  const reply = await query(session, configCmdSet(), { key, value });
-  if (reply === null)
-    throw new Error("no reply from config/cmd/set (config service running?)");
-  return reply as ConfigSetReply;
+  return (await call(session, configCmdSet(), { key, value })) as unknown as ConfigSetReply;
 }
 
-export interface ConfigDeleteReply {
-  ok: boolean;
-  error: string | null;
-}
-
-export async function configDelete(
-  session: Session,
-  key: string,
-): Promise<ConfigDeleteReply> {
-  const reply = await query(session, configCmdDelete(), { key });
-  if (reply === null)
-    throw new Error("no reply from config/cmd/delete (config service running?)");
-  return reply as ConfigDeleteReply;
+export async function configDelete(session: Session, key: string): Promise<void> {
+  await call(session, configCmdDelete(), { key });
 }
 
 

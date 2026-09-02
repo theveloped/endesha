@@ -17,6 +17,7 @@ from pathlib import Path
 
 import yaml
 
+from wf.core.keys import REALM_DEFAULT
 from wf.core.log import get_logger
 
 from .cells import CellInfo, scan_cells
@@ -134,7 +135,11 @@ class SupervisorManager:
         with self._lock:
             if self._config_proc is not None and self._config_proc.poll() is None:
                 return
-            argv = [sys.executable, "-m", "wf.services.config", "--dir", self.config_dir]
+            # --realm places the write-audit echo under {realm}/audit/config
+            # (the config keys themselves stay realm-less); without it the
+            # Queries page never sees config writes (architecture seam #2).
+            argv = [sys.executable, "-m", "wf.services.config", "--dir", self.config_dir,
+                    "--realm", REALM_DEFAULT]
             if self.zenoh_config:
                 argv += ["--zenoh-config", self.zenoh_config]
             self.log_dir.mkdir(parents=True, exist_ok=True)

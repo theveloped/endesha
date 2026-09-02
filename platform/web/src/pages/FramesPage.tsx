@@ -333,11 +333,7 @@ function FramesCard({
     if (session === null) return;
     setError(null);
     try {
-      const reply = await configDelete(session, configFrame(name));
-      if (!reply.ok) {
-        setError(reply.error ?? "delete failed");
-        return;
-      }
+      await configDelete(session, configFrame(name));
       if (editing?.name === name) onEdit(null);
       onMutated(session);
     } catch (e) {
@@ -458,17 +454,13 @@ function FrameForm({
       return;
     }
     try {
-      const reply = await configSet(session, configFrame(nm), {
+      await configSet(session, configFrame(nm), {
         parent,
         xyz: p,
         quat: rpyDegToQuat(r[0], r[1], r[2]),
         source: "manual",
         meta: {},
       });
-      if (!reply.ok) {
-        setError(reply.error ?? "save failed");
-        return;
-      }
       onSaved(session);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -545,11 +537,7 @@ function TcpsCard({
     if (session === null) return;
     setError(null);
     try {
-      const reply = await configDelete(session, configTcp(name));
-      if (!reply.ok) {
-        setError(reply.error ?? "delete failed");
-        return;
-      }
+      await configDelete(session, configTcp(name));
       onDeleted(name);
       if (editing?.name === name) onEdit(null);
       onMutated(session);
@@ -669,16 +657,12 @@ function TcpForm({ session, editing, onClose, onSaved }: TcpFormProps) {
       return;
     }
     try {
-      const reply = await configSet(session, configTcp(nm), {
+      await configSet(session, configTcp(nm), {
         xyz: p,
         quat: rpyDegToQuat(r[0], r[1], r[2]),
         role,
         selectable_as_tcp: selectable,
       });
-      if (!reply.ok) {
-        setError(reply.error ?? "save failed");
-        return;
-      }
       onSaved(session);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -772,14 +756,10 @@ function PosesCard({
       return;
     }
     try {
-      const reply = await configSet(session, configPose(nm), {
+      await configSet(session, configPose(nm), {
         q: js.q,
         meta: {},
       });
-      if (!reply.ok) {
-        setError(reply.error ?? "save failed");
-        return;
-      }
       setName("");
       onMutated(session);
     } catch (e) {
@@ -791,11 +771,7 @@ function PosesCard({
     if (session === null) return;
     setError(null);
     try {
-      const reply = await configDelete(session, configPose(poseName));
-      if (!reply.ok) {
-        setError(reply.error ?? "delete failed");
-        return;
-      }
+      await configDelete(session, configPose(poseName));
       onDeleted(poseName);
       onMutated(session);
     } catch (e) {

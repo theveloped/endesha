@@ -211,11 +211,7 @@ export function SceneCreatePanel({
           };
         }
       }
-      const reply = await configSet(session, key, value);
-      if (!reply.ok) {
-        setError(reply.error ?? "Save failed");
-        return;
-      }
+      await configSet(session, key, value);
       onSaved(kind, cleanName);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));

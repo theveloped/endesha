@@ -10,6 +10,25 @@ from wf.core.keys import key
 
 CONFIG_PREFIX = "config"
 
+#: Registered envelope error ``reason`` values for cmd/set + cmd/delete
+#: (wire-contract RFC §5); the store's ValueError heads map 1:1 onto these.
+ERROR_REASONS = (
+    "bad_request",
+    "invalid_key",
+    "unknown_key",
+    "bad_frame",
+    "unknown_parent",
+    "cycle",
+    "bad_pose",
+    "bad_tcp",
+    "bad_intrinsics",
+    "bad_collision",
+    "bad_layout",
+    "reserved_name",
+    "set_failed",
+    "delete_failed",
+)
+
 
 def frame(name: str) -> str:
     """``config/frames/{name}`` — name may contain ``/``."""

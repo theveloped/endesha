@@ -39,7 +39,8 @@ export function useProgramLayout(session: Session | null, programName: string | 
     async (next: GraphLayout) => {
       if (session === null || programName === null) return;
       setLayout(next);
-      await configSet(session, configProgramLayout(programName), next);
+      // Layout persistence is best-effort; an envelope error only logs.
+      await configSet(session, configProgramLayout(programName), next).catch(console.error);
     },
     [session, programName],
   );

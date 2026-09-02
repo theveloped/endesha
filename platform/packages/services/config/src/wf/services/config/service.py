@@ -15,7 +15,8 @@ import threading
 import zenoh
 
 from wf.core.audit import QueryAudit
-from wf.core.codec import decode, encode
+from wf.core.codec import encode
+from wf.core.envelope import RecentReplies, Request, fail, ok_value, serve_query
 from wf.core.log import get_logger
 from wf.core.session import open_session
 
@@ -33,6 +34,7 @@ class ConfigService:
         # commands lives under {realm}/audit/config so the recorder sees who
         # changed what (values themselves stay out of recordings).
         self._audit = QueryAudit(session, realm, "config") if realm else None
+        self._recent = RecentReplies()
         self._stop_event = threading.Event()
         self._queryables: list = []
         self._alive_token = None
@@ -79,42 +81,53 @@ class ConfigService:
         except Exception:
             _log.exception("config GET failed: %s", query.key_expr)
 
+    @staticmethod
+    def _store_error(exc: ValueError) -> dict:
+        """The store's machine-readable "reason:detail" strings map straight
+        onto the envelope (``invalid_key:``, ``bad_frame:``, ``cycle:``, …)."""
+        head, _, detail = str(exc).partition(":")
+        return fail("invalid", head or "bad_request", detail or None)
+
     def _on_cmd_set(self, query: zenoh.Query) -> None:
-        key = str(query.key_expr)
+        serve_query(query, self._do_set, recent=self._recent)
+
+    def _do_set(self, req: Request) -> dict:
         try:
-            req = decode(query.payload) if query.payload is not None else {}
-            revision = self.store.set(req["key"], req["value"])
-            # Publish the STORED (normalized, revision-stamped) value on its own
-            # key so live subscribers (e.g. the sim camera page) see the edit
-            # without re-GETting. config/** stays queryable too; this only adds
-            # a latest-wins sample on change.
-            stored = self.store.get_matching(req["key"]).get(req["key"], req["value"])
-            self.session.put(req["key"], encode(stored))
-            query.reply(
-                key, encode({"ok": True, "revision": revision, "error": None})
-            )
+            key, value = req.args["key"], req.args["value"]
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_request", repr(exc))
+        try:
+            revision = self.store.set(key, value)
         except ValueError as exc:
-            query.reply(
-                key, encode({"ok": False, "revision": None, "error": str(exc)})
-            )
-        except Exception as exc:
-            query.reply(
-                key, encode({"ok": False, "revision": None, "error": repr(exc)})
-            )
+            return self._store_error(exc)
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "set_failed", repr(exc))
+        # Publish the STORED (normalized, revision-stamped) value on its own
+        # key so live subscribers (e.g. the sim camera page) see the edit
+        # without re-GETting. config/** stays queryable too; this only adds
+        # a latest-wins sample on change.
+        stored = self.store.get_matching(key).get(key, value)
+        self.session.put(key, encode(stored))
+        return ok_value({"revision": revision})
 
     def _on_cmd_delete(self, query: zenoh.Query) -> None:
-        key = str(query.key_expr)
+        serve_query(query, self._do_delete, recent=self._recent)
+
+    def _do_delete(self, req: Request) -> dict:
         try:
-            req = decode(query.payload) if query.payload is not None else {}
-            self.store.delete(req["key"])
-            # Empty-payload tombstone so live subscribers drop the entry (mirrors
-            # the runtime scene layer's delete convention in scene_live.py).
-            self.session.put(req["key"], encode({}))
-            query.reply(key, encode({"ok": True, "error": None}))
+            key = req.args["key"]
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_request", repr(exc))
+        try:
+            self.store.delete(key)
         except ValueError as exc:
-            query.reply(key, encode({"ok": False, "error": str(exc)}))
-        except Exception as exc:
-            query.reply(key, encode({"ok": False, "error": repr(exc)}))
+            return self._store_error(exc)
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "delete_failed", repr(exc))
+        # Empty-payload tombstone so live subscribers drop the entry (mirrors
+        # the runtime scene layer's delete convention in scene_live.py).
+        self.session.put(key, encode({}))
+        return ok_value()
 
 
 def main(argv=None) -> int:

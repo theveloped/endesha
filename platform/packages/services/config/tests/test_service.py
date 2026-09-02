@@ -12,6 +12,7 @@ import time
 import pytest
 
 from wf.core.codec import decode, encode
+from wf.core.envelope import request as envelope_request
 from wf.core.testing import linked_sessions
 from wf.services.config import keys
 from wf.services.config.service import ConfigService
@@ -63,10 +64,10 @@ def test_cmd_set_and_delete_publish_on_key(linked, tmp_path):
 
     try:
         # set -> publishes the value on its own key
-        reply = _query(
+        reply = envelope_request(
             session_a, keys.cmd_set(), {"key": keys.scene("foo"), "value": SCENE}
         )
-        assert reply is not None and reply["ok"], reply
+        assert reply.ok, reply.error
         _wait_until(lambda: len(received) >= 1, 5.0, "no set sample published")
         key, payload = received[-1]
         assert key == keys.scene("foo")
@@ -77,8 +78,8 @@ def test_cmd_set_and_delete_publish_on_key(linked, tmp_path):
         assert {k: v for k, v in published.items() if k not in ("revision", "t")} == SCENE
 
         # delete -> publishes an empty tombstone on the same key
-        reply = _query(session_a, keys.cmd_delete(), {"key": keys.scene("foo")})
-        assert reply is not None and reply["ok"], reply
+        reply = envelope_request(session_a, keys.cmd_delete(), {"key": keys.scene("foo")})
+        assert reply.ok, reply.error
         _wait_until(lambda: len(received) >= 2, 5.0, "no delete tombstone published")
         key, payload = received[-1]
         assert key == keys.scene("foo")

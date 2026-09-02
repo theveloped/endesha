@@ -90,7 +90,7 @@ envelope** (`wf.core.envelope` ↔ `web/src/lib/envelope.ts`): request
 recent-replies ring), reply `{ok, value|goal|error}` with the closed
 8-code error enum and per-contract registered reasons; field conventions
 in [wire-vocabulary.md](wire-vocabulary.md). Migration is
-contract-by-contract (seam #14) — dio, tags, control, washer commands and the program runner speak it today; the rest
+contract-by-contract (seam #14) — dio, tags, control, washer commands, the program runner and config speak it today; camera2d and arm
 still use their legacy dialects. Long-running operations use the
 **action pattern**
 ([core/action.py](../packages/core/src/wf/core/action.py)): goal queryable →
@@ -341,7 +341,6 @@ should either close it or consciously leave it.
 | # | Seam | Status |
 |---|---|---|
 | 1 | `POST /cells/<id>/activate` without a runtime falls back to `sorted(runtimes)[0]` — for the ecoclean cell that is **`live`** (the real OPC-UA washer). | **wants fixing** (add `default.yaml` or refuse to default to live) |
-| 2 | The shipped host-API path starts the config service without `--realm`, so `cell/audit/config` is **never published** despite the Queries page expecting it. | **wants fixing** |
 | 3 | Conformance suites exist only for arm / camera2d / dio; control, program, tags, washer have none; `supervisor` has no `messages.py` (inline dicts). | wants fixing, incremental |
 | 4 | No camera2d program proxy — programs cannot grab images yet. | accepted until the vision RFC lands |
 | 5 | Stale `"live"` realm defaults linger in the two conformance conftests and the recorder (`start_stack.ps1` overrides); `wfctl` docstring says live, code says cell. | wants fixing, trivial |
@@ -353,7 +352,7 @@ should either close it or consciously leave it.
 | 11 | `web/tests/` is empty; the CBOR wire gate and lint/tsc are the only web verification, and the gate is not in CI (no CI exists yet). | wants fixing eventually |
 | 12 | Web fallback constants when no host API answers: `CELL_NAME="dev-cell"`, `RID="r1"`, `CID="cam0"`. | accepted |
 | 13 | Orphaned `deploy/programs/__pycache__/ui_made_532*.pyc` from a deleted UI-authored program. | trivial cleanup |
-| 14 | Envelope migration ([ADR-0013](decisions/0013-reply-envelope.md)) in progress: **dio + tags** (shared `ChannelsCore`), **control**, **washer** (commands; its door/wash actions await the arm/action step), and **program** (all runner commands) speak it, with conformance enforcement on dio and control; `camera2d`, `arm`, `config` still reply legacy dialects (their audit records show `ok: null` until migrated — no sniffing, no backcompat). | in progress, per RFC §9 |
+| 14 | Envelope migration ([ADR-0013](decisions/0013-reply-envelope.md)) in progress: **dio + tags** (shared `ChannelsCore`), **control**, **washer** (commands; its door/wash actions await the arm/action step), **program** (all runner commands), and **config** (set/delete; reads stay glob queryables) speak it, with conformance enforcement on dio and control; `camera2d` and `arm` still reply legacy dialects (their audit records show `ok: null` until migrated — no sniffing, no backcompat). | in progress, per RFC §9 |
 
 ## 13. Keeping this document honest
 

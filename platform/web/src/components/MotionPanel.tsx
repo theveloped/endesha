@@ -204,14 +204,10 @@ export default function MotionPanel({
       return;
     }
     try {
-      const reply = await configSet(session, configPose(name), {
+      await configSet(session, configPose(name), {
         q: js.q,
         meta: {},
       });
-      if (!reply.ok) {
-        setPoseError(reply.error ?? "save failed");
-        return;
-      }
       setPoseName("");
       await fetchPoses(session);
     } catch (e) {

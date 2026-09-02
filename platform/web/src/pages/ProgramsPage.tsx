@@ -505,9 +505,8 @@ function ProgramPosesCard({
     setBusy(true);
     onError(null);
     try {
-      const reply = await configSet(session, configProgramPose(programName, name), { q: [...q] });
-      if (!reply.ok) onError(`teach ${name}: ${reply.error ?? "failed"}`);
-      else setDraft("");
+      await configSet(session, configProgramPose(programName, name), { q: [...q] });
+      setDraft("");
     } catch (e) {
       onError(`teach ${name}: ${String(e)}`);
     } finally {
@@ -517,8 +516,7 @@ function ProgramPosesCard({
   const remove = async (name: string) => {
     if (session === null) return;
     try {
-      const reply = await configDelete(session, configProgramPose(programName, name));
-      if (!reply.ok) onError(`delete ${name}: ${reply.error ?? "failed"}`);
+      await configDelete(session, configProgramPose(programName, name));
     } catch (e) {
       onError(`delete ${name}: ${String(e)}`);
     }

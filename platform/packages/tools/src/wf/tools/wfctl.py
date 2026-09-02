@@ -825,19 +825,13 @@ def cmd_pose(session, args) -> int:
             print("no joints sample within 2.0s", file=sys.stderr)
             return 1
         q = [float(v) for v in result[0]["q"]]
-        reply = _query(
+        reply = envelope_request(
             session,
             config_keys.cmd_set(),
             {"key": config_keys.pose(args.name), "value": {"q": q, "meta": {}}},
         )
-        if reply is None:
-            print(
-                "no reply from config/cmd/set (config service running?)",
-                file=sys.stderr,
-            )
-            return 1
-        print(json.dumps(reply))
-        return 0 if reply.get("ok") else 1
+        print("ok" if reply.ok else f"error: {reply.error}")
+        return 0 if reply.ok else 1
     if args.action == "list":
         entries = _query_all(session, config_keys.poses_glob())
         for key_str in sorted(entries):
@@ -885,7 +879,7 @@ def cmd_frame(session, args) -> int:
         return 2
     xyz = _parse_xyz(args.xyz)
     quat = _pose_args_to_quat(args)
-    reply = _query(
+    reply = envelope_request(
         session,
         config_keys.cmd_set(),
         {
@@ -899,13 +893,8 @@ def cmd_frame(session, args) -> int:
             },
         },
     )
-    if reply is None:
-        print(
-            "no reply from config/cmd/set (config service running?)", file=sys.stderr
-        )
-        return 1
-    print(json.dumps(reply))
-    return 0 if reply.get("ok") else 1
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_tcp(session, args) -> int:

@@ -15,6 +15,7 @@ from __future__ import annotations
 from wf.core.frametree import FrameDef
 from wf.core.scene import SceneObject
 from wf.core.time import now_ns
+from wf.core.envelope import request as envelope_request
 from wf.services.config import keys as config_keys
 from wf.world_model.frames_live import publish_dynamic_frame
 from wf.world_model.scene_live import publish_scene_object
@@ -51,25 +52,21 @@ def apply(
 
     if mode == "config":
         for name, fd in _ordered_frames(frames):
-            reply = _query(
+            reply = envelope_request(
                 session,
                 config_keys.cmd_set(),
                 {"key": config_keys.frame(name), "value": fd.to_wire()},
             )
-            if reply is None:
-                errors.append(f"frame {name}: no reply from config/cmd/set")
-            elif not reply.get("ok"):
-                errors.append(f"frame {name}: {reply.get('error')}")
+            if not reply.ok:
+                errors.append(f"frame {name}: {reply.error}")
         for name, so in scene.items():
-            reply = _query(
+            reply = envelope_request(
                 session,
                 config_keys.cmd_set(),
                 {"key": config_keys.scene(name), "value": so.to_wire()},
             )
-            if reply is None:
-                errors.append(f"scene {name}: no reply from config/cmd/set")
-            elif not reply.get("ok"):
-                errors.append(f"scene {name}: {reply.get('error')}")
+            if not reply.ok:
+                errors.append(f"scene {name}: {reply.error}")
         return errors
 
     # mode == "live"
