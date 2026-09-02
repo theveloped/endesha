@@ -213,18 +213,16 @@ export interface AuditRecord {
   duration_ms: number;
 }
 
+/** programs/cmd/source envelope value. */
 export interface ProgramSourceReply {
-  ok: boolean;
   name: string;
   path: string;
   text: string;
-  error: string | null;
 }
 
+/** programs/cmd/save envelope value (an import error rides in the entry). */
 export interface ProgramSaveReply {
-  ok: boolean;
-  entry: CatalogEntry | null;
-  error: string | null;
+  entry: CatalogEntry;
 }
 
 export interface TransitionEvent {

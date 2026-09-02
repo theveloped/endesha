@@ -39,7 +39,6 @@ from wf.contracts.washer import keys as washer_keys
 from wf.contracts.washer.messages import Recipe, RecipeReply, SetRecipe, WasherStatus
 from wf.core.action import ActionClient, ActionRejected
 from wf.contracts.tags.messages import ForceTag, TagsState, WriteTag
-from wf.contracts.program.messages import Ack as ProgramAck
 from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, LogLine, ProgramState
 from wf.contracts.dio.messages import ForceChannel, SetChannel
 from wf.core.envelope import request as envelope_request
@@ -356,38 +355,23 @@ def cmd_program_catalog(session, args) -> int:
 
 def cmd_program_load(session, args) -> int:
     req = LoadRequest(name=args.name, bindings=_kv_pairs(args.bind), params=_kv_pairs(args.param))
-    reply = _query(session, program_keys.cmd_load(args.realm), req.to_wire())
-    if reply is None:
-        print("no reply from programs/cmd/load", file=sys.stderr)
-        return 1
-    ack = ProgramAck.from_wire(reply)
-    print("loaded" if ack.ok else f"error: {ack.error}")
-    return 0 if ack.ok else 1
+    reply = envelope_request(session, program_keys.cmd_load(args.realm), req.to_wire())
+    print("loaded" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_program(session, args) -> int:
     payload = {"reason": args.reason} if args.reason else {}
-    reply = _query(session, program_keys.cmd(args.realm, args.command), payload)
-    if reply is None:
-        print(f"no reply from program/cmd/{args.command}", file=sys.stderr)
-        return 1
-    ack = ProgramAck.from_wire(reply)
-    print("ok" if ack.ok else f"error: {ack.error}")
-    return 0 if ack.ok else 1
+    reply = envelope_request(session, program_keys.cmd(args.realm, args.command), payload)
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_program_event(session, args) -> int:
-    reply = _query(
-        session,
-        program_keys.cmd_event(args.realm),
-        EventRequest(event=args.event, data=_kv_pairs(args.data)).to_wire(),
-    )
-    if reply is None:
-        print("no reply from program/cmd/event", file=sys.stderr)
-        return 1
-    ack = ProgramAck.from_wire(reply)
-    print("ok" if ack.ok else f"error: {ack.error}")
-    return 0 if ack.ok else 1
+    reply = envelope_request(session, program_keys.cmd_event(args.realm),
+                             EventRequest(event=args.event, data=_kv_pairs(args.data)).to_wire())
+    print("ok" if reply.ok else f"error: {reply.error}")
+    return 0 if reply.ok else 1
 
 
 def cmd_program_state(session, args) -> int:

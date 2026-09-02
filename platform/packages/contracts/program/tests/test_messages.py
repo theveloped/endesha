@@ -6,7 +6,6 @@ import pytest
 
 from wf.contracts.program import keys
 from wf.contracts.program.messages import (
-    Ack,
     Catalog,
     CatalogEntry,
     EventRequest,
@@ -19,8 +18,6 @@ from wf.contracts.program.messages import (
 @pytest.mark.parametrize(
     "msg",
     [
-        Ack(ok=True),
-        Ack(ok=False, error="invalid_in_state:execute"),
         CatalogEntry(name="pick", roles={"arm": "arm"}, params={"n": 1}, doc="d", path="p.py"),
         CatalogEntry(name="broken", path="b.py", error="ImportError: x"),
         Catalog(t=1, programs=[CatalogEntry(name="a")]),

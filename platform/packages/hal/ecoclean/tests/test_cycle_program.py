@@ -13,7 +13,8 @@ import pytest
 
 from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.program import keys
-from wf.contracts.program.messages import Ack, Catalog, EventRequest, LoadRequest, ProgramState
+from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, ProgramState
+from wf.core.envelope import request as envelope_request
 from wf.contracts.washer import keys as washer_keys
 from wf.contracts.washer.messages import WasherStatus
 from wf.core.codec import decode, encode
@@ -44,8 +45,8 @@ def _query(session, key, payload):
     pytest.fail(f"no reply from {key}")
 
 
-def _ack(session, key, payload) -> Ack:
-    return Ack.from_wire(_query(session, key, payload))
+def _ack(session, key, payload):
+    return envelope_request(session, key, payload, timeout_s=5.0)
 
 
 def _state(session, realm) -> ProgramState:

@@ -272,16 +272,16 @@ export async function tagsForce(
   await call(session, tagsCmdForce(realm, rid), { tag, value }, { clientId });
 }
 
+// Program runner commands speak the envelope: resolve on success, throw
+// EnvelopeError ("code:reason[:detail]") otherwise.
 export async function programLoad(
   session: Session,
   realm: string,
   name: string,
   bindings: Record<string, string>,
   params: Record<string, unknown>,
-): Promise<Ack> {
-  const reply = await query(session, programsCmdLoad(realm), { name, bindings, params });
-  if (reply === null) throw new Error("no reply from programs/cmd/load");
-  return reply as Ack;
+): Promise<void> {
+  await call(session, programsCmdLoad(realm), { name, bindings, params });
 }
 
 export async function programCommand(
@@ -289,10 +289,8 @@ export async function programCommand(
   realm: string,
   command: UnitCommand,
   reason?: string,
-): Promise<Ack> {
-  const reply = await query(session, programCmd(realm, command), reason ? { reason } : {});
-  if (reply === null) throw new Error(`no reply from program/cmd/${command}`);
-  return reply as Ack;
+): Promise<void> {
+  await call(session, programCmd(realm, command), reason ? { reason } : {});
 }
 
 export async function programSource(
@@ -300,9 +298,7 @@ export async function programSource(
   realm: string,
   nameOrFile: { name: string } | { file: string },
 ): Promise<ProgramSourceReply> {
-  const reply = await query(session, programsCmdSource(realm), nameOrFile);
-  if (reply === null) throw new Error("no reply from programs/cmd/source");
-  return reply as ProgramSourceReply;
+  return (await call(session, programsCmdSource(realm), nameOrFile)) as unknown as ProgramSourceReply;
 }
 
 export async function programSave(
@@ -311,15 +307,11 @@ export async function programSave(
   file: string,
   text: string,
 ): Promise<ProgramSaveReply> {
-  const reply = await query(session, programsCmdSave(realm), { file, text });
-  if (reply === null) throw new Error("no reply from programs/cmd/save");
-  return reply as ProgramSaveReply;
+  return (await call(session, programsCmdSave(realm), { file, text })) as unknown as ProgramSaveReply;
 }
 
-export async function programDeleteFile(session: Session, realm: string, name: string): Promise<Ack> {
-  const reply = await query(session, programsCmdDelete(realm), { name });
-  if (reply === null) throw new Error("no reply from programs/cmd/delete");
-  return reply as Ack;
+export async function programDeleteFile(session: Session, realm: string, name: string): Promise<void> {
+  await call(session, programsCmdDelete(realm), { name });
 }
 
 export async function programEvent(
@@ -327,10 +319,8 @@ export async function programEvent(
   realm: string,
   event: string,
   data: Record<string, unknown> = {},
-): Promise<Ack> {
-  const reply = await query(session, programCmdEvent(realm), { event, data });
-  if (reply === null) throw new Error("no reply from program/cmd/event");
-  return reply as Ack;
+): Promise<void> {
+  await call(session, programCmdEvent(realm), { event, data });
 }
 
 // Control lease: envelope queryables (holds/owner state comes from the

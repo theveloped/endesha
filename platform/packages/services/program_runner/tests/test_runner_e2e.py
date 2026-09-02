@@ -24,7 +24,7 @@ from wf.contracts.dio import keys as dio_keys
 from wf.contracts.dio.messages import ChannelsState, ForceChannel
 from wf.core.envelope import request as envelope_request
 from wf.contracts.program import keys
-from wf.contracts.program.messages import Ack, Catalog, EventRequest, LoadRequest, ProgramState
+from wf.contracts.program.messages import Catalog, EventRequest, LoadRequest, ProgramState
 from wf.core.codec import decode, encode
 from wf.hal.arm_core import ArmCore
 from wf.hal.arm_sim.backend import SimArmBackend
@@ -123,11 +123,11 @@ class FakeConfig:
         self.pq.undeclare()
 
 
-def _ack(session, key, payload) -> Ack:
-    for reply in session.get(key, payload=encode(payload), timeout=5.0):
-        if reply.ok is not None:
-            return Ack.from_wire(decode(reply.ok.payload))
-    pytest.fail(f"no reply from {key}")
+def _ack(session, key, payload):
+    reply = envelope_request(session, key, payload, timeout_s=5.0)
+    if not reply.ok and reply.error.reason == "no_reply":
+        pytest.fail(f"no reply from {key}")
+    return reply
 
 
 def _state(session, realm) -> ProgramState:
@@ -225,11 +225,12 @@ def test_catalog_lists_good_and_broken(cell):
 
 def test_load_errors(cell):
     session, realm, runner, arm, backend = cell
-    assert _ack(session, keys.cmd_load(realm), LoadRequest("nope").to_wire()).error == "unknown_program:nope"
-    assert _ack(session, keys.cmd_load(realm), LoadRequest("broken").to_wire()).error.startswith("program_broken:")
-    assert _ack(session, keys.cmd_load(realm), LoadRequest("tp", params={"zzz": 1}).to_wire()).error == "unknown_params:zzz"
-    assert _ack(session, keys.cmd_load(realm), LoadRequest("tp", bindings={"arm": "io0"}).to_wire()).error.startswith("bind:arm:contract_mismatch")
-    assert _ack(session, keys.cmd(realm, "start"), {}).error == "no_program_loaded"
+    assert _ack(session, keys.cmd_load(realm), LoadRequest("nope").to_wire()).error.reason == "unknown_program"
+    assert _ack(session, keys.cmd_load(realm), LoadRequest("broken").to_wire()).error.reason == "program_broken"
+    assert _ack(session, keys.cmd_load(realm), LoadRequest("tp", params={"zzz": 1}).to_wire()).error.reason == "unknown_params"
+    err = _ack(session, keys.cmd_load(realm), LoadRequest("tp", bindings={"arm": "io0"}).to_wire()).error
+    assert err.reason == "bind" and err.detail.startswith("arm:contract_mismatch")
+    assert _ack(session, keys.cmd(realm, "start"), {}).error.reason == "no_program_loaded"
 
 
 def test_run_to_completion_with_trigger_hold_and_lease(cell):
@@ -281,7 +282,7 @@ def test_external_event_and_stop(cell):
     assert _ack(session, keys.cmd_load(realm), LoadRequest("tp", params={"cycles": 5}).to_wire()).ok
     assert _ack(session, keys.cmd(realm, "start"), {}).ok
     _wait_unit(session, realm, "execute")
-    assert _ack(session, keys.cmd_event(realm), EventRequest("nope").to_wire()).error == "unknown_event:nope"
+    assert _ack(session, keys.cmd_event(realm), EventRequest("nope").to_wire()).error.reason == "unknown_event"
     assert _ack(session, keys.cmd_event(realm), EventRequest("kick").to_wire()).ok
     assert _wait(lambda: "working" in _state(session, realm).program_states)
     assert _ack(session, keys.cmd(realm, "stop"), {}).ok
@@ -289,7 +290,8 @@ def test_external_event_and_stop(cell):
     assert st.actions == []
     assert _wait(lambda: _owner(session, realm) is None, 5.0)
     # a program event while stopped is refused
-    assert _ack(session, keys.cmd_event(realm), EventRequest("kick").to_wire()).error == "invalid_in_state:stopped"
+    err = _ack(session, keys.cmd_event(realm), EventRequest("kick").to_wire()).error
+    assert err.reason == "invalid_in_state" and err.detail == "stopped"
     assert _ack(session, keys.cmd(realm, "reset"), {}).ok
     _wait_unit(session, realm, "idle")
 

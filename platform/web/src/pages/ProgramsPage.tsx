@@ -90,10 +90,9 @@ export function CommandBar({
     setBusy(command);
     onError(null);
     try {
-      const ack = await programCommand(session, realm, command);
-      if (!ack.ok) onError(`${command}: ${ack.error ?? "failed"}`);
+      await programCommand(session, realm, command);
     } catch (e) {
-      onError(`${command}: ${String(e)}`);
+      onError(`${command}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(null);
     }
@@ -174,10 +173,9 @@ function CatalogCard({
           params[k] = raw;
         }
       }
-      const ack = await programLoad(session, realm, entry.name, bindings, params);
-      if (!ack.ok) onError(`load: ${ack.error ?? "failed"}`);
+      await programLoad(session, realm, entry.name, bindings, params);
     } catch (e) {
-      onError(`load: ${String(e)}`);
+      onError(`load: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -445,8 +443,8 @@ function EventCard({
             ev.preventDefault();
             if (!enabled || session === null) return;
             void programEvent(session, realm, event.trim())
-              .then((ack) => onError(ack.ok ? null : `event: ${ack.error ?? "failed"}`))
-              .catch((e) => onError(`event: ${String(e)}`));
+              .then(() => onError(null))
+              .catch((e) => onError(`event: ${e instanceof Error ? e.message : String(e)}`));
           }}
         >
           <Input

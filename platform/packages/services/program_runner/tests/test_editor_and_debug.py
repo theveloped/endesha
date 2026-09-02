@@ -10,7 +10,6 @@ import pytest
 from wf.contracts.control.authority import ControlAuthority
 from wf.contracts.program import keys
 from wf.contracts.program.messages import (
-    Ack,
     Catalog,
     LoadRequest,
     LogLine,
@@ -20,6 +19,7 @@ from wf.contracts.program.messages import (
     SourceReply,
 )
 from wf.core.codec import decode, encode
+from wf.core.envelope import request as envelope_request
 from wf.services.program_runner.service import ProgramRunner
 
 DEVICES = [{"id": "io0", "contract": "dio", "model": None, "active": "sim", "config": {"channels": {}}, "sources": []}]
@@ -70,30 +70,43 @@ def runner(tmp_path):
     session.close()
 
 
+def _cmd(session, key, args=None):
+    """Envelope command; retained reads keep using _q."""
+    return envelope_request(session, key, args or {}, timeout_s=5.0)
+
+
 def test_source_save_delete_roundtrip(runner):
     session, realm, r, programs = runner
-    src = SourceReply.from_wire(_q(session, keys.cmd_source(realm), {"name": "blink"}))
-    assert src.ok and src.name == "blink" and "class Blink" in src.text and src.path.endswith("blink.py")
-    assert not SourceReply.from_wire(_q(session, keys.cmd_source(realm), {"name": "nope"})).ok
+    r = _cmd(session, keys.cmd_source(realm), {"name": "blink"})
+    assert r.ok
+    src = SourceReply.from_wire(r.value)
+    assert src.name == "blink" and "class Blink" in src.text and src.path.endswith("blink.py")
+    r = _cmd(session, keys.cmd_source(realm), {"name": "nope"})
+    assert not r.ok and r.error.reason == "unknown_program"
     # by bare file name too (a new file the catalog does not know yet)
-    assert not SourceReply.from_wire(_q(session, keys.cmd_source(realm), {"file": "fresh.py"})).ok
+    assert not _cmd(session, keys.cmd_source(realm), {"file": "fresh.py"}).ok
 
     # save a broken module: file written, catalog lists it with the error
-    rep = SaveReply.from_wire(_q(session, keys.cmd_save(realm), SaveRequest("fresh.py", BROKEN).to_wire()))
-    assert rep.ok and rep.entry is not None and rep.entry.error and "SyntaxError" in rep.entry.error
+    r = _cmd(session, keys.cmd_save(realm), SaveRequest("fresh.py", BROKEN).to_wire())
+    assert r.ok
+    rep = SaveReply.from_wire(r.value)
+    assert rep.entry.error and "SyntaxError" in rep.entry.error
     assert (programs / "fresh.py").read_text(encoding="utf-8") == BROKEN
     cat = Catalog.from_wire(_q(session, keys.catalog(realm)))
     assert {p.name for p in cat.programs} == {"blink", "fresh"}
 
     # fix it: entry becomes loadable
     fixed = GOOD.replace('program_name = "blink"', 'program_name = "fresh"')
-    rep = SaveReply.from_wire(_q(session, keys.cmd_save(realm), SaveRequest("fresh.py", fixed).to_wire()))
-    assert rep.ok and rep.entry.error is None and rep.entry.name == "fresh"
-    assert Ack.from_wire(_q(session, keys.cmd_load(realm), LoadRequest("fresh").to_wire())).ok
+    r = _cmd(session, keys.cmd_save(realm), SaveRequest("fresh.py", fixed).to_wire())
+    assert r.ok
+    rep = SaveReply.from_wire(r.value)
+    assert rep.entry.error is None and rep.entry.name == "fresh"
+    assert _cmd(session, keys.cmd_load(realm), LoadRequest("fresh").to_wire()).ok
 
     # bad file names are refused; delete removes file + catalog entry
-    assert not SaveReply.from_wire(_q(session, keys.cmd_save(realm), SaveRequest("../x.py", "").to_wire())).ok
-    assert Ack.from_wire(_q(session, keys.cmd_delete(realm), {"name": "fresh"})).ok
+    bad = _cmd(session, keys.cmd_save(realm), SaveRequest("../x.py", "").to_wire())
+    assert not bad.ok and bad.error.reason == "bad_file"
+    assert _cmd(session, keys.cmd_delete(realm), {"name": "fresh"}).ok
     assert not (programs / "fresh.py").exists()
     cat = Catalog.from_wire(_q(session, keys.catalog(realm)))
     assert {p.name for p in cat.programs} == {"blink"}
@@ -103,8 +116,8 @@ def test_source_save_delete_roundtrip(runner):
 
 def test_waiting_for_and_log(runner):
     session, realm, r, programs = runner
-    assert Ack.from_wire(_q(session, keys.cmd_load(realm), LoadRequest("blink").to_wire())).ok
-    assert Ack.from_wire(_q(session, keys.cmd(realm, "start"))).ok
+    assert _cmd(session, keys.cmd_load(realm), LoadRequest("blink").to_wire()).ok
+    assert _cmd(session, keys.cmd(realm, "start")).ok
     deadline = time.monotonic() + 10
     st = None
     while time.monotonic() < deadline:
@@ -122,7 +135,7 @@ def test_waiting_for_and_log(runner):
     lines = [LogLine.from_wire(ln) for ln in _q(session, keys.log(realm))["lines"]]
     assert any(ln.source == "runner" and ln.message.startswith("started blink") for ln in lines)
     # unit-level abort shows the reason in the log
-    assert Ack.from_wire(_q(session, keys.cmd(realm, "abort"), {"reason": "test"})).ok
+    assert _cmd(session, keys.cmd(realm, "abort"), {"reason": "test"}).ok
     time.sleep(0.3)
     lines = [LogLine.from_wire(ln) for ln in _q(session, keys.log(realm))["lines"]]
     assert any(ln.level == "warning" and "abort" in ln.message for ln in lines)

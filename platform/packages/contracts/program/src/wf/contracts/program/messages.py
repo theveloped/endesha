@@ -27,19 +27,6 @@ UNIT_STATES = (
 
 
 @dataclass
-class Ack:
-    ok: bool
-    error: str | None = None
-
-    def to_wire(self) -> dict:
-        return {"ok": bool(self.ok), "error": self.error}
-
-    @classmethod
-    def from_wire(cls, d: dict) -> "Ack":
-        return cls(ok=d["ok"], error=d.get("error"))
-
-
-@dataclass
 class CatalogEntry:
     """One discoverable program. ``error`` is set (and roles/params empty) when
     the module failed to import — the catalog still lists it so the operator
@@ -212,18 +199,18 @@ class LogLine:
 
 @dataclass
 class SourceReply:
-    ok: bool
+    """``programs/cmd/source`` envelope ``value``."""
+
     name: str = ""
     path: str = ""
     text: str = ""
-    error: str | None = None
 
     def to_wire(self) -> dict:
-        return {"ok": bool(self.ok), "name": self.name, "path": self.path, "text": self.text, "error": self.error}
+        return {"name": self.name, "path": self.path, "text": self.text}
 
     @classmethod
     def from_wire(cls, d: dict) -> "SourceReply":
-        return cls(ok=d["ok"], name=d.get("name", ""), path=d.get("path", ""), text=d.get("text", ""), error=d.get("error"))
+        return cls(name=str(d.get("name", "")), path=str(d.get("path", "")), text=str(d.get("text", "")))
 
 
 @dataclass
@@ -246,17 +233,17 @@ class SaveRequest:
 
 @dataclass
 class SaveReply:
-    ok: bool
-    entry: CatalogEntry | None = None
-    error: str | None = None
+    """``programs/cmd/save`` envelope ``value``: the rescanned catalog entry
+    (its ``error`` reports an import failure — the file is written anyway)."""
+
+    entry: CatalogEntry
 
     def to_wire(self) -> dict:
-        return {"ok": bool(self.ok), "entry": None if self.entry is None else self.entry.to_wire(), "error": self.error}
+        return {"entry": self.entry.to_wire()}
 
     @classmethod
     def from_wire(cls, d: dict) -> "SaveReply":
-        e = d.get("entry")
-        return cls(ok=d["ok"], entry=None if e is None else CatalogEntry.from_wire(e), error=d.get("error"))
+        return cls(entry=CatalogEntry.from_wire(d["entry"]))
 
 
 @dataclass
@@ -291,3 +278,24 @@ class TransitionEvent:
             event=d.get("event"),
             detail=d.get("detail"),
         )
+
+
+#: Registered envelope error ``reason`` values (wire-contract RFC §5).
+ERROR_REASONS = (
+    "bad_request",
+    "invalid_in_state",
+    "no_program_loaded",
+    "no_program_running",
+    "unknown_program",
+    "unknown_event",
+    "unknown_params",
+    "program_broken",
+    "bind",
+    "bad_file",
+    "load_failed",
+    "save_failed",
+    "delete_failed",
+    "command_failed",
+    "event_failed",
+    "source_failed",
+)

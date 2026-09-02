@@ -54,8 +54,8 @@ function OperatorEvents({
             onClick={() => {
               if (session === null) return;
               void programEvent(session, realm, ev)
-                .then((ack) => onError(ack.ok ? null : `event ${ev}: ${ack.error ?? "failed"}`))
-                .catch((e) => onError(`event ${ev}: ${String(e)}`));
+                .then(() => onError(null))
+                .catch((e) => onError(`event ${ev}: ${e instanceof Error ? e.message : String(e)}`));
             }}
           >
             {labels[ev] ?? ev}

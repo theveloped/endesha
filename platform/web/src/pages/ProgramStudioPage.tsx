@@ -108,10 +108,6 @@ export default function ProgramStudioPage({ session, realm, program, theme, init
       setStatus(null);
       try {
         const reply = await programSource(session, realm, nameOrFile);
-        if (!reply.ok) {
-          setStatus({ kind: "err", text: reply.error ?? "cannot read" });
-          return;
-        }
         const base = reply.path.split(/[\\/]/).pop() ?? `${reply.name}.py`;
         setFile(base);
         setText(reply.text);
@@ -143,15 +139,11 @@ export default function ProgramStudioPage({ session, realm, program, theme, init
     setStatus(null);
     try {
       const reply = await programSave(session, realm, file, text);
-      if (!reply.ok) {
-        setStatus({ kind: "err", text: reply.error ?? "save failed" });
-        return;
-      }
       setSaved(text);
-      if (reply.entry?.error) {
+      if (reply.entry.error) {
         setStatus({ kind: "err", text: `saved, but the module does not import:\n${reply.entry.error}` });
       } else {
-        setStatus({ kind: "ok", text: `saved ${file} — program "${reply.entry?.name ?? file}" is loadable` });
+        setStatus({ kind: "ok", text: `saved ${file} — program "${reply.entry.name}" is loadable` });
       }
     } catch (e) {
       setStatus({ kind: "err", text: String(e) });
@@ -177,11 +169,7 @@ export default function ProgramStudioPage({ session, realm, program, theme, init
     if (session === null || entry === null) return;
     if (!window.confirm(`Delete ${file}? This removes the file from deploy/programs.`)) return;
     try {
-      const ack = await programDeleteFile(session, realm, entry.name);
-      if (!ack.ok) {
-        setStatus({ kind: "err", text: ack.error ?? "delete failed" });
-        return;
-      }
+      await programDeleteFile(session, realm, entry.name);
       setFile(null);
       setText("");
       setSaved("");
@@ -195,10 +183,10 @@ export default function ProgramStudioPage({ session, realm, program, theme, init
   const load = async () => {
     if (session === null || entry === null) return;
     try {
-      const ack = await programLoad(session, realm, entry.name, {}, {});
-      setStatus(ack.ok ? { kind: "ok", text: `loaded ${entry.name} into the unit` } : { kind: "err", text: `load: ${ack.error}` });
+      await programLoad(session, realm, entry.name, {}, {});
+      setStatus({ kind: "ok", text: `loaded ${entry.name} into the unit` });
     } catch (e) {
-      setStatus({ kind: "err", text: String(e) });
+      setStatus({ kind: "err", text: `load: ${e instanceof Error ? e.message : String(e)}` });
     }
   };
 
@@ -206,8 +194,8 @@ export default function ProgramStudioPage({ session, realm, program, theme, init
     (event: string) => {
       if (session === null) return;
       void programEvent(session, realm, event)
-        .then((ack) => setStatus(ack.ok ? null : { kind: "err", text: `event ${event}: ${ack.error ?? "failed"}` }))
-        .catch((e) => setStatus({ kind: "err", text: `event ${event}: ${String(e)}` }));
+        .then(() => setStatus(null))
+        .catch((e) => setStatus({ kind: "err", text: `event ${event}: ${e instanceof Error ? e.message : String(e)}` }));
     },
     [session, realm],
   );

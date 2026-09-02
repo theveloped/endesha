@@ -1,15 +1,16 @@
 """The `program` contract key space (program-layer RFC §3.5)::
 
-    {realm}/programs/catalog          pub latest-wins + queryable  Catalog
-    {realm}/programs/cmd/load         queryable LoadRequest -> Ack   (unit Idle/Stopped only)
-    {realm}/programs/cmd/source       queryable {name|path} -> SourceReply   (read a program file)
-    {realm}/programs/cmd/save         queryable SaveRequest -> SaveReply     (write + rescan; import error reported)
-    {realm}/programs/cmd/delete       queryable {name} -> Ack               (delete a program file)
+    {realm}/programs/catalog          retained: pub latest-wins + queryable Catalog
+    {realm}/programs/cmd/load         envelope queryable, args LoadRequest (unit Idle/Stopped only)
+    {realm}/programs/cmd/source       envelope queryable, args {name|file} -> value SourceReply
+    {realm}/programs/cmd/save         envelope queryable, args SaveRequest -> value SaveReply
+                                      (write + rescan; an import error rides in the entry)
+    {realm}/programs/cmd/delete       envelope queryable, args {name}
     {realm}/program/log               pub (program.log() + runner notes) + queryable (last N)
-    {realm}/program/state             pub latest-wins + queryable  ProgramState
-    {realm}/program/cmd/{command}     queryables -> Ack: start hold unhold suspend
-                                      unsuspend stop abort clear reset unload
-    {realm}/program/cmd/event         queryable EventRequest -> Ack  (HMI/bus -> program)
+    {realm}/program/state             retained: pub latest-wins + queryable ProgramState
+    {realm}/program/cmd/{command}     envelope queryables, args {reason?}: start hold unhold
+                                      suspend unsuspend stop abort clear reset unload
+    {realm}/program/cmd/event         envelope queryable, args EventRequest (HMI/bus -> program)
     {realm}/program/transitions       pub (event log, DROP)  TransitionEvent
     {realm}/program/alive             liveliness token of the runner
 """

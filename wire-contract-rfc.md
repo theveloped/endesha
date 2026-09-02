@@ -1,7 +1,7 @@
 # RFC — Wire contract: five shapes, one reply envelope, generated TypeScript
 
 Status: **reviewed — accepted** (2026-09-01; decisions from review in §11).
-Branch: `observability`. Implementation: core envelope/retained helpers, dio+tags, control, and washer commands landed (with conformance); program/camera2d/arm/config + codegen pending.
+Branch: `observability`. Implementation: core envelope/retained helpers, dio+tags, control, washer commands, and the program runner landed; camera2d/arm/config + codegen pending.
 Builds on ADR-0001…0012 ([platform/docs/decisions/](platform/docs/decisions/)),
 the query/reply audit (`wf.core.audit`), the conformance mechanism
 (arm/camera2d/dio), and the as-built picture in

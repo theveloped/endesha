@@ -47,11 +47,17 @@ import zenoh
 from wf.contracts.arm import keys as arm_keys
 from wf.contracts.arm.messages import ArmStatus
 from wf.contracts.control import keys as control_keys
-from wf.core.envelope import request as envelope_request
+from wf.core.envelope import (
+    RecentReplies,
+    Request,
+    fail,
+    ok_value,
+    serve_query,
+    request as envelope_request,
+)
 from wf.contracts.program import keys
 from wf.contracts.program.keys import UNIT_COMMANDS
 from wf.contracts.program.messages import (
-    Ack,
     Catalog,
     CatalogEntry,
     EventRequest,
@@ -105,6 +111,26 @@ class _Action:
         self.thread = thread
 
 
+_ERR_CODES = {
+    "invalid_in_state": "conflict",
+    "no_program_loaded": "conflict",
+    "no_program_running": "conflict",
+    "unknown_program": "not_found",
+    "unknown_event": "not_found",
+    "unknown_params": "invalid",
+    "program_broken": "invalid",
+    "bind": "invalid",
+    "bad_file": "invalid",
+    "bad_request": "invalid",
+}
+
+
+def _err_wire(err: str) -> dict:
+    """Map the runner's internal "reason:detail" strings onto the envelope."""
+    head, _, detail = err.partition(":")
+    return fail(_ERR_CODES.get(head, "internal"), head, detail or None)
+
+
 class ProgramRunner:
     def __init__(
         self,
@@ -118,6 +144,7 @@ class ProgramRunner:
         self.session = session
         self.realm = realm
         self._audit = QueryAudit(session, realm, "program_runner")
+        self._recent = RecentReplies()
         self.programs_dir = programs_dir
         self.node = node
 
@@ -380,35 +407,37 @@ class ProgramRunner:
         return None
 
     def _on_source(self, query) -> None:
+        serve_query(query, self._do_source)
+
+    def _do_source(self, req: Request) -> dict:
+        name = str(req.args.get("name") or req.args.get("file") or "")
         try:
-            req = decode(query.payload) if query.payload is not None else {}
-            name = str(req.get("name") or req.get("file") or "")
             path = self._resolve_file(name)
             if path is None or not path.is_file():
-                reply = SourceReply(ok=False, name=name, error=f"unknown_program:{name}")
-            else:
-                entry = next((d.entry for d in self._catalog if d.entry.path == str(path)), None)
-                reply = SourceReply(ok=True, name=entry.name if entry else path.stem, path=str(path),
-                                    text=path.read_text(encoding="utf-8"))
+                return fail("not_found", "unknown_program", name)
+            entry = next((d.entry for d in self._catalog if d.entry.path == str(path)), None)
+            return ok_value(SourceReply(name=entry.name if entry else path.stem, path=str(path),
+                                        text=path.read_text(encoding="utf-8")).to_wire())
         except Exception as exc:  # noqa: BLE001
-            reply = SourceReply(ok=False, error=f"source_failed:{exc!r}")
-        query.reply(str(query.key_expr), encode(reply.to_wire()))
+            return fail("internal", "source_failed", repr(exc))
 
     def _on_save(self, query) -> None:
-        try:
-            req = SaveRequest.from_wire(decode(query.payload))
-        except Exception as exc:
-            query.reply(str(query.key_expr), encode(SaveReply(ok=False, error=f"bad_request:{exc!r}").to_wire()))
-            return
-        try:
-            reply = self._call(lambda: self._save(req))
-        except Exception as exc:  # noqa: BLE001
-            reply = SaveReply(ok=False, error=f"save_failed:{exc!r}")
-        query.reply(str(query.key_expr), encode(reply.to_wire()))
+        serve_query(query, self._do_save, recent=self._recent)
 
-    def _save(self, req: SaveRequest) -> SaveReply:
-        if not _FILE_RE.match(req.file):
-            return SaveReply(ok=False, error="bad_file:expected a bare module name like my_program.py")
+    def _do_save(self, req: Request) -> dict:
+        try:
+            sreq = SaveRequest.from_wire(req.args)
+        except Exception as exc:  # noqa: BLE001
+            return fail("invalid", "bad_request", repr(exc))
+        if not _FILE_RE.match(sreq.file):
+            return fail("invalid", "bad_file", "expected a bare module name like my_program.py")
+        try:
+            entry = self._call(lambda: self._save(sreq))
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "save_failed", repr(exc))
+        return ok_value(SaveReply(entry=entry).to_wire())
+
+    def _save(self, req: SaveRequest) -> CatalogEntry:
         root = Path(self.programs_dir)
         root.mkdir(parents=True, exist_ok=True)
         path = root / req.file
@@ -422,16 +451,18 @@ class ProgramRunner:
         self._emit_log("info" if entry.error is None else "warning",
                        f"saved {req.file}" + ("" if entry.error is None else f" (import error: {entry.error.splitlines()[-1]})"),
                        source="runner")
-        return SaveReply(ok=True, entry=entry)
+        return entry
 
     def _on_delete(self, query) -> None:
+        serve_query(query, self._do_delete, recent=self._recent)
+
+    def _do_delete(self, req: Request) -> dict:
+        name = str(req.args.get("name") or req.args.get("file") or "")
         try:
-            req = decode(query.payload) if query.payload is not None else {}
-            name = str(req.get("name") or req.get("file") or "")
             err = self._call(lambda: self._delete(name))
         except Exception as exc:  # noqa: BLE001
-            err = f"delete_failed:{exc!r}"
-        query.reply(str(query.key_expr), encode(Ack(ok=err is None, error=err).to_wire()))
+            return fail("internal", "delete_failed", repr(exc))
+        return ok_value() if err is None else _err_wire(err)
 
     def _delete(self, name: str) -> str | None:
         if self._loaded is not None and self._loaded.name == name and self.unit.state_id not in ("idle", "stopped"):
@@ -472,50 +503,46 @@ class ProgramRunner:
 
     # ── queryables (zenoh threads -> driver) ─────────────────────────────
 
-    def _reply(self, query, ack: Ack) -> None:
-        query.reply(str(query.key_expr), encode(ack.to_wire()))
-
     def _on_load(self, query) -> None:
+        serve_query(query, self._do_load, recent=self._recent)
+
+    def _do_load(self, req: Request) -> dict:
         try:
-            req = LoadRequest.from_wire(decode(query.payload))
-        except Exception as exc:
-            self._reply(query, Ack(ok=False, error=f"bad_request:{exc!r}"))
-            return
-        try:
-            err = self._call(lambda: self._load(req))
+            lreq = LoadRequest.from_wire(req.args)
         except Exception as exc:  # noqa: BLE001
-            err = f"load_failed:{exc!r}"
-        self._reply(query, Ack(ok=err is None, error=err))
+            return fail("invalid", "bad_request", repr(exc))
+        try:
+            err = self._call(lambda: self._load(lreq))
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "load_failed", repr(exc))
+        return ok_value() if err is None else _err_wire(err)
 
     def _make_cmd_handler(self, command: str):
-        def handler(query) -> None:
-            data: dict = {}
+        def do(req: Request) -> dict:
             try:
-                if query.payload is not None:
-                    decoded = decode(query.payload)
-                    if isinstance(decoded, dict):
-                        data = decoded
-            except Exception:
-                pass
-            try:
-                err = self._call(lambda: self._unit_command(command, data))
+                err = self._call(lambda: self._unit_command(command, dict(req.args)))
             except Exception as exc:  # noqa: BLE001
-                err = f"command_failed:{exc!r}"
-            self._reply(query, Ack(ok=err is None, error=err))
+                return fail("internal", "command_failed", repr(exc))
+            return ok_value() if err is None else _err_wire(err)
+
+        def handler(query) -> None:
+            serve_query(query, do, recent=self._recent)
 
         return handler
 
     def _on_event(self, query) -> None:
+        serve_query(query, self._do_event, recent=self._recent)
+
+    def _do_event(self, req: Request) -> dict:
         try:
-            req = EventRequest.from_wire(decode(query.payload))
-        except Exception as exc:
-            self._reply(query, Ack(ok=False, error=f"bad_request:{exc!r}"))
-            return
-        try:
-            err = self._call(lambda: self._external_event(req.event, req.data))
+            ereq = EventRequest.from_wire(req.args)
         except Exception as exc:  # noqa: BLE001
-            err = f"event_failed:{exc!r}"
-        self._reply(query, Ack(ok=err is None, error=err))
+            return fail("invalid", "bad_request", repr(exc))
+        try:
+            err = self._call(lambda: self._external_event(ereq.event, ereq.data))
+        except Exception as exc:  # noqa: BLE001
+            return fail("internal", "event_failed", repr(exc))
+        return ok_value() if err is None else _err_wire(err)
 
     # ── load / unload (driver thread) ────────────────────────────────────
 

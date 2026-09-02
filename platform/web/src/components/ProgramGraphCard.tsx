@@ -41,8 +41,8 @@ export function ProgramGraphCard({
     (event: string) => {
       if (session === null) return;
       void programEvent(session, realm, event)
-        .then((ack) => onError?.(ack.ok ? null : `event ${event}: ${ack.error ?? "failed"}`))
-        .catch((e) => onError?.(`event ${event}: ${String(e)}`));
+        .then(() => onError?.(null))
+        .catch((e) => onError?.(`event ${event}: ${e instanceof Error ? e.message : String(e)}`));
     },
     [session, realm, onError],
   );
