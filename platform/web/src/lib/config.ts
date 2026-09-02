@@ -1,7 +1,12 @@
-// Key space for the `arm` contract, mirroring wf/contracts/arm/keys.py.
-// The realm is caller-supplied: every builder takes the full namespace prefix
-// string ("cell" or "replay/{sid}") — the UI's switcher picks it and identical
+// Key space of the bus, as the UI consumes it. The builders themselves are
+// GENERATED from the Python key modules (src/lib/gen/keys.ts — regenerate
+// with `pixi run wiregen`, drift-gated by `pixi run wire-check`); this file
+// is the thin hand-written adapter that keeps the UI's historical names,
+// default ids (RID/CID/"main") and grouped conveniences. The realm is
+// caller-supplied: every builder takes the full namespace prefix string
+// ("cell" or "replay/{sid}") — the UI's switcher picks it and identical
 // components render the live cell or a recording by prefix swap alone.
+import * as gen from "./gen/keys";
 
 export const RID = "r1";
 
@@ -28,212 +33,213 @@ export function realmPrefix(r: Realm): string | null {
 }
 
 export function replayCmd(sid: string, action: string): string {
-  return `replay/${sid}/cmd/${action}`;
+  return gen.recordingReplayCmd(sid, action);
 }
 
 export function replayClock(sid: string): string {
-  return `replay/${sid}/clock`;
+  return gen.recordingReplayClock(sid);
 }
 
 /** Matches replay/{sid}/{contract}/{rid}/alive liveliness tokens. */
 export const REPLAY_ALIVE_GLOB = "replay/*/*/*/alive";
 
-function prefix(realm: string, rid: string): string {
-  return `${realm}/arm/${rid}`;
-}
+// ── arm ──────────────────────────────────────────────────────────────────
 
 export function stateJoints(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/state/joints`;
+  return gen.armStateJoints(realm, rid);
 }
 
 export function stateFlange(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/state/flange`;
+  return gen.armStateFlange(realm, rid);
 }
 
 export function stateTcp(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/state/tcp`;
+  return gen.armStateTcp(realm, rid);
 }
 
 export function stateIo(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/state/io`;
+  return gen.armStateIo(realm, rid);
 }
 
 export function stateStatus(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/state/status`;
+  return gen.armStateStatus(realm, rid);
 }
 
 export function cmdSetDo(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/cmd/set_do`;
+  return gen.armCmdSetDo(realm, rid);
 }
 
 export function cmdStop(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/cmd/stop`;
+  return gen.armCmdStop(realm, rid);
 }
 
 export function cmdClearProtectiveStop(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/cmd/clear_protective_stop`;
+  return gen.armCmdClearProtectiveStop(realm, rid);
 }
 
 export function cmdSetTcp(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/cmd/set_tcp`;
+  return gen.armCmdSetTcp(realm, rid);
 }
 
 export function cmdJog(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/cmd/jog`;
+  return gen.armCmdJog(realm, rid);
 }
 
-// dio contract (wf/contracts/dio/keys.py): named channels per dio device.
+export function actionPrefix(realm: string, rid = RID): string {
+  return gen.armActionPrefix(realm, rid);
+}
+
+export function alive(realm: string, rid = RID): string {
+  return gen.armAlive(realm, rid);
+}
+
+// ── dio ──────────────────────────────────────────────────────────────────
+
 export function dioStateChannels(realm: string, rid: string): string {
-  return `${realm}/dio/${rid}/state/channels`;
+  return gen.dioStateChannels(realm, rid);
 }
 
 export function dioCmdSet(realm: string, rid: string): string {
-  return `${realm}/dio/${rid}/cmd/set`;
+  return gen.dioCmdSet(realm, rid);
 }
 
 export function dioCmdForce(realm: string, rid: string): string {
-  return `${realm}/dio/${rid}/cmd/force`;
+  return gen.dioCmdForce(realm, rid);
 }
 
 export function dioAlive(realm: string, rid: string): string {
-  return `${realm}/dio/${rid}/alive`;
+  return gen.dioAlive(realm, rid);
 }
 
-// program contract (wf/contracts/program/keys.py): one PackML unit per cell.
+// ── program (one PackML unit per cell) ───────────────────────────────────
+
 export const UNIT_COMMANDS = [
   "start", "hold", "unhold", "suspend", "unsuspend", "stop", "abort", "clear", "reset", "unload",
 ] as const;
 export type UnitCommand = (typeof UNIT_COMMANDS)[number];
 
 export function programsCatalog(realm: string): string {
-  return `${realm}/programs/catalog`;
+  return gen.programCatalog(realm);
 }
 
 export function programsCmdLoad(realm: string): string {
-  return `${realm}/programs/cmd/load`;
+  return gen.programCmdLoad(realm);
 }
 
 export function programsCmdSource(realm: string): string {
-  return `${realm}/programs/cmd/source`;
+  return gen.programCmdSource(realm);
 }
 
 export function programsCmdSave(realm: string): string {
-  return `${realm}/programs/cmd/save`;
+  return gen.programCmdSave(realm);
 }
 
 export function programsCmdDelete(realm: string): string {
-  return `${realm}/programs/cmd/delete`;
+  return gen.programCmdDelete(realm);
 }
 
 export function programLog(realm: string): string {
-  return `${realm}/program/log`;
+  return gen.programLog(realm);
 }
 
 export function programState(realm: string): string {
-  return `${realm}/program/state`;
+  return gen.programState(realm);
 }
 
 export function programCmd(realm: string, command: UnitCommand): string {
-  return `${realm}/program/cmd/${command}`;
+  return gen.programCmd(realm, command);
 }
 
 export function programCmdEvent(realm: string): string {
-  return `${realm}/program/cmd/event`;
+  return gen.programCmdEvent(realm);
 }
 
 export function programTransitions(realm: string): string {
-  return `${realm}/program/transitions`;
+  return gen.programTransitions(realm);
 }
 
 export function programAlive(realm: string): string {
-  return `${realm}/program/alive`;
+  return gen.programAlive(realm);
 }
 
-// tags contract (wf/contracts/tags/keys.py): named typed controller variables.
+// ── tags ─────────────────────────────────────────────────────────────────
+
 export function tagsState(realm: string, rid: string): string {
-  return `${realm}/tags/${rid}/state/tags`;
+  return gen.tagsStateTags(realm, rid);
 }
 
 export function tagsCmdWrite(realm: string, rid: string): string {
-  return `${realm}/tags/${rid}/cmd/write`;
+  return gen.tagsCmdWrite(realm, rid);
 }
 
 export function tagsCmdForce(realm: string, rid: string): string {
-  return `${realm}/tags/${rid}/cmd/force`;
+  return gen.tagsCmdForce(realm, rid);
 }
 
 export function tagsAlive(realm: string, rid: string): string {
-  return `${realm}/tags/${rid}/alive`;
+  return gen.tagsAlive(realm, rid);
 }
 
-// washer contract (wf/contracts/washer/keys.py): parts washer door/cycle/recipe.
+// ── washer ───────────────────────────────────────────────────────────────
+
 export function washerState(realm: string, rid: string): string {
-  return `${realm}/washer/${rid}/state/status`;
+  return gen.washerStateStatus(realm, rid);
 }
 
 export function washerActionPrefix(realm: string, rid: string): string {
-  return `${realm}/washer/${rid}/action`;
+  return gen.washerActionPrefix(realm, rid);
 }
 
 export function washerCmdStopDoor(realm: string, rid: string): string {
-  return `${realm}/washer/${rid}/cmd/stop_door`;
+  return gen.washerCmdStopDoor(realm, rid);
 }
 
 export function washerCmdGetRecipe(realm: string, rid: string): string {
-  return `${realm}/washer/${rid}/cmd/get_recipe`;
+  return gen.washerCmdGetRecipe(realm, rid);
 }
 
 export function washerCmdSetRecipe(realm: string, rid: string): string {
-  return `${realm}/washer/${rid}/cmd/set_recipe`;
+  return gen.washerCmdSetRecipe(realm, rid);
 }
 
 export function washerAlive(realm: string, rid: string): string {
-  return `${realm}/washer/${rid}/alive`;
+  return gen.washerAlive(realm, rid);
 }
 
-// Cell-level control lease (wf/contracts/control/keys.py): ONE holder for every
-// device in the cell, granted by the supervisor-hosted authority. No rid.
+// ── control (the one cell lease) ─────────────────────────────────────────
+
 export function controlCmdAcquire(realm: string): string {
-  return `${realm}/control/cmd/acquire`;
+  return gen.controlCmdAcquire(realm);
 }
 
 export function controlCmdRelease(realm: string): string {
-  return `${realm}/control/cmd/release`;
+  return gen.controlCmdRelease(realm);
 }
 
 export function controlStateOwner(realm: string): string {
-  return `${realm}/control/state/owner`;
+  return gen.controlStateOwner(realm);
 }
 
 export function controlAlive(realm: string): string {
-  return `${realm}/control/alive`;
+  return gen.controlAlive(realm);
 }
 
-export function actionPrefix(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/action`;
-}
-
-export function alive(realm: string, rid = RID): string {
-  return `${prefix(realm, rid)}/alive`;
-}
-
-// Realm-less config store keys, mirroring wf/services/config/keys.py.
-// Config is shared by all realms — no prefix swap.
+// ── config store (realm-less) ────────────────────────────────────────────
 
 export function configFramesGlob(): string {
-  return "config/frames/**";
+  return gen.configFramesGlob();
 }
 
 export function configFrame(name: string): string {
-  return `config/frames/${name}`;
+  return gen.configFrame(name);
 }
 
 export function configSceneGlob(): string {
-  return "config/scene/**";
+  return gen.configSceneGlob();
 }
 
 export function configScene(name: string): string {
-  return `config/scene/${name}`;
+  return gen.configScene(name);
 }
 
 /** Map an `asset://wf/<rel>` mesh uri to its served public URL. The shared
@@ -246,127 +252,123 @@ export function assetUrl(uri: string): string {
 }
 
 export function configIntrinsicsGlob(): string {
-  return "config/intrinsics/**";
+  return gen.configIntrinsicsGlob();
 }
 
 export function configIntrinsics(cid = CID): string {
-  return `config/intrinsics/${cid}`;
+  return gen.configIntrinsics(cid);
 }
 
 export function configPosesGlob(): string {
-  return "config/poses/**";
+  return gen.configPosesGlob();
 }
 
 export function configProgramPosesGlob(program: string): string {
-  return `config/programs/${program}/poses/**`;
+  return gen.configProgramPosesGlob(program);
 }
 
 export function configProgramPose(program: string, name: string): string {
-  return `config/programs/${program}/poses/${name}`;
+  return gen.configProgramPose(program, name);
 }
 
 /** Hand-placed node positions of a program's graph view: {positions: {state: [x, y]}}. */
 export function configProgramLayout(program: string): string {
-  return `config/programs/${program}/layout`;
+  return gen.configProgramLayout(program);
 }
 
 export function configPose(name: string): string {
-  return `config/poses/${name}`;
+  return gen.configPose(name);
 }
 
 export function configTcpsGlob(rid = RID): string {
-  return `config/arm/${rid}/tcp/**`;
+  return gen.configTcpsGlob(rid);
 }
 
 export function configTcp(name: string, rid = RID): string {
-  return `config/arm/${rid}/tcp/${name}`;
+  return gen.configTcp(rid, name);
 }
 
 export function configCmdSet(): string {
-  return "config/cmd/set";
+  return gen.configCmdSet();
 }
 
 export function configCmdDelete(): string {
-  return "config/cmd/delete";
+  return gen.configCmdDelete();
 }
 
-// Key space for the `camera2d` contract, mirroring
-// wf/contracts/camera2d/keys.py.
+// ── camera2d ─────────────────────────────────────────────────────────────
 
 export const CID = "cam0";
 
-function camPrefix(realm: string, cid: string): string {
-  return `${realm}/camera2d/${cid}`;
-}
-
 export function camImage(realm: string, cid = CID): string {
-  return `${camPrefix(realm, cid)}/image`;
+  return gen.camera2dImage(realm, cid);
 }
 
 export function camStatus(realm: string, cid = CID): string {
-  return `${camPrefix(realm, cid)}/state/status`;
+  return gen.camera2dStateStatus(realm, cid);
 }
 
 export function camAlive(realm: string, cid = CID): string {
-  return `${camPrefix(realm, cid)}/alive`;
+  return gen.camera2dAlive(realm, cid);
 }
 
 /** actions: grab | configure | stream_start | stream_stop */
 export function camCmd(realm: string, action: string, cid = CID): string {
-  return `${camPrefix(realm, cid)}/cmd/${action}`;
+  return `${gen.camera2dPrefix(realm, cid)}/cmd/${action}`;
 }
 
 export function camProducerCmd(realm: string, action: "acquire" | "release", cid = CID): string {
-  return `${camPrefix(realm, cid)}/producer/cmd/${action}`;
+  return action === "acquire"
+    ? gen.camera2dProducerCmdAcquire(realm, cid)
+    : gen.camera2dProducerCmdRelease(realm, cid);
 }
 
 export function camProducerOwner(realm: string, cid = CID): string {
-  return `${camPrefix(realm, cid)}/producer/state/owner`;
+  return gen.camera2dProducerStateOwner(realm, cid);
 }
 
 export function camProducerDemand(realm: string, cid = CID): string {
-  return `${camPrefix(realm, cid)}/producer/state/demand`;
+  return gen.camera2dProducerStateDemand(realm, cid);
 }
 
 export function camProducerIngress(realm: string, cid = CID): string {
-  return `${camPrefix(realm, cid)}/producer/ingress`;
+  return gen.camera2dProducerIngress(realm, cid);
 }
 
 export function camProducerRender(realm: string, clientId: string, cid = CID): string {
-  return `${camPrefix(realm, cid)}/producer/clients/${clientId}/render`;
+  return gen.camera2dProducerRender(realm, cid, clientId);
 }
 
-// Supervisor process and device-inventory key space.
+// ── supervisor ───────────────────────────────────────────────────────────
 
 export function supervisorAlive(realm: string, node = "main"): string {
-  return `${realm}/supervisor/${node}/alive`;
+  return gen.supervisorAlive(realm, node);
 }
 
 export function supervisorDescriptor(realm: string, node = "main"): string {
-  return `${realm}/supervisor/${node}/descriptor`;
+  return gen.supervisorDescriptor(realm, node);
 }
 
 export function supervisorDevices(realm: string, node = "main"): string {
-  return `${realm}/supervisor/${node}/devices`;
+  return gen.supervisorDevices(realm, node);
 }
 
 export function supervisorCmdSetSource(realm: string, node = "main"): string {
-  return `${realm}/supervisor/${node}/cmd/set_source`;
+  return gen.supervisorCmdSetSource(realm, node);
 }
 
-/** Captured stdout/stderr of every supervised child; each key is one service.
- * Subscribe live and query the same glob for the per-service ring buffers. */
+/** All services' log streams of one supervisor node (subscribe or query). */
 export function supervisorLogGlob(realm: string, node = "main"): string {
-  return `${realm}/supervisor/${node}/log/*`;
+  return gen.supervisorLogGlob(realm, node);
 }
 
-/** Supervisor lifecycle events (started/exited/stopped/source_switched/...);
- * queryable for the ring: `{events: [...]}`. */
 export function supervisorEvents(realm: string, node = "main"): string {
-  return `${realm}/supervisor/${node}/events`;
+  return gen.supervisorEvents(realm, node);
 }
 
-/** Query/reply audit echoes: one key per service (`{realm}/audit/<service>`). */
+// ── audit (wf/core/audit.py) ─────────────────────────────────────────────
+
+/** Every service's query/reply echo stream (see wf/core/audit.py). */
 export function auditGlob(realm: string): string {
   return `${realm}/audit/*`;
 }

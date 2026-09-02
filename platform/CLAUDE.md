@@ -47,6 +47,7 @@ this docs tree, never only into agent memory.
 ```powershell
 pixi run python -m pytest
 pixi run docs-check
+pixi run wire-check          # generated TS wire mirror matches the contracts
 cd web; npx tsc -b; npm run build; cd ..   # build also syncs static assets
 docker compose -f deploy/compose.yaml config --quiet
 ```

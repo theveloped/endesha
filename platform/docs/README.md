@@ -45,6 +45,7 @@ should be split.
 | [0012](decisions/0012-config-service-provenance.md) | Config is realm-less, via the config service, with provenance |
 | [0013](decisions/0013-reply-envelope.md) | Five interaction shapes; one reply envelope |
 | [0014](decisions/0014-retention-classes.md) | Two retention classes: session vs durable |
+| [0015](decisions/0015-generated-typescript.md) | The TS wire mirror is generated from the Python contracts |
 
 ## Agent context — everything that steers Claude, and where it lives
 

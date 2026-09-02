@@ -1,7 +1,7 @@
 # RFC — Wire contract: five shapes, one reply envelope, generated TypeScript
 
 Status: **reviewed — accepted** (2026-09-01; decisions from review in §11).
-Branch: `observability`. Implementation: COMPLETE for all contracts (2026-09-02) — every command queryable and the action pattern speak the envelope; step 4 (generated TypeScript + wire-check) pending.
+Branch: `observability`. Implementation: COMPLETE (2026-09-02) — every command queryable and the action pattern speak the envelope; wiregen generates the TS keys+types mirror with `wire-check` as the drift gate (ADR-0015; a small adoption tail is architecture seam #15).
 Builds on ADR-0001…0012 ([platform/docs/decisions/](platform/docs/decisions/)),
 the query/reply audit (`wf.core.audit`), the conformance mechanism
 (arm/camera2d/dio), and the as-built picture in

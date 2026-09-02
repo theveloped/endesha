@@ -96,4 +96,6 @@ pytest = ">=8"
 [tasks]
 test = "python -m pytest"
 docs-check = "python scripts/check_docs.py"
+wiregen = "python -m wf.tools.wiregen"
+wire-check = "python -m wf.tools.wiregen --check"
 sync-assets = { cmd = "node scripts/sync-assets.mjs", cwd = "web" }

@@ -294,8 +294,11 @@ and a headless render-only camera bundle driven by Puppeteer in Docker.
   implements the full camera2d provider in TS, and the in-tab browser
   camera producer holds a fenced producer lease and answers per-client
   render queries.
-- **Contract mirroring is explicit**: `src/lib/config.ts` mirrors every
-  Python `keys.py`; `codec.ts` ↔ `wf.core.codec`; `actions.ts` ↔
+- **The wire mirror is generated** ([ADR-0015](decisions/0015-generated-typescript.md)):
+  `src/lib/gen/keys.ts` + `gen/types.ts` are derived from the Python
+  contracts by `wf.tools.wiregen` (committed output; `pixi run
+  wire-check` fails on drift); `config.ts` is a thin compiler-checked
+  adapter over them. Still hand-mirrored: `codec.ts` ↔ `wf.core.codec`; `actions.ts` ↔
   `wf.core.action` (feedback/result subscribed *before* the goal query);
   `framemath.ts`/`geometry.ts` ↔ `wf.core.frametree`/`frames`. Two CBOR
   codecs on purpose: `cbor-x` for reads; a hand-rolled write-side encoder
@@ -354,6 +357,7 @@ should either close it or consciously leave it.
 | 11 | `web/tests/` is empty; the CBOR wire gate and lint/tsc are the only web verification, and the gate is not in CI (no CI exists yet). | wants fixing eventually |
 | 12 | Web fallback constants when no host API answers: `CELL_NAME="dev-cell"`, `RID="r1"`, `CID="cam0"`. | accepted |
 | 13 | Orphaned `deploy/programs/__pycache__/ui_made_532*.pyc` from a deleted UI-authored program. | trivial cleanup |
+| 15 | Generated-mirror adoption tail ([ADR-0015](decisions/0015-generated-typescript.md)): `messages.ts` still hand-writes interfaces that `gen/types.ts` carries; the camera write-side CBOR encoder does not yet consume `FLOAT_FIELDS`; supervisor retained payloads untyped. | wants fixing, incremental |
 
 ## 13. Keeping this document honest
 
